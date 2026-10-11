@@ -10,6 +10,9 @@ import {
   type Wallet,
 } from "@stream-live/client";
 import { GATEWAY_CONFIG } from "./gateway-config";
+import type { LiveLease } from "./minutes";
+
+export type { LiveLease };
 
 export type AccountState = {
   signedIn: boolean;
@@ -18,25 +21,6 @@ export type AccountState = {
   loading: boolean;
   /** The metered lease this machine is holding right now, or null when idle. */
   live: LiveLease | null;
-};
-
-/**
- * What the gateway last said about the running call. Balances only move when a
- * heartbeat settles a window, so the UI fills the gaps with the bucket's burn
- * rate and gets a smooth per-second countdown out of a 45-second poll.
- */
-export type LiveLease = {
-  sessionId: string;
-  modality: Modality;
-  balance: number | null;
-  unlimited: boolean;
-  billedMinutes: number;
-  /** What the bucket held when the call opened, so the bar can show the drain. */
-  startBalance: number;
-  startedAt: number;
-  observedAt: number;
-  leaseExpiresAt: string | null;
-  lowBalance: boolean;
 };
 
 export const gateway = new StreamLiveClient(GATEWAY_CONFIG);

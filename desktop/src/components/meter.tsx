@@ -1,55 +1,13 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Hourglass, TriangleAlert } from "lucide-react";
-import { bucketFor, useAccount, useLease, type LiveLease } from "../lib/gateway";
+import { bucketFor, useAccount, useLease } from "../lib/gateway";
+import { countdown, drainOf, MOD_LABELS } from "../lib/minutes";
 import type { Modality } from "@stream-live/client";
 
 const C = "hsl(187 100% 52%)";
-const LOW = 5;
-
-export const MOD_LABELS: Record<Modality, string> = {
-  video: "Video Call",
-  audio: "Audio Call",
-  video_audio: "Video + Audio",
-};
-
-/** Seconds since the gateway last settled this lease, for the between-heartbeat drain. */
-function secondsSince(observedAt: number, now: number): number {
-  return Math.max(0, (now - observedAt) / 1000);
-}
-
-export type Drain = {
-  /** Wallet minutes left, or null when the bucket is unlimited. */
-  remaining: number | null;
-  /** Wallet minutes this call has cost so far. */
-  used: number;
-  /** Wall-clock minutes the call has been running. */
-  live: number;
-  unlimited: boolean;
-};
-
-/**
- * Minutes remaining, drained by the burn rate since the last heartbeat. The
- * gateway bills in 45-second windows, so the ticker interpolates what the next
- * settle will say — the number moves every second, not every 45.
- */
-export function drainOf(lease: LiveLease, burnRate: number, now: number): Drain {
-  const drift = (secondsSince(lease.observedAt, now) / 60) * burnRate;
-  const remaining = lease.unlimited ? null : Math.max(0, (lease.balance ?? 0) - drift);
-  return {
-    remaining,
-    used: lease.billedMinutes + drift,
-    live: Math.max(0, (now - lease.startedAt) / 60000),
-    unlimited: lease.unlimited,
-  };
-}
-
-/** 7.25 → "7:15" — minutes and seconds, the way a countdown should read. */
-export function countdown(mins: number | null): string {
-  if (mins === null) return "∞";
-  const total = Math.max(0, Math.floor(mins * 60));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
-}
+/** Below this the clock turns amber, because a top-up takes a human. */
+export const LOW_MINUTES = 5;
 
 /** Re-render on a fixed beat so derived values can use Date.now(). */
 export function useTicker(periodMs = 1000): number {
@@ -63,8 +21,8 @@ export function useTicker(periodMs = 1000): number {
 
 /**
  * The user's minute clock. Idle it states what the current tab can still buy;
- * streaming it counts down in real time and turns amber, then red, as the
- * bucket empties.
+ * on air it counts down every second and turns amber, then red, as the bucket
+ * empties.
  */
 export function MinuteMeter({ modality }: { modality: Modality }) {
   const account = useAccount();
@@ -74,23 +32,16 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
 
   const wallet = bucketFor(account, modality);
   const burnRate = wallet?.burnRate ?? 1;
-  const running = lease !== null && lease.modality === modality;
-  const drain = running ? drainOf(lease!, burnRate, now) : null;
+  const drain = lease !== null && lease.modality === modality ? drainOf(lease, burnRate, now) : null;
+  const running = drain !== null;
   const remaining = drain ? drain.remaining : (wallet?.unlimited ? null : wallet?.balance ?? 0);
   const unlimited = drain ? drain.unlimited : (wallet?.unlimited ?? false);
   const empty = !unlimited && remaining !== null && remaining < 1;
-  const low = !unlimited && remaining !== null && remaining < LOW;
+  const low = !unlimited && remaining !== null && remaining < LOW_MINUTES;
   const tone = empty ? "hsl(0 85% 62%)" : low ? "hsl(35 100% 60%)" : C;
-  const pct = !running || unlimited || lease!.startBalance <= 0
+  const pct = !drain || unlimited || !lease
     ? 100
-    : Math.max(0, Math.min(100, ((remaining ?? 0) / lease!.startBalance) * 100));
-
-  const link = (
-    <button onClick={() => setLocation("/minutes")}
-      style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: tone, fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
-      Minutes dashboard →
-    </button>
-  );
+    : Math.max(0, Math.min(100, ((remaining ?? 0) / lease.startBalance) * 100));
 
   return (
     <div style={{
@@ -118,9 +69,9 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
           {unlimited ? "UNLIMITED" : countdown(remaining)}
         </span>
 
-        {!unlimited && !empty && (
+        {!unlimited && !empty && burnRate !== 1 && (
           <span style={{ fontSize: 10, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif" }}>
-            min{running ? (burnRate === 1 ? "" : ` · ${burnRate}× rate`) : ""}
+            {burnRate}× rate
           </span>
         )}
 
@@ -132,13 +83,16 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
         )}
 
         <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-          {running && (
+          {drain && (
             <>
-              <Stat label="this call" value={`${countdown(drain!.used)} min`} />
-              <Stat label="on air" value={clock(drain!.live)} />
+              <Stat label="this call" value={countdown(drain.used)} />
+              <Stat label="on air" value={clock(drain.live)} />
             </>
           )}
-          {link}
+          <button onClick={() => setLocation("/minutes")}
+            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: tone, fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
+            Minutes dashboard →
+          </button>
         </div>
       </div>
 
@@ -150,7 +104,7 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
 
       {low && !empty && (
         <p style={{ margin: "7px 0 0", fontSize: 10.5, color: "hsl(35 100% 70%)", fontFamily: "'Rajdhani',sans-serif" }}>
-          Under {LOW} minutes left here. Ask your administrator to top up before the call drops.
+          Under {LOW_MINUTES} minutes left here. Ask your administrator to top up before the call drops.
         </p>
       )}
     </div>

@@ -217,6 +217,7 @@ export class StreamLiveClient {
 
   /** Balances, what the account may use, spend totals and live sessions in one read. */
   async snapshot(): Promise<AccountSnapshot> {
+    await this.token();
     const { data, error } = await this.sb.rpc("sl_account_snapshot");
     if (error) throw new Error(error.message);
     const j = (data ?? {}) as SnapshotJson;

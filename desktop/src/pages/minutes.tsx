@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout";
-import { countdown, drainOf, useTicker, MOD_LABELS } from "../components/meter";
-import { gateway, useAccount, useLease, requestTopup, type LiveLease } from "../lib/gateway";
+import { countdown, drainOf, MOD_LABELS, type LiveLease } from "../lib/minutes";
+import { useTicker } from "../components/meter";
+import { gateway, useAccount, useLease, requestTopup } from "../lib/gateway";
 import type { AccountSnapshot, Modality } from "@stream-live/client";
 import { Hourglass, Radio, RefreshCw, Send, ArrowLeftRight, CircleCheck, CircleOff } from "lucide-react";
 
