@@ -72,9 +72,9 @@ export default function SettingsPage() {
             ))}
           </div>
 
-          <Link href="/account">
+          <Link href="/minutes">
             <a style={{ display: "flex", alignItems: "center", gap: 6, width: "fit-content", padding: "10px 18px", borderRadius: 8, background: C, color: BG, fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani', sans-serif", cursor: "pointer", textDecoration: "none" }}>
-              Open account panel <ArrowRight style={{ width: 14, height: 14 }} />
+              Open minutes dashboard <ArrowRight style={{ width: 14, height: 14 }} />
             </a>
           </Link>
           <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani', sans-serif", lineHeight: 1.5, marginTop: 10 }}>

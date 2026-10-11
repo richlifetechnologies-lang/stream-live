@@ -5,7 +5,8 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances } from "../lib/gateway";
+import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease } from "../lib/gateway";
+import { MinuteMeter } from "../components/meter";
 import { GatewayError, REASON_MESSAGES, type TabName } from "@stream-live/client";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
@@ -1054,6 +1055,7 @@ export default function StreamPage() {
     isStartingRef.current = false;
     // Close the lease so the unused prepaid chunk is refunded and the heartbeat stops.
     await gateway.endCall().catch(() => {});
+    endLease();
     sessionIdRef.current = null;
     void refreshBalances();
     videoSessionRef.current?.close(); videoSessionRef.current = null;
@@ -1081,7 +1083,7 @@ export default function StreamPage() {
     const needsVoice = activeTab !== "video-only" && vcEnabled;
     const tabName: TabName = activeTab;
 
-    if (credsMissing) { setLocation("/account"); return; }
+    if (credsMissing) { setLocation(account.signedIn ? "/minutes" : "/account"); return; }
     if (needsVideo && (!cameraReady || !localStreamRef.current)) {
       toast({ title: "Camera not ready", description: "Enable your camera first.", variant: "destructive" }); return;
     }
@@ -1093,6 +1095,7 @@ export default function StreamPage() {
       // confirms this account and bucket can pay for the call.
       const ticket = await gateway.startCall(tabName, await deviceId());
       sessionIdRef.current = ticket.sessionId;
+      beginLease(ticket);
 
       setConnStep("engine");
       const style  = STYLES.find(s => s.id === selectedStyle)!;
@@ -1169,6 +1172,7 @@ export default function StreamPage() {
       // Heartbeat well inside the 120 s lease TTL. When it reports ended the
       // bucket has run dry: stop cleanly and tell the user to ask for a top-up.
       gateway.beginHeartbeat(state => {
+        updateLease(ticket.sessionId, state);
         void refreshBalances();
         if (state.ended) {
           void teardownStream();
@@ -1188,8 +1192,8 @@ export default function StreamPage() {
       if (err instanceof GatewayError) {
         const msg = REASON_MESSAGES[err.reason] ?? err.message;
         if (err.reason === "out_of_minutes") {
-          toast({ title: "Out of minutes", description: `${msg} Open your account to request more.`, variant: "destructive" });
-          setLocation("/account");
+          toast({ title: "Out of minutes", description: `${msg} Ask your administrator for more from your minutes dashboard.`, variant: "destructive" });
+          setLocation("/minutes");
         } else {
           toast({ title: "Cannot start", description: msg, variant: "destructive" });
         }
@@ -1471,6 +1475,7 @@ export default function StreamPage() {
   const canStart = !credsMissing && (needsVideo ? cameraReady : true);
   const StreamBtn = () => (
     <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 60, width: "min(440px, calc(100vw - 110px))", filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.55))" }}>
+      <MinuteMeter modality={modalityForTab(activeTab)} />
       {isStreaming ? (
         <button onClick={handleStop}
           style={{ width: "100%", height: 54, background: "hsl(0 85% 40% / 0.3)", border: "1px solid hsl(0 85% 55% / 0.5)", borderRadius: 12, cursor: "pointer", color: "hsl(0 85% 75%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
@@ -1479,7 +1484,7 @@ export default function StreamPage() {
           <Square style={{ width: 18, height: 18 }} /> Stop
         </button>
       ) : (
-        <button onClick={credsMissing ? () => setLocation("/account") : handleStartStream} disabled={isStarting || (!credsMissing && !canStart)}
+        <button onClick={credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStartStream} disabled={isStarting || (!credsMissing && !canStart)}
           style={{ width: "100%", height: 54, background: (canStart && !isStarting) ? "linear-gradient(135deg, hsl(187 100% 52%) 0%, hsl(200 100% 45%) 100%)" : "hsl(222 40% 11%)", border: "none", borderRadius: 12, cursor: (canStart && !isStarting) ? "pointer" : "not-allowed", color: (canStart && !isStarting) ? "hsl(222 47% 4%)" : "hsl(222 25% 40%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: (canStart && !isStarting) ? "0 0 28px hsl(187 100% 52% / 0.3)" : "none" }}
           onMouseEnter={e => { if (canStart && !isStarting) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}>
@@ -1515,7 +1520,7 @@ export default function StreamPage() {
         <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(40 100% 52% / 0.08)", border: "1px solid hsl(40 100% 52% / 0.2)", marginBottom: 10 }}>
           <p style={{ fontSize: 11, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif" }}>
             You have no credit minutes in this bucket. Ask your administrator to top up your account.{" "}
-            <button onClick={() => setLocation("/account")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>Request credits →</button>
+            <button onClick={() => setLocation("/minutes")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>Request credits →</button>
           </p>
         </div>
       )}
@@ -1801,7 +1806,7 @@ export default function StreamPage() {
           <p style={{ fontSize: 13, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif", flex: 1 }}>
             You have no credit minutes in this bucket. Ask your administrator to top up your account.
           </p>
-          <button onClick={() => setLocation("/account")} style={{ padding: "6px 14px", borderRadius: 8, background: "hsl(40 100% 52% / 0.25)", border: "1px solid hsl(40 100% 52% / 0.5)", color: "hsl(40 100% 80%)", fontWeight: 700, fontSize: 12, fontFamily: "'Orbitron',monospace", cursor: "pointer" }}>
+          <button onClick={() => setLocation("/minutes")} style={{ padding: "6px 14px", borderRadius: 8, background: "hsl(40 100% 52% / 0.25)", border: "1px solid hsl(40 100% 52% / 0.5)", color: "hsl(40 100% 80%)", fontWeight: 700, fontSize: 12, fontFamily: "'Orbitron',monospace", cursor: "pointer" }}>
             Request credits
           </button>
         </div>

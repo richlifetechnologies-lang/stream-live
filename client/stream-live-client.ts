@@ -55,6 +55,46 @@ export type LeaseState = {
   lowBalance: boolean;
 };
 
+export type SnapshotWallet = {
+  modality: Modality;
+  balance: number;
+  unlimited: boolean;
+  total_credited: number;
+  total_spent: number;
+  burn_rate: number;
+};
+
+export type SnapshotSession = {
+  id: string;
+  tab: TabName;
+  device_id: string | null;
+  started_at: string;
+  lease_expires_at: string | null;
+  real_minutes: number;
+};
+
+/** One round-trip to `sl_account_snapshot` — what the user dashboard shows. */
+export type AccountSnapshot = {
+  status: string;
+  modalities: Record<Modality, boolean>;
+  maxConcurrentSessions: number;
+  wallets: SnapshotWallet[];
+  openSessions: SnapshotSession[];
+  app: { min_supported_version: string; latest_version: string | null; maintenance: boolean; maintenance_message: string | null } | null;
+};
+
+/** Postgres returns the snapshot as loose JSON; this is the shape we read from it. */
+type SnapshotJson = {
+  ok?: boolean;
+  error?: string;
+  status?: string;
+  modalities?: Partial<Record<Modality, boolean>>;
+  max_concurrent_sessions?: number;
+  wallets?: SnapshotWallet[];
+  open_sessions?: SnapshotSession[];
+  app?: AccountSnapshot["app"];
+};
+
 /** Gateway refused the call. `reason` is stable — map it to a message in the UI. */
 export class GatewayError extends Error {
   readonly status: number;
@@ -139,6 +179,12 @@ export class StreamLiveClient {
     return data.session.access_token;
   }
 
+  private async userId(): Promise<string> {
+    const { data } = await this.sb.auth.getSession();
+    if (!data.session) throw new GatewayError("not signed in", 401, "signed_out");
+    return data.session.user.id;
+  }
+
   // ── Wallet ─────────────────────────────────────────────────────────────────
   /** The three buckets, with the burn rate each one is charged at. */
   async wallets(): Promise<Wallet[]> {
@@ -167,6 +213,35 @@ export class StreamLiveClient {
       if (!seen.has(m)) rows.push({ modality: m, balance: 0, unlimited: false, burnRate: rate.get(m) ?? 1 });
     }
     return rows;
+  }
+
+  /** Balances, what the account may use, spend totals and live sessions in one read. */
+  async snapshot(): Promise<AccountSnapshot> {
+    const { data, error } = await this.sb.rpc("sl_account_snapshot");
+    if (error) throw new Error(error.message);
+    const j = (data ?? {}) as SnapshotJson;
+    if (j.ok !== true) throw new Error(String(j.error ?? "snapshot unavailable"));
+
+    const wallets = j.wallets ?? [];
+    const seen = new Set<Modality>();
+    for (const w of wallets) seen.add(w.modality);
+    // A bucket the user has never been credited does not exist in the table yet.
+    for (const m of ["video", "audio", "video_audio"] as Modality[]) {
+      if (!seen.has(m)) wallets.push({ modality: m, balance: 0, unlimited: false, total_credited: 0, total_spent: 0, burn_rate: 1 });
+    }
+
+    return {
+      status: j.status ?? "none",
+      modalities: {
+        video: j.modalities?.video === true,
+        audio: j.modalities?.audio === true,
+        video_audio: j.modalities?.video_audio === true,
+      },
+      maxConcurrentSessions: Number(j.max_concurrent_sessions ?? 1),
+      wallets,
+      openSessions: j.open_sessions ?? [],
+      app: j.app ?? null,
+    };
   }
 
   async ledger(limit = 50): Promise<Array<Record<string, unknown>>> {
@@ -206,9 +281,10 @@ export class StreamLiveClient {
     paymentReference?: string;
     note?: string;
   }): Promise<void> {
-    await this.token();
+    const id = await this.userId();
     if (!(input.minutes > 0)) throw new Error("Choose how many minutes to request.");
     const { error } = await this.sb.from("credit_requests").insert({
+      user_id: id,
       modality: input.modality,
       minutes: input.minutes,
       payment_channel: input.paymentChannel ?? null,

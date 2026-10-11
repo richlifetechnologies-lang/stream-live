@@ -3,24 +3,12 @@ import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout";
 import { ArtBackdrop, Logo } from "../components/brand";
 import { useToast } from "../hooks/use-toast";
-import { gateway, useAccount, signIn, signUp, signOut, requestTopup } from "../lib/gateway";
+import { gateway, useAccount, signIn, signUp, signOut } from "../lib/gateway";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
-import type { Modality } from "@stream-live/client";
-import { LogIn, LogOut, UserPlus, Send, KeyRound, Loader2, MonitorX } from "lucide-react";
+import { LogIn, LogOut, UserPlus, KeyRound, Loader2, MonitorX, Hourglass } from "lucide-react";
 
 const C = "hsl(187 100% 52%)";
 const BG = "hsl(222 47% 4%)";
-
-const MOD_LABELS: Record<Modality, string> = {
-  video: "Video Call",
-  audio: "Audio Call",
-  video_audio: "Video + Audio",
-};
-
-function balanceText(m: number | null, unlimited: boolean) {
-  if (unlimited) return "Unlimited";
-  return `${(m ?? 0).toFixed(1)} min`;
-}
 
 function fmtDate(ts: string | null) {
   if (!ts) return "—";
@@ -42,29 +30,19 @@ export default function AccountPage() {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const [reqModality, setReqModality] = useState<Modality>("video");
-  const [reqMinutes, setReqMinutes] = useState("60");
-  const [reqChannel, setReqChannel] = useState("");
-  const [reqReference, setReqReference] = useState("");
-  const [reqNote, setReqNote] = useState("");
-  const [requesting, setRequesting] = useState(false);
-
-  const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
   const [devices, setDevices] = useState<Array<Record<string, unknown>>>([]);
   const [newPassword, setNewPassword] = useState("");
   const [changingPw, setChangingPw] = useState(false);
 
-  const loadAccountData = useCallback(async () => {
+  const loadDevices = useCallback(async () => {
     try {
-      const [r, d] = await Promise.all([gateway.myRequests(), gateway.devices()]);
-      setRequests(r);
-      setDevices(d);
-    } catch { /* ignore — panels stay empty */ }
+      setDevices(await gateway.devices());
+    } catch { /* panel stays empty */ }
   }, []);
 
   useEffect(() => {
-    if (account.signedIn) void loadAccountData();
-  }, [account.signedIn, loadAccountData]);
+    if (account.signedIn) void loadDevices();
+  }, [account.signedIn, loadDevices]);
 
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,32 +70,10 @@ export default function AccountPage() {
     } finally { setBusy(false); }
   };
 
-  const handleTopup = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (requesting) return;
-    const minutes = Number(reqMinutes);
-    if (!(minutes > 0)) { toast({ title: "Enter how many minutes to request.", variant: "destructive" }); return; }
-    setRequesting(true);
-    try {
-      await requestTopup({
-        modality: reqModality,
-        minutes,
-        paymentChannel: reqChannel.trim() || undefined,
-        paymentReference: reqReference.trim() || undefined,
-        note: reqNote.trim() || undefined,
-      });
-      toast({ title: "Request sent", description: "An administrator will top up your bucket once your payment is confirmed." });
-      setReqChannel(""); setReqReference(""); setReqNote("");
-      await loadAccountData();
-    } catch (err) {
-      toast({ title: "Could not send request", description: err instanceof Error ? err.message : "Try again.", variant: "destructive" });
-    } finally { setRequesting(false); }
-  };
-
   const handleRevoke = async (deviceId: string) => {
     try {
       await gateway.revokeDevice(deviceId);
-      await loadAccountData();
+      await loadDevices();
       toast({ title: "Device removed" });
     } catch (err) {
       toast({ title: "Could not remove device", description: err instanceof Error ? err.message : "Try again.", variant: "destructive" });
@@ -239,84 +195,20 @@ export default function AccountPage() {
           </button>
         </div>
 
-        {/* Balances */}
-        <div style={card}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron', monospace", marginBottom: 14 }}>Your minutes</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {account.wallets.map(w => {
-              const empty = !w.unlimited && w.balance < 1;
-              return (
-                <div key={w.modality} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", background: "hsl(222 40% 8%)", borderRadius: 8, border: `1px solid ${empty ? "hsl(0 85% 40% / 0.3)" : "hsl(222 40% 12%)"}` }}>
-                  <div>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani', sans-serif" }}>{MOD_LABELS[w.modality]}</p>
-                    <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani', sans-serif", marginTop: 2 }}>1 real minute = {w.burnRate} credit minute{w.burnRate === 1 ? "" : "s"}</p>
-                  </div>
-                  <span style={{ fontSize: 16, fontWeight: 700, color: empty ? "hsl(0 85% 65%)" : C, fontFamily: "'Orbitron', monospace" }}>{balanceText(w.balance, w.unlimited)}</span>
-                </div>
-              );
-            })}
-          </div>
-          <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani', sans-serif", marginTop: 12, lineHeight: 1.5 }}>
-            You have no credit minutes in a bucket? Ask your administrator to top up your account — there are no trials and nothing to buy here.
-          </p>
-        </div>
-
-        {/* Request credits */}
-        <div style={card}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron', monospace", marginBottom: 14 }}>Request credits</p>
-          <form onSubmit={handleTopup} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <div>
-                <label style={labelSt}>Bucket</label>
-                <select value={reqModality} onChange={e => setReqModality(e.target.value as Modality)} style={inputSt}>
-                  <option value="video">Video Call</option>
-                  <option value="audio">Audio Call</option>
-                  <option value="video_audio">Video + Audio</option>
-                </select>
-              </div>
-              <div>
-                <label style={labelSt}>Minutes</label>
-                <input type="number" min={1} step={1} required value={reqMinutes} onChange={e => setReqMinutes(e.target.value)} style={inputSt} />
-              </div>
-            </div>
-            <div>
-              <label style={labelSt}>How you paid</label>
-              <input value={reqChannel} onChange={e => setReqChannel(e.target.value)} placeholder="e.g. bank transfer, cash" style={inputSt} />
-            </div>
-            <div>
-              <label style={labelSt}>Payment reference</label>
-              <input value={reqReference} onChange={e => setReqReference(e.target.value)} placeholder="What the administrator should match" style={inputSt} />
-            </div>
-            <div>
-              <label style={labelSt}>Note</label>
-              <textarea value={reqNote} onChange={e => setReqNote(e.target.value)} rows={2} placeholder="Anything the administrator should know" style={{ ...inputSt, resize: "vertical" }} />
-            </div>
-            <button type="submit" disabled={requesting}
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 18px", borderRadius: 8, border: "none", background: requesting ? "hsl(222 40% 11%)" : C, color: requesting ? "hsl(222 25% 35%)" : BG, fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani', sans-serif", cursor: requesting ? "not-allowed" : "pointer", width: "fit-content" }}>
-              <Send style={{ width: 14, height: 14 }} /> {requesting ? "Sending…" : "Send request"}
-            </button>
-          </form>
-        </div>
-
-        {/* My requests */}
-        <div style={card}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron', monospace", marginBottom: 14 }}>Your requests</p>
-          {requests.length === 0 ? (
-            <p style={{ fontSize: 13, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani', sans-serif" }}>No requests yet.</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              {requests.map(r => (
-                <div key={String(r.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "hsl(222 40% 8%)", borderRadius: 8, border: "1px solid hsl(222 40% 12%)" }}>
-                  <div>
-                    <p style={{ fontSize: 12, color: "hsl(190 80% 92%)", fontFamily: "'Rajdhani', sans-serif" }}>{Number(r.minutes)} min · {MOD_LABELS[r.modality as Modality] ?? String(r.modality)}</p>
-                    <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani', sans-serif" }}>{fmtDate(r.created_at as string)}{r.admin_note ? ` — ${String(r.admin_note)}` : ""}</p>
-                  </div>
-                  <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", color: r.status === "approved" ? "hsl(143 72% 55%)" : r.status === "rejected" ? "hsl(0 85% 65%)" : "hsl(40 100% 65%)", fontFamily: "'Orbitron', monospace" }}>{String(r.status)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Minutes live on their own dashboard */}
+        <button onClick={() => setLocation("/minutes")}
+          style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", cursor: "pointer", textAlign: "left" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Hourglass style={{ width: 16, height: 16, color: C }} />
+            <span>
+              <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Your minutes</span>
+              <span style={{ display: "block", fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
+                Balances per bucket, live drain while you are on air, and asking for more
+              </span>
+            </span>
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace" }}>OPEN →</span>
+        </button>
 
         {/* Devices */}
         <div style={card}>

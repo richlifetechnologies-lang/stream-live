@@ -3,6 +3,8 @@ import type { Session } from "@supabase/supabase-js";
 import {
   StreamLiveClient,
   deviceIdFrom,
+  type CallTicket,
+  type LeaseState,
   type Modality,
   type TabName,
   type Wallet,
@@ -14,11 +16,32 @@ export type AccountState = {
   email: string | null;
   wallets: Wallet[];
   loading: boolean;
+  /** The metered lease this machine is holding right now, or null when idle. */
+  live: LiveLease | null;
+};
+
+/**
+ * What the gateway last said about the running call. Balances only move when a
+ * heartbeat settles a window, so the UI fills the gaps with the bucket's burn
+ * rate and gets a smooth per-second countdown out of a 45-second poll.
+ */
+export type LiveLease = {
+  sessionId: string;
+  modality: Modality;
+  balance: number | null;
+  unlimited: boolean;
+  billedMinutes: number;
+  /** What the bucket held when the call opened, so the bar can show the drain. */
+  startBalance: number;
+  startedAt: number;
+  observedAt: number;
+  leaseExpiresAt: string | null;
+  lowBalance: boolean;
 };
 
 export const gateway = new StreamLiveClient(GATEWAY_CONFIG);
 
-let state: AccountState = { signedIn: false, email: null, wallets: [], loading: true };
+let state: AccountState = { signedIn: false, email: null, wallets: [], loading: true, live: null };
 const listeners = new Set<() => void>();
 
 function setState(patch: Partial<AccountState>) {
@@ -37,6 +60,48 @@ export function getState(): AccountState {
 
 export function useAccount(): AccountState {
   return useSyncExternalStore(subscribe, getState, getState);
+}
+
+export function useLease(): LiveLease | null {
+  return useSyncExternalStore(subscribe, () => state.live, () => state.live);
+}
+
+export function beginLease(ticket: CallTicket): void {
+  const now = Date.now();
+  setState({
+    live: {
+      sessionId: ticket.sessionId,
+      modality: ticket.modality,
+      balance: ticket.balance,
+      unlimited: ticket.unlimited,
+      billedMinutes: 0,
+      startBalance: (ticket.balance ?? 0) + ticket.leaseMinutes,
+      startedAt: now,
+      observedAt: now,
+      leaseExpiresAt: ticket.leaseExpiresAt,
+      lowBalance: false,
+    },
+  });
+}
+
+export function updateLease(sessionId: string, lease: LeaseState): void {
+  const prev = state.live;
+  if (!prev || prev.sessionId !== sessionId) return;
+  setState({
+    live: {
+      ...prev,
+      balance: lease.balance,
+      unlimited: lease.unlimited,
+      billedMinutes: lease.billedMinutes ?? prev.billedMinutes,
+      observedAt: Date.now(),
+      leaseExpiresAt: lease.leaseExpiresAt,
+      lowBalance: lease.lowBalance,
+    },
+  });
+}
+
+export function endLease(): void {
+  if (state.live) setState({ live: null });
 }
 
 export function modalityForTab(tab: TabName): Modality {
@@ -97,7 +162,7 @@ export async function signUp(email: string, password: string, displayName?: stri
 
 export async function signOut(): Promise<void> {
   await gateway.signOut();
-  setState({ signedIn: false, email: null, wallets: [], loading: false });
+  setState({ signedIn: false, email: null, wallets: [], loading: false, live: null });
 }
 
 export async function requestTopup(input: {
@@ -112,5 +177,5 @@ export async function requestTopup(input: {
 }
 
 gateway.onChange((session) => {
-  if (!session) setState({ signedIn: false, email: null, wallets: [], loading: false });
+  if (!session) setState({ signedIn: false, email: null, wallets: [], loading: false, live: null });
 });
