@@ -781,7 +781,7 @@
   function grantPayload(sign) {
     const minutes = N($("gMinutes").value) * sign;
     const reason = $("gReason").value.trim();
-    if (!minutes) throw new Error("Enter how many minutes.");
+    if (!minutes && !$("gUnlimited").checked && !$("gClearUnlimited").checked) throw new Error("Enter how many minutes, or use the unlimited switches.");
     if (reason.length < 3) throw new Error("A reason is required (audit trail).");
     let unlimited = null;
     if ($("gUnlimited").checked && $("gClearUnlimited").checked) throw new Error("Pick either set or clear unlimited, not both.");
