@@ -1,7 +1,7 @@
 {
-  "name": "stream-studio-login-web",
-  "version": "0.3.0",
-  "description": "Auth, licensing gateway and subscription/usage backend for Stream Studio (Supabase Edge Functions + admin panel + client SDK).",
+  "name": "stream-live",
+  "version": "1.0.0",
+  "description": "STREAM LIVE — Stream Studio desktop app plus its account gateway: Supabase auth, three non-expiring per-modality minute wallets, admin-managed key pool, manual credits, lease metering and the admin panel.",
   "private": false,
   "type": "module",
   "scripts": {

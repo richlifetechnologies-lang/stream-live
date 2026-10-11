@@ -19,13 +19,18 @@ site_url = "http://localhost:54321"
 
 # Edge Functions run on the Supabase Edge Runtime (Deno). Set their secrets in
 # the dashboard for production, or in supabase/.env.local for `supabase start`.
-[functions.mint-fal-token]
-verify_jwt = false   # we validate the user JWT ourselves to return clean errors
+# verify_jwt = false because each function validates the user JWT itself and
+# returns a clean reason code the desktop app can show.
+[functions.start-session]
+verify_jwt = false
+
+[functions.lease]
+verify_jwt = false
 
 [functions.proxy-voice]
 verify_jwt = false
 
-[functions.usage-heartbeat]
+[functions.admin-api]
 verify_jwt = false
 
 # Serves the admin panel HTML. Public shell — access is gated by the admin's own

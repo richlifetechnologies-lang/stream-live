@@ -1,0 +1,309 @@
+name: Build & Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to publish (e.g. v1.7.0). Leave empty to skip release.'
+        required: false
+        default: ''
+      build_windows:
+        description: 'Build Windows installer (true/false)'
+        required: false
+        default: 'true'
+      build_mac:
+        description: 'Build macOS DMGs (true/false)'
+        required: false
+        default: 'true'
+
+permissions:
+  contents: write
+
+jobs:
+
+  # ── Windows x64 ──────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    if: "inputs.build_windows != 'false'"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Download virtual device drivers
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path "drivers" -Force | Out-Null
+
+          # ── VB-Audio Virtual Cable (virtual microphone, ~1.5MB) ───────────
+          # Inno Setup based — silent flag is /VERYSILENT
+          Write-Host "Downloading VB-Audio Virtual Cable..."
+          try {
+            Invoke-WebRequest -Uri "https://download.vb-audio.com/Download_CABLE/VBCable_Driver_Pack43.zip" `
+              -OutFile "drivers\VBCable.zip" -TimeoutSec 120
+            Expand-Archive -Path "drivers\VBCable.zip" -DestinationPath "drivers\VBCable_tmp" -Force
+            $setup = Get-ChildItem "drivers\VBCable_tmp" -Filter "VBCable_Setup_x64.exe" -Recurse | Select-Object -First 1
+            if (-not $setup) { throw "VBCable_Setup_x64.exe not found in zip" }
+            Copy-Item $setup.FullName "drivers\VBCable_Setup_x64.exe"
+            Write-Host "VBCable: $([math]::Round((Get-Item 'drivers\VBCable_Setup_x64.exe').Length/1KB,1)) KB"
+            Remove-Item "drivers\VBCable.zip","drivers\VBCable_tmp" -Recurse -Force -ErrorAction SilentlyContinue
+          } catch {
+            Write-Warning "VBCable download failed: $_ — microphone driver will be skipped"
+            [System.IO.File]::WriteAllBytes("drivers\VBCable_Setup_x64.exe", [byte[]]@())
+          }
+
+          # ── OBS Studio is NOT bundled: users install OBS themselves if they
+          # want its virtual camera. Bundling it caused a silent ~300MB OBS
+          # download on every app install and a black "virtual camera" entry
+          # in the input picker.
+
+          Write-Host "=== Drivers ready ==="
+          Get-ChildItem "drivers\" | Select-Object Name,@{N='SizeKB';E={[math]::Round($_.Length/1KB,1)}}
+
+      - name: Build web + electron
+        run: npm run build
+
+      - name: Package Windows installer
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Generate latest.yml
+        shell: pwsh
+        run: |
+          $exePath = (Get-Item 'release\StreamStudio-Setup-*.exe').FullName
+          $exeName = [System.IO.Path]::GetFileName($exePath)
+          $bytes   = [System.IO.File]::ReadAllBytes($exePath)
+          $hash    = [System.Security.Cryptography.SHA512]::Create().ComputeHash($bytes)
+          $sha512  = [Convert]::ToBase64String($hash)
+          $size    = (Get-Item $exePath).Length
+          $refName = '${{ inputs.release_tag || github.ref_name }}'
+          $ver     = $refName.TrimStart('v')
+          $date    = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ss.fffZ')
+          $lines = @(
+            "version: $ver",
+            "files:",
+            "  - url: $exeName",
+            "    sha512: $sha512",
+            "    size: $size",
+            "path: $exeName",
+            "sha512: $sha512",
+            "releaseDate: '$date'"
+          )
+          $lines -join "`n" | Set-Content -Path 'release\latest.yml' -Encoding UTF8
+          Get-Content 'release\latest.yml'
+
+      - name: Upload artifact (non-release)
+        if: "!startsWith(github.ref, 'refs/tags/') && inputs.release_tag == ''"
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-studio-windows-${{ github.run_number }}
+          path: |
+            release/*.exe
+            release/latest.yml
+          retention-days: 30
+
+      - name: Publish to GitHub Release
+        if: "startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: Stream Studio ${{ inputs.release_tag || github.ref_name }}
+          body: |
+            ## Stream Studio ${{ inputs.release_tag || github.ref_name }}
+
+            Real-time AI webcam transformation powered by **fal.ai Lucy 2.5** via WebRTC.
+
+            ### What's new
+            - 🔄 Switched engine from Decart 2.1 SDK → **fal.ai Lucy 2.5** (WebRTC, `decart/lucy-2-5/realtime`)
+            - 🎤 Microphone audio is pipelined alongside video in the same WebRTC connection for native lip sync
+            - 🔑 Single fal.ai API Key — get one at [fal.ai/dashboard/keys](https://fal.ai/dashboard/keys)
+            - 📡 720p webcam stream at 30fps
+
+            ### Downloads
+            | Platform | File |
+            |----------|------|
+            | Windows (x64) | StreamStudio-Setup-*.exe |
+            | macOS Apple Silicon (M1/M2/M3) | StreamStudio-*-arm64.dmg |
+            | macOS Intel | StreamStudio-*-x64.dmg |
+
+            ### macOS first launch
+            If macOS blocks the app, right-click the DMG and choose Open to bypass Gatekeeper.
+          files: |
+            release/*.exe
+            release/latest.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+
+  # ── macOS Apple Silicon (arm64) ───────────────────────────────────────────────
+  build-mac-arm64:
+    name: Build macOS Apple Silicon (arm64)
+    runs-on: macos-latest
+    if: "inputs.build_mac != 'false'"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web + electron
+        run: npm run build
+
+      - name: Package macOS DMG (Apple Silicon)
+        run: npx electron-builder --mac --arm64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Generate latest-mac-arm64.yml
+        shell: python
+        run: |
+          import os, hashlib, base64, datetime, glob
+          matches = glob.glob('release/StreamStudio-*.dmg')
+          dmg = next((f for f in matches if 'arm64' in f), matches[0] if matches else None)
+          if not dmg:
+              raise FileNotFoundError('No DMG found in release/')
+          name = os.path.basename(dmg)
+          data = open(dmg, 'rb').read()
+          sha512 = base64.b64encode(hashlib.sha512(data).digest()).decode()
+          size = os.path.getsize(dmg)
+          ver = '${{ inputs.release_tag || github.ref_name }}'.lstrip('v')
+          date = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+          content = (
+              'version: ' + ver + '\n' +
+              'files:\n' +
+              '  - url: ' + name + '\n' +
+              '    sha512: ' + sha512 + '\n' +
+              '    size: ' + str(size) + '\n' +
+              'path: ' + name + '\n' +
+              'sha512: ' + sha512 + '\n' +
+              "releaseDate: '" + date + "'\n"
+          )
+          open('release/latest-mac-arm64.yml', 'w').write(content)
+          print('=== release/latest-mac-arm64.yml ===')
+          print(content)
+
+      - name: Upload artifact (non-release)
+        if: "!startsWith(github.ref, 'refs/tags/') && inputs.release_tag == ''"
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-studio-mac-arm64-${{ github.run_number }}
+          path: |
+            release/*.dmg
+            release/latest-mac-arm64.yml
+          retention-days: 30
+
+      - name: Publish to GitHub Release
+        if: "startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: Stream Studio ${{ inputs.release_tag || github.ref_name }}
+          files: |
+            release/*.dmg
+            release/latest-mac-arm64.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+
+  # ── macOS Intel (x64) ────────────────────────────────────────────────────────
+  build-mac-intel:
+    name: Build macOS Intel (x64)
+    runs-on: macos-13
+    if: "inputs.build_mac != 'false'"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.ref }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build web + electron
+        run: npm run build
+
+      - name: Package macOS DMG (Intel)
+        run: npx electron-builder --mac --x64 --publish never
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+      - name: Generate latest-mac.yml
+        shell: python
+        run: |
+          import os, hashlib, base64, datetime, glob
+          matches = glob.glob('release/StreamStudio-*.dmg')
+          dmg = next((f for f in matches if 'x64' in f), matches[0] if matches else None)
+          if not dmg:
+              raise FileNotFoundError('No DMG found in release/')
+          name = os.path.basename(dmg)
+          data = open(dmg, 'rb').read()
+          sha512 = base64.b64encode(hashlib.sha512(data).digest()).decode()
+          size = os.path.getsize(dmg)
+          ver = '${{ inputs.release_tag || github.ref_name }}'.lstrip('v')
+          date = datetime.datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%S.000Z')
+          content = (
+              'version: ' + ver + '\n' +
+              'files:\n' +
+              '  - url: ' + name + '\n' +
+              '    sha512: ' + sha512 + '\n' +
+              '    size: ' + str(size) + '\n' +
+              'path: ' + name + '\n' +
+              'sha512: ' + sha512 + '\n' +
+              "releaseDate: '" + date + "'\n"
+          )
+          open('release/latest-mac.yml', 'w').write(content)
+          print('=== release/latest-mac.yml ===')
+          print(content)
+
+      - name: Upload artifact (non-release)
+        if: "!startsWith(github.ref, 'refs/tags/') && inputs.release_tag == ''"
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-studio-mac-intel-${{ github.run_number }}
+          path: |
+            release/*.dmg
+            release/latest-mac.yml
+          retention-days: 30
+
+      - name: Publish to GitHub Release
+        if: "startsWith(github.ref, 'refs/tags/') || inputs.release_tag != ''"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release_tag || github.ref_name }}
+          name: Stream Studio ${{ inputs.release_tag || github.ref_name }}
+          files: |
+            release/*.dmg
+            release/latest-mac.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
