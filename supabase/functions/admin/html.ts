@@ -57,6 +57,25 @@ export const ADMIN_HTML = `<!doctype html>
   .secret { display: flex; gap: 6px; align-items: center; }
   .secret input { flex: 1; }
   .secret button { padding: 6px 9px; font-size: 11px; }
+  .prov { border: 1px solid #1d2733; border-radius: 10px; padding: 14px; background: #0b0f14; }
+  .prov label { margin-top: 0; }
+  .phead { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .phead b { font-size: 13px; }
+  .pmeta { color: #6b8296; font-size: 11px; }
+  .pdot { width: 9px; height: 9px; border-radius: 50%; background: #33475c; flex: 0 0 auto; }
+  .pdot.ok { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.55); }
+  .pdot.fail { background: #fb7185; box-shadow: 0 0 8px rgba(251,113,133,.5); }
+  .pdot.warn { background: #facc15; }
+  .chip { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; padding: 2px 9px; border-radius: 999px; background: #16202b; color: #8aa0b2; margin-left: auto; white-space: nowrap; }
+  .chip.ok { background: #0d3320; color: #4ade80; }
+  .chip.fail { background: #3a1620; color: #fb7185; }
+  .chip.busy { background: #3a2d0d; color: #facc15; }
+  .phint { font-size: 11px; color: #6b8296; margin: 8px 0 0; line-height: 1.55; }
+  .phint b { color: #8aa0b2; }
+  .presult { font-size: 12px; margin-top: 10px; padding: 9px 11px; border-radius: 8px; line-height: 1.45; display: none; }
+  .presult.show { display: block; }
+  .presult.ok { background: #0d3320; color: #4ade80; border: 1px solid #14532d; }
+  .presult.fail { background: #3a1620; color: #ffb3c1; border: 1px solid #6b2233; }
 </style>
 </head>
 <body>
@@ -220,15 +239,54 @@ export const ADMIN_HTML = `<!doctype html>
     <!-- ══ TAB: KEY POOL ═══════════════════════════════════════════════════ -->
     <section id="tab-keys" class="hidden">
       <div class="card">
-        <h2 style="font-size:14px;margin:0 0 4px">Add / edit a key pair</h2>
-        <p class="muted" style="margin:0 0 12px">One row carries a fal.ai (video) key and an ElevenLabs (voice) key. The gateway tries assigned keys first, then every enabled key by ascending <b>priority</b>, skipping any that hit its daily minute cap — then the env secret. Regular users never see any of this.</p>
-        <input type="hidden" id="kId" />
-        <div class="row">
-          <div><label>Label</label><input id="kLabel" placeholder="e.g. Primary keys" /></div>
-          <div><label>fal.ai key</label><div class="secret"><input id="kFal" type="password" autocomplete="off" placeholder="blank = keep current" /><button type="button" data-show="kFal">show</button></div></div>
-          <div><label>ElevenLabs key</label><div class="secret"><input id="kEleven" type="password" autocomplete="off" placeholder="blank = keep current" /><button type="button" data-show="kEleven">show</button></div></div>
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Key pool</h2>
+          <button id="refreshKeys">Refresh</button>
         </div>
-        <div class="row" style="margin-top:12px">
+        <div class="grid4" style="margin-top:12px" id="keyStats"></div>
+        <p class="muted" style="margin:12px 0 0">For every call the gateway tries the key assigned to that account first, then every enabled key by ascending <b>priority</b>, skipping any that already hit its daily cap, and only then the env secret. A key that fails is logged and the next one is tried in the same request, so one bad key never takes the product down. Users never see, send or store any of this.</p>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px">Add a key pair</h2>
+        <p class="muted" style="margin:0 0 14px">Paste each provider's key and press <b>Verify</b> — that asks the provider itself, right now, without billing a single second of inference. When both turn green, save.</p>
+        <input type="hidden" id="kId" />
+        <div class="grid2">
+          <div class="prov">
+            <div class="phead">
+              <span class="pdot" id="vidDot"></span>
+              <b>Video</b><span class="pmeta">fal.ai · LUCY 2.5 realtime</span>
+              <span class="chip" id="vidChip">not tested</span>
+            </div>
+            <label>fal.ai API key</label>
+            <div class="secret">
+              <input id="kFal" type="password" autocomplete="off" spellcheck="false" placeholder="blank = keep the stored key" />
+              <button type="button" data-show="kFal">show</button>
+              <button type="button" id="testFal" class="primary">Verify</button>
+            </div>
+            <p class="phint">Where: <b>fal.ai → dashboard → API Keys</b>. What it does: the gateway signs a ≤120-second call token with it, and your app opens the video call with that token — the key itself never leaves the server.</p>
+            <div class="presult" id="vidResult"></div>
+          </div>
+
+          <div class="prov">
+            <div class="phead">
+              <span class="pdot" id="voiceDot"></span>
+              <b>Voice</b><span class="pmeta">ElevenLabs · speech to speech</span>
+              <span class="chip" id="voiceChip">not tested</span>
+            </div>
+            <label>ElevenLabs API key</label>
+            <div class="secret">
+              <input id="kEleven" type="password" autocomplete="off" spellcheck="false" placeholder="blank = keep the stored key" />
+              <button type="button" data-show="kEleven">show</button>
+              <button type="button" id="testEleven" class="primary">Verify</button>
+            </div>
+            <p class="phint">Where: <b>elevenlabs.io → your profile picture → API Key</b>. What it does: streams the caller's voice through speech-to-speech and back, and powers voice cloning. It is not the same string as your agent or workspace key.</p>
+            <div class="presult" id="voiceResult"></div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top:14px">
+          <div><label>Label</label><input id="kLabel" placeholder="e.g. Primary keys" /></div>
           <div><label>Priority (lower tried first)</label><input id="kPriority" type="number" min="0" step="1" value="100" /></div>
           <div><label>Daily minute cap</label><input id="kCap" type="number" min="0" step="1" placeholder="blank = uncapped" /></div>
           <div style="flex:0 0 auto;display:flex;align-items:center">
@@ -245,12 +303,12 @@ export const ADMIN_HTML = `<!doctype html>
 
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Key pool health</h2>
-          <button id="refreshKeys">Refresh</button>
+          <h2 style="font-size:14px;margin:0">Stored keys</h2>
         </div>
-        <div style="overflow:auto;margin-top:12px">
+        <p class="muted" style="margin:6px 0 12px">Only the last four characters ever reach this page. <b>Verify</b> re-checks the stored copy against the provider; <span class="pill ok">live</span> means no failure was recorded against it in the last 24 hours.</p>
+        <div style="overflow:auto">
           <table id="keysTable">
-            <thead><tr><th>Label</th><th>fal.ai</th><th>ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Recent failures</th><th>Last error</th><th></th></tr></thead>
+            <thead><tr><th>Label</th><th>Video · fal.ai</th><th>Voice · ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -455,7 +513,6 @@ export const ADMIN_HTML = `<!doctype html>
   let ADMIN_EMAIL = "";
   let PLAN_ROWS = [];
   let KEY_ROWS = [];
-  let HEALTH_ROWS = [];
   let ACCT_ROWS = [];
   let EMAIL_OF = {};
   let CUR = null;
@@ -780,37 +837,75 @@ export const ADMIN_HTML = `<!doctype html>
   });
 
   // ══ KEY POOL ════════════════════════════════════════════════════════════
+  // admin_key_health is the only source: it carries a last-4 tail per provider,
+  // so raw secrets never enter this page.
   async function loadKeys() {
-    const [keysRes, healthRes] = await Promise.all([
-      sb.from("gateway_keys").select("id, label, fal_key, elevenlabs_key, is_default, enabled, priority, daily_minute_cap, created_at").order("priority", { ascending: true }),
-      sb.from("admin_key_health").select("id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, recent_failures").order("priority", { ascending: true }),
-    ]);
-    if (keysRes.error) return msg("keyMsg", keysRes.error.message);
-    KEY_ROWS = keysRes.data || [];
-    HEALTH_ROWS = healthRes.data || [];
-    const health = Object.fromEntries(HEALTH_ROWS.map((h) => [h.id, h]));
+    const { data, error } = await sb.from("admin_key_health")
+      .select("id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures")
+      .order("priority", { ascending: true });
+    if (error) return msg("keyMsg", error.message);
+    KEY_ROWS = data || [];
+
+    const live = KEY_ROWS.filter((k) => k.enabled !== false);
+    $("keyStats").innerHTML = [
+      [KEY_ROWS.length, "pairs stored"],
+      [live.filter((k) => k.video_key_tail).length, "video keys live"],
+      [live.filter((k) => k.voice_key_tail).length, "voice keys live"],
+      [KEY_ROWS.reduce((a, k) => a + N(k.recent_failures), 0), "failures in 24h"],
+    ].map(([v, l]) => \`<div class="stat"><div class="v">\${v}</div><div class="l">\${l}</div></div>\`).join("");
+
+    const cell = (k, provider, tail) => !tail ? '<span class="pill none">missing</span>' : \`
+      <div style="display:flex;align-items:center;gap:7px;white-space:nowrap">
+        <span class="pdot \${N(k.recent_failures) ? "fail" : "ok"}" title="\${N(k.recent_failures) ? "failed on a live call within the last 24 hours" : "no failure recorded against this key in the last 24 hours"}"></span>
+        <span class="mono">\${esc(tail)}</span>
+        <button data-act="verify" data-provider="\${provider}" data-id="\${k.id}" style="padding:4px 9px;font-size:11px">Verify</button>
+      </div>
+      <div class="muted" data-vres="\${provider}:\${k.id}" style="font-size:11px;margin-top:3px"></div>\`;
 
     $("keysTable").querySelector("tbody").innerHTML = KEY_ROWS.map((k) => {
-      const h = health[k.id] || {};
-      const cap = h.daily_minute_cap ?? k.daily_minute_cap;
-      const used = N(h.minutes_today);
+      const used = N(k.minutes_today), cap = k.daily_minute_cap;
       return \`<tr data-key="\${k.id}">
         <td><b>\${esc(k.label || "(unlabeled)")}</b>\${k.is_default ? ' <span class="pill yes">default</span>' : ""}</td>
-        <td>\${k.fal_key ? \`<span class="muted mono" data-secret="fal" data-key="\${k.id}">\${mask(k.fal_key)}</span> <button data-reveal="fal" data-id="\${k.id}">show</button>\` : '<span class="pill n">none</span>'}</td>
-        <td>\${k.elevenlabs_key ? \`<span class="muted mono" data-secret="elevenlabs" data-key="\${k.id}">\${mask(k.elevenlabs_key)}</span> <button data-reveal="elevenlabs" data-id="\${k.id}">show</button>\` : '<span class="pill n">none</span>'}</td>
-        <td>\${h.enabled === false ? '<span class="pill no">disabled</span>' : '<span class="pill yes">enabled</span>'} <button data-act="toggle" data-id="\${k.id}">\${h.enabled === false ? "enable" : "disable"}</button></td>
-        <td class="mono">\${N(h.priority ?? k.priority, 100)}</td>
-        <td class="mono">\${cap == null || cap === "" ? "uncapped" : mins(used) + " / " + mins(cap)}\${cap != null && cap !== "" && used >= N(cap) ? ' <span class="pill warn">capped</span>' : ""}</td>
-        <td class="mono">\${N(h.recent_failures) ? \`<span class="pill fail">\${h.recent_failures}</span>\` : '<span class="pill ok">0</span>'}</td>
-        <td class="muted">\${esc(h.last_error || "—")}\${h.last_error_at ? \`<div class="muted">\${when(h.last_error_at)}</div>\` : ""}</td>
+        <td>\${cell(k, "fal", k.video_key_tail)}</td>
+        <td>\${cell(k, "elevenlabs", k.voice_key_tail)}</td>
+        <td style="white-space:nowrap">\${k.enabled === false ? '<span class="pill no">disabled</span>' : '<span class="pill yes">enabled</span>'} <button data-act="toggle" data-id="\${k.id}">\${k.enabled === false ? "enable" : "disable"}</button></td>
+        <td class="mono">\${N(k.priority, 100)}</td>
+        <td class="mono">\${cap == null ? "uncapped" : mins(used) + " / " + mins(cap)}\${cap != null && used >= N(cap) ? ' <span class="pill warn">capped</span>' : ""}</td>
+        <td class="mono">\${N(k.recent_failures) ? \`<span class="pill fail">\${k.recent_failures}</span>\` : '<span class="pill ok">0</span>'}</td>
+        <td class="muted">\${esc(k.last_error || "—")}\${k.last_error_at ? \`<div class="muted">\${when(k.last_error_at)}</div>\` : ""}</td>
         <td style="white-space:nowrap">
           <button data-act="edit" data-id="\${k.id}">Edit</button>
           <button data-act="del" data-id="\${k.id}" class="danger">Delete</button>
         </td></tr>\`;
-    }).join("") || '<tr><td colspan="9" class="muted">No keys in the pool — the gateway falls back to the FAL_KEY / ELEVENLABS_KEY env secrets.</td></tr>';
+    }).join("") || '<tr><td colspan="9" class="muted">The pool is empty, so every call falls back to the FAL_KEY / ELEVENLABS_KEY env secrets. Add a pair above and press Verify.</td></tr>';
 
     $("asKey").innerHTML = KEY_ROWS.map((k) => \`<option value="\${k.id}">\${esc(k.label || shortId(k.id))}</option>\`).join("");
     await Promise.all([loadKeyUsage(), loadAssignments()]);
+  }
+
+  function setChip(prefix, cls, text) {
+    const chip = $(prefix + "Chip"), dot = $(prefix + "Dot");
+    if (chip) { chip.className = "chip" + (cls ? " " + cls : ""); chip.textContent = text; }
+    if (dot) dot.className = "pdot" + (cls === "ok" ? " ok" : cls === "fail" ? " fail" : "");
+  }
+
+  async function runVerify(provider, key, keyId, ui) {
+    const name = provider === "fal" ? "fal.ai" : "ElevenLabs";
+    if (ui.prefix) setChip(ui.prefix, "busy", "checking");
+    ui.box.className = "presult show";
+    ui.box.textContent = "Asking " + name + "…";
+    let r;
+    try {
+      r = await api({ action: "test_key", provider, key: key || undefined, keyId: keyId || undefined });
+    } catch (err) {
+      ui.box.className = "presult show fail";
+      ui.box.textContent = err.message;
+      if (ui.prefix) setChip(ui.prefix, "fail", "error");
+      return;
+    }
+    ui.box.className = "presult show " + (r.verified ? "ok" : "fail");
+    ui.box.textContent = r.detail;
+    if (ui.prefix) setChip(ui.prefix, r.verified ? "ok" : "fail", r.verified ? "key accepted" : "key rejected");
   }
 
   async function loadKeyUsage() {
@@ -856,24 +951,21 @@ export const ADMIN_HTML = `<!doctype html>
       const on = inp.type === "password";
       inp.type = on ? "text" : "password";
       t.textContent = on ? "hide" : "show";
-      return;
-    }
-    const r = e.target.closest("button[data-reveal]");
-    if (r) {
-      const row = KEY_ROWS.find((k) => k.id === r.dataset.id);
-      const field = r.dataset.reveal === "fal" ? "fal_key" : "elevenlabs_key";
-      const span = document.querySelector(\`[data-secret="\${r.dataset.reveal}"][data-key="\${r.dataset.id}"]\`);
-      if (!row?.[field] || !span) return;
-      const shown = r.textContent === "hide";
-      span.textContent = shown ? mask(row[field]) : row[field];
-      r.textContent = shown ? "show" : "hide";
     }
   });
+
+  $("testFal").onclick = () => runVerify("fal", $("kFal").value.trim(), $("kId").value, { prefix: "vid", box: $("vidResult") });
+  $("testEleven").onclick = () => runVerify("elevenlabs", $("kEleven").value.trim(), $("kId").value, { prefix: "voice", box: $("voiceResult") });
+  // A typed key invalidates whatever the last check proved.
+  $("kFal").oninput = () => { setChip("vid", "", "not tested"); $("vidResult").className = "presult"; };
+  $("kEleven").oninput = () => { setChip("voice", "", "not tested"); $("voiceResult").className = "presult"; };
 
   function clearKeyForm() {
     ["kId", "kLabel", "kFal", "kEleven"].forEach((i) => $(i).value = "");
     $("kPriority").value = 100; $("kCap").value = "";
     $("kEnabled").checked = true; $("kDefault").checked = false;
+    setChip("vid", "", "not tested"); setChip("voice", "", "not tested");
+    $("vidResult").className = "presult"; $("voiceResult").className = "presult";
     msg("keyMsg", "");
   }
 
@@ -895,7 +987,7 @@ export const ADMIN_HTML = `<!doctype html>
     if (!id && !fal && !eleven) return msg("keyMsg", "Enter at least one key.");
     const res = id ? await sb.from("gateway_keys").update(row).eq("id", id) : await sb.from("gateway_keys").insert(row);
     if (res.error) return msg("keyMsg", res.error.message);
-    msg("keyMsg", "Saved.", "ok");
+    msg("keyMsg", "Saved to the pool. Press Verify on each provider to confirm the gateway can actually use it.", "ok");
     clearKeyForm();
     await loadKeys();
   };
@@ -1058,9 +1150,17 @@ export const ADMIN_HTML = `<!doctype html>
       await loadRates();
       return;
     }
+    if (b.dataset.act === "verify") {
+      const box = document.querySelector(\`[data-vres="\${b.dataset.provider}:\${id}"]\`);
+      if (!box) return;
+      b.disabled = true;
+      await runVerify(b.dataset.provider, "", id, { box });
+      b.disabled = false;
+      return;
+    }
     if (b.dataset.act === "toggle") {
-      const h = HEALTH_ROWS.find((x) => x.id === id);
-      const { error } = await sb.from("gateway_keys").update({ enabled: !(h?.enabled !== false) }).eq("id", id);
+      const row = KEY_ROWS.find((k) => k.id === id);
+      const { error } = await sb.from("gateway_keys").update({ enabled: !(row?.enabled !== false) }).eq("id", id);
       if (error) return msg("keyMsg", error.message);
       await loadKeys();
       return;
@@ -1068,14 +1168,14 @@ export const ADMIN_HTML = `<!doctype html>
     if (b.dataset.act === "edit") {
       const row = KEY_ROWS.find((k) => k.id === id);
       if (!row) return;
-      const h = HEALTH_ROWS.find((x) => x.id === id) || {};
       $("kId").value = row.id; $("kLabel").value = row.label || "";
-      $("kFal").value = row.fal_key || ""; $("kEleven").value = row.elevenlabs_key || "";
-      $("kPriority").value = N(h.priority ?? row.priority, 100);
-      $("kCap").value = (h.daily_minute_cap ?? row.daily_minute_cap) ?? "";
-      $("kEnabled").checked = h.enabled !== false;
+      $("kFal").value = ""; $("kEleven").value = "";
+      $("kPriority").value = N(row.priority, 100);
+      $("kCap").value = row.daily_minute_cap ?? "";
+      $("kEnabled").checked = row.enabled !== false;
       $("kDefault").checked = !!row.is_default;
-      msg("keyMsg", \`Editing “\${row.label || shortId(id)}”. Clear a field to drop that half of the pair.\`, "ok");
+      setChip("vid", "", "not tested"); setChip("voice", "", "not tested");
+      msg("keyMsg", \`Editing “\${row.label || shortId(id)}”. Both stored keys stay exactly as they are unless you paste over them.\`, "ok");
       window.scrollTo({ top: 0, behavior: "smooth" });
       return;
     }

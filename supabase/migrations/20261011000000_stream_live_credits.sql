@@ -870,10 +870,26 @@ from public.usage_sessions u
 join public.profiles p on p.id = u.user_id
 where u.ended_at is null;
 
+-- Admins never need the raw secret in their browser to manage the pool, so the
+-- view carries a last-4 tail (like a card statement) instead. The helper is pure
+-- string work and holds nothing secret; the view runs as the calling admin, so it
+-- has to stay executable by authenticated.
+create or replace function public.sl_key_tail(secret text)
+returns text
+language sql
+immutable
+as $$
+  select case when secret is null or secret = '' then null
+              when length(secret) <= 4 then '****'
+              else '••••' || right(secret, 4) end;
+$$;
+
 create or replace view public.admin_key_health
 with (security_invoker = true) as
 select k.id, k.label, k.enabled, k.priority, k.daily_minute_cap, k.minutes_today, k.usage_day,
-       k.last_error, k.last_error_at,
+       k.last_error, k.last_error_at, k.is_default, k.created_at,
+       public.sl_key_tail(nullif(k.fal_key, ''))        as video_key_tail,
+       public.sl_key_tail(nullif(k.elevenlabs_key, '')) as voice_key_tail,
        coalesce(l.fails, 0) as recent_failures
 from public.gateway_keys k
 left join (

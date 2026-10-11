@@ -7,13 +7,15 @@
 //   grant         { userId, modality, minutes, reason, unlimited? }
 //   end_session   { sessionId }
 //   resolve       { requestId, approve, note?, minutes? }
-//   reap          { userId? }
+//   reap          { userId? }                 -- close expired leases
 //   signout       { userId }                 -- kill every refresh token
+//   test_key      { provider, key? , keyId? } -- prove a key works, no inference billed
 // Resp: { ok:true, ...result } or { error, status }
 import { preflight, json, fail } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { adminClient } from "../_shared/db.ts";
 import { grantCredits, reapSessions, resolveRequest, signOutEverywhere, updateLease, type Modality } from "../_shared/credits.ts";
+import { verifyKey, type Provider } from "../_shared/verify.ts";
 
 const MODALITIES = ["video", "audio", "video_audio"];
 
@@ -82,6 +84,34 @@ Deno.serve(async (req: Request) => {
         // Also close anything still leasing so the minute counter stops.
         const closed = await reapSessions(target);
         return json({ ok: true, sessions, closed });
+      }
+
+      case "test_key": {
+        const provider = body.provider === "elevenlabs" ? "elevenlabs" : body.provider === "fal" ? "fal" : null;
+        if (!provider) return fail("provider must be fal or elevenlabs");
+        const keyId = typeof body.keyId === "string" && body.keyId ? body.keyId : null;
+        let secret = typeof body.key === "string" ? body.key : "";
+        if (!secret.trim() && keyId) {
+          const column = provider === "fal" ? "fal_key" : "elevenlabs_key";
+          const { data } = await adminClient().from("gateway_keys").select(column).eq("id", keyId).maybeSingle();
+          secret = String((data as Record<string, string | null> | null)?.[column] ?? "");
+        }
+        if (!secret.trim()) return fail("Nothing to test — paste a key, or save it first and verify the stored copy.");
+        const res = await verifyKey(provider as Provider, secret);
+        // Logged, but deliberately not through sl_report_key_use: a manual check
+        // says nothing about this key's daily burn and must not clear a real
+        // last_error that a live call recorded.
+        if (keyId) {
+          await adminClient().from("key_usage_log").insert({
+            key_id: keyId,
+            provider,
+            user_id: null,
+            outcome: res.ok ? "ok" : "fail",
+            status: res.status,
+            detail: `verify: ${res.detail}`,
+          });
+        }
+        return json({ ok: true, provider, verified: res.ok, status: res.status, detail: res.detail });
       }
 
       default:
