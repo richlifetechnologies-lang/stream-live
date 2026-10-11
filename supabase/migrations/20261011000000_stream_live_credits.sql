@@ -743,7 +743,7 @@ begin
   select jsonb_build_object(
     'ok', true,
     'user_id', p_user,
-    'status', coalesce((select s.status from public.subscriptions s where s.user_id = p_user), 'none'),
+    'status', coalesce((select s.status::text from public.subscriptions s where s.user_id = p_user), 'none'),
     'plan_id', (select s.plan_id from public.subscriptions s where s.user_id = p_user),
     'modalities', jsonb_build_object(
       'video',       coalesce((select s.video_enabled       from public.subscriptions s where s.user_id = p_user), false),
