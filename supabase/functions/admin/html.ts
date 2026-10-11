@@ -5,7 +5,7 @@ export const ADMIN_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Stream Studio — Admin</title>
+<title>Stream Live — Admin</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   :root { color-scheme: dark; }
@@ -13,25 +13,27 @@ export const ADMIN_HTML = `<!doctype html>
   body { margin: 0; font-family: ui-sans-serif, system-ui, "Segoe UI", sans-serif; background: #0b0f14; color: #e6f6fb; }
   header { display: flex; align-items: center; justify-content: space-between; padding: 14px 20px; border-bottom: 1px solid #1d2733; background: #0e141b; position: sticky; top: 0; z-index: 5; }
   h1 { font-size: 15px; margin: 0; letter-spacing: .08em; text-transform: uppercase; color: #35e0e6; }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px; }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 20px; }
   .card { background: #0e141b; border: 1px solid #1d2733; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
   label { display: block; font-size: 12px; color: #8aa0b2; margin: 10px 0 4px; }
-  input, select, button { font: inherit; }
-  input, select { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid #24303d; background: #0b0f14; color: #e6f6fb; }
+  input, select, button, textarea { font: inherit; }
+  input, select, textarea { width: 100%; padding: 9px 11px; border-radius: 8px; border: 1px solid #24303d; background: #0b0f14; color: #e6f6fb; }
+  textarea { min-height: 64px; resize: vertical; }
   input[type="checkbox"] { width: auto; }
-  input[type="range"] { padding: 0; }
   button { cursor: pointer; border-radius: 8px; border: 1px solid #24303d; background: #16202b; color: #e6f6fb; padding: 8px 14px; }
   button.primary { background: #0e7f86; border-color: #12a5ad; color: #04121a; font-weight: 700; }
   button.danger { background: #3a1620; border-color: #6b2233; color: #ffb3c1; }
   button:disabled { opacity: .5; cursor: not-allowed; }
+  .btns { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btns button { padding: 5px 10px; font-size: 12px; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #1a2430; vertical-align: middle; }
   th { color: #8aa0b2; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
   td input, td select { padding: 6px 8px; }
   .pill { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 700; }
-  .pill.active, .pill.trialing, .pill.yes { background: #0d3320; color: #4ade80; }
-  .pill.past_due { background: #3a2d0d; color: #facc15; }
-  .pill.canceled, .pill.expired, .pill.no { background: #3a1620; color: #fb7185; }
+  .pill.active, .pill.ok, .pill.yes, .pill.approved { background: #0d3320; color: #4ade80; }
+  .pill.pending, .pill.past_due, .pill.warn { background: #3a2d0d; color: #facc15; }
+  .pill.canceled, .pill.expired, .pill.no, .pill.rejected, .pill.fail, .pill.none { background: #3a1620; color: #fb7185; }
   .pill.n { background: #1a2430; color: #6b8296; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; }
   .row > div { flex: 1; min-width: 150px; }
@@ -51,16 +53,15 @@ export const ADMIN_HTML = `<!doctype html>
   .stat { background: #0b0f14; border: 1px solid #1d2733; border-radius: 10px; padding: 12px; }
   .stat .v { font-size: 18px; font-weight: 800; font-family: ui-monospace, monospace; }
   .stat .l { font-size: 11px; color: #8aa0b2; }
-  .verdict { padding: 14px; border-radius: 12px; border: 1px solid #24303d; }
-  .verdict.profit { background: #0d3320; border-color: #166534; }
-  .verdict.loss { background: #3a1620; border-color: #6b2233; }
-  .verdict.be { background: #3a2d0d; border-color: #854d0e; }
   .mono { font-family: ui-monospace, monospace; }
+  .secret { display: flex; gap: 6px; align-items: center; }
+  .secret input { flex: 1; }
+  .secret button { padding: 6px 9px; font-size: 11px; }
 </style>
 </head>
 <body>
 <header>
-  <h1>Stream Studio · Admin</h1>
+  <h1>Stream Live · Admin</h1>
   <div id="who" class="muted"></div>
 </header>
 
@@ -68,7 +69,7 @@ export const ADMIN_HTML = `<!doctype html>
   <!-- Sign in -->
   <div id="authCard" class="card">
     <h2 style="font-size:14px;margin:0 0 6px">Admin sign in</h2>
-    <p class="muted" style="margin:0 0 12px">Sign in with the Supabase account whose profile has <code>is_admin = true</code>. Access is account-based — there are no license keys.</p>
+    <p class="muted" style="margin:0 0 12px">Sign in with the Supabase account whose profile has <code>is_admin = true</code>. Everything here is gated on that flag; nothing here is visible to a regular user.</p>
     <label>Email</label>
     <input id="email" type="email" autocomplete="username" placeholder="you@yourdomain.com" />
     <label>Password</label>
@@ -80,222 +81,347 @@ export const ADMIN_HTML = `<!doctype html>
   <!-- Dashboard -->
   <div id="dash" class="hidden">
     <div class="tabs">
-      <button data-tab="subs" class="on">Users</button>
-      <button data-tab="plans">Plans &amp; Pricing</button>
-      <button data-tab="keys">API Key Vault</button>
-      <button data-tab="pricing">Pricing &amp; Profit</button>
-      <button data-tab="timer">Timer &amp; Burn Rates</button>
+      <button data-tab="accounts" class="on">Accounts</button>
+      <button data-tab="topups">Top-ups</button>
+      <button data-tab="keys">Key pool</button>
+      <button data-tab="burn">Burn rates</button>
+      <button data-tab="sessions">Live sessions</button>
+      <button data-tab="gateway">Gateway</button>
+      <button data-tab="plans">Plans</button>
       <button id="signOut" style="margin-left:auto">Sign out</button>
     </div>
 
-    <!-- ══ TAB: USERS / SUBSCRIPTIONS ══════════════════════════════════════ -->
-    <section id="tab-subs">
-      <div class="card">
-        <h2 style="font-size:14px;margin:0 0 4px">Grant / edit an account</h2>
-        <p class="muted" style="margin:0 0 12px">The user must have signed up once (so a profile exists). The <b>plan</b> sets what they can do (audio-only vs video+audio). The <b>minute wallet</b> is what you allocate — they use exactly that until it reaches zero.</p>
-        <div class="row">
-          <div><label>User email</label><input id="gEmail" type="email" placeholder="customer@domain.com" /></div>
-          <div><label>Plan</label><select id="gPlan"></select></div>
-          <div><label>Status</label>
-            <select id="gStatus">
-              <option value="active">active</option>
-              <option value="trialing">trialing</option>
-              <option value="past_due">past_due</option>
-              <option value="canceled">canceled</option>
-              <option value="expired">expired</option>
-            </select>
-          </div>
-          <div><label>Period end (optional)</label><input id="gEnd" type="date" /></div>
-        </div>
-        <div class="row" style="margin-top:12px">
-          <div><label>Allocated minutes (wallet)</label><input id="gAlloc" type="number" min="0" placeholder="blank = plan default" /></div>
-          <div><label>Minutes used</label><input id="gUsed" type="number" min="0" value="0" /></div>
-          <div><label>API key pair (optional)</label><select id="gKey"></select></div>
-        </div>
-        <div class="row" style="margin-top:12px;align-items:center">
-          <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gUnlimited" /> Unlimited minutes</label></div>
-          <div style="flex:0 0 auto"><button id="grant" class="primary">Save account</button></div>
-        </div>
-        <div id="grantMsg"></div>
-        <p class="muted" style="margin-top:10px">Manual grants use <code>billing_provider = 'manual'</code>. Leave the key pair on <b>Global default</b> unless this user needs their own keys.</p>
-      </div>
-
+    <!-- ══ TAB: ACCOUNTS ═══════════════════════════════════════════════════ -->
+    <section id="tab-accounts">
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
           <h2 style="font-size:14px;margin:0">Accounts</h2>
-          <div style="flex:0 1 320px"><input id="subSearch" placeholder="Search email / plan / status…" /></div>
-          <button id="refresh">Refresh</button>
+          <div style="flex:1 1 260px"><input id="acctSearch" placeholder="Search by email…" /></div>
+          <button id="acctSearchBtn">Search</button>
+          <button id="acctRefresh">Refresh</button>
         </div>
-        <div style="overflow:auto;margin-top:12px">
-          <table id="subsTable">
-            <thead><tr><th>User</th><th>Plan</th><th>Can use</th><th>Status</th><th>Wallet</th><th>Period end</th><th>Key</th><th>Devices</th><th></th></tr></thead>
+        <p class="muted" style="margin:8px 0 12px">Minutes sit in three separate buckets — video, audio and video + audio — and never expire. An account can be full in one bucket and empty in another. Only <span class="pill active">active</span> accounts can place calls.</p>
+        <div style="overflow:auto">
+          <table id="acctTable">
+            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video</th><th>Audio</th><th>Video + Audio</th><th>Lifetime</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
+        <div id="acctMsg"></div>
       </div>
 
-      <div class="card">
-        <h2 style="font-size:14px;margin:0 0 12px">Recent usage</h2>
-        <div style="overflow:auto">
-          <table id="usageTable">
-            <thead><tr><th>User</th><th>Tab</th><th>Started</th><th>Ended</th><th>Real min</th></tr></thead>
-            <tbody></tbody>
-          </table>
+      <div id="acctDetail" class="hidden">
+        <div class="card">
+          <div class="row" style="justify-content:space-between;align-items:center">
+            <h2 style="font-size:14px;margin:0" id="detTitle">Account</h2>
+            <div class="btns">
+              <button id="detReload">Reload</button>
+              <button id="detLedgerBtn">Recent ledger</button>
+              <button id="detReap">Reap expired leases</button>
+              <button id="detSignout" class="danger">Sign out everywhere</button>
+            </div>
+          </div>
+          <div id="detSummary" class="muted" style="margin-top:8px"></div>
+          <div id="detMsg"></div>
+
+          <div class="grid2" style="margin-top:14px">
+            <div>
+              <label>Modality switches</label>
+              <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
+                <label class="feat" style="margin:0 0 8px"><input type="checkbox" id="swVideo" /> Video Call</label>
+                <label class="feat" style="margin:0 0 8px"><input type="checkbox" id="swAudio" /> Audio Call</label>
+                <label class="feat" style="margin:0"><input type="checkbox" id="swBoth" /> Video + Audio</label>
+              </div>
+            </div>
+            <div>
+              <label>Max concurrent sessions (devices calling at once)</label>
+              <input id="detMaxConc" type="number" min="1" step="1" />
+              <div class="muted" style="margin-top:6px">Concurrent devices are expected — each one holds its own lease.</div>
+            </div>
+          </div>
+          <div class="btns" style="margin-top:12px"><button id="detSaveSwitches" class="primary">Save switches</button></div>
+
+          <div style="overflow:auto;margin-top:16px">
+            <table id="bucketTable">
+              <thead><tr><th>Bucket</th><th>Balance</th><th>Burn rate</th><th>Unlimited</th><th>Credited</th><th>Spent</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+
+          <div id="noSub" class="hidden" style="margin-top:14px;border:1px dashed #6b2233;border-radius:10px;padding:12px">
+            <div class="muted">This account has no subscription row yet, so the gateway refuses it with <code>no_subscription</code>. Pick a plan and create one.</div>
+            <div class="row" style="margin-top:8px;align-items:center">
+              <div><label style="margin-top:0">Plan</label><select id="detPlan"></select></div>
+              <div style="flex:0 0 auto"><button id="detCreateSub">Create subscription</button></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size:14px;margin:0 0 4px">Grant / deduct minutes</h2>
+          <p class="muted" style="margin:0 0 12px">The user paid you outside the software; you credit the bucket. Deducting is a negative grant (corrections, refunds reversed). Both write an append-only ledger row and go through <code>admin-api</code>. A reason is required.</p>
+          <div class="row">
+            <div><label>Bucket</label><select id="gModality"></select></div>
+            <div><label>Minutes</label><input id="gMinutes" type="number" min="0" step="0.5" placeholder="60" /></div>
+            <div style="flex:2 1 260px"><label>Reason (required — audit trail)</label><input id="gReason" placeholder="e.g. Interac e-transfer ref 8842" /></div>
+          </div>
+          <div class="row" style="margin-top:12px;align-items:center">
+            <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gUnlimited" /> Set unlimited</label></div>
+            <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gClearUnlimited" /> Clear unlimited</label></div>
+            <div style="flex:0 0 auto"><button id="grantBtn" class="primary">Grant</button></div>
+            <div style="flex:0 0 auto"><button id="deductBtn" class="danger">Deduct</button></div>
+          </div>
+          <div id="grantMsg"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size:14px;margin:0 0 4px">Bound devices</h2>
+          <p class="muted" style="margin:0 0 12px">A device binds itself the first time a call starts on it. Revoking stops that machine from calling; signing out everywhere also ends any lease it holds.</p>
+          <div style="overflow:auto">
+            <table id="deviceTable">
+              <thead><tr><th>Device</th><th>Label</th><th>Last seen</th><th>Status</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div id="deviceMsg"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size:14px;margin:0 0 12px">Recent ledger rows</h2>
+          <div style="overflow:auto">
+            <table id="ledgerTable">
+              <thead><tr><th>When</th><th>Bucket</th><th>Kind</th><th style="text-align:right">Delta</th><th style="text-align:right">After</th><th>Reason</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
         </div>
       </div>
     </section>
 
-    <!-- ══ TAB: PLANS & PRICING ════════════════════════════════════════════ -->
-    <section id="tab-plans" class="hidden">
+    <!-- ══ TAB: TOP-UP REQUESTS ════════════════════════════════════════════ -->
+    <section id="tab-topups" class="hidden">
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Plans &amp; Pricing</h2>
-          <button id="addPlan">+ New plan</button>
+          <h2 style="font-size:14px;margin:0">Top-up requests</h2>
+          <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="onlyPending" checked /> Pending only</label></div>
+          <button id="reqRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:6px 0 12px">Set the price, the default monthly minutes (0 = unlimited), device limit, and which features each plan includes. A plan's features decide capability: <code>voice</code> only = audio calls; <code>video + voice</code> = video &amp; audio calls. Price is a label — billing is handled offline by the administrator.</p>
+        <p class="muted" style="margin:6px 0 12px">Users file these after paying you out-of-band. Approving credits the bucket for the amount you set here — it can differ from what was requested. Rejecting keeps the note so the user sees why.</p>
         <div style="overflow:auto">
-          <table id="plansTable">
-            <thead><tr><th>Id</th><th>Name</th><th>Price</th><th>Minutes</th><th>Devices</th><th>Features</th><th>Active</th><th></th></tr></thead>
+          <table id="reqTable">
+            <thead><tr><th>When</th><th>User</th><th>Bucket</th><th style="text-align:right">Requested</th><th style="text-align:right">Grant</th><th>Payment</th><th>Note</th><th>Status</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
-        <div id="plansMsg"></div>
+        <div id="reqMsg"></div>
       </div>
     </section>
 
-    <!-- ══ TAB: API KEY VAULT ══════════════════════════════════════════════ -->
+    <!-- ══ TAB: KEY POOL ═══════════════════════════════════════════════════ -->
     <section id="tab-keys" class="hidden">
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px">Add / edit a key pair</h2>
-        <p class="muted" style="margin:0 0 12px">Store your <b>video key</b> (fal.ai) and <b>voice key</b> (ElevenLabs). Keep several pairs on file and mark one as the <b>global default</b> (the master fallback). Link a specific pair to a user on the Users tab. Keys are readable only by admins and the server; regular users can never read them.</p>
+        <p class="muted" style="margin:0 0 12px">One row carries a fal.ai (video) key and an ElevenLabs (voice) key. The gateway tries assigned keys first, then every enabled key by ascending <b>priority</b>, skipping any that hit its daily minute cap — then the env secret. Regular users never see any of this.</p>
         <input type="hidden" id="kId" />
         <div class="row">
           <div><label>Label</label><input id="kLabel" placeholder="e.g. Primary keys" /></div>
-          <div><label>Video key (fal.ai)</label><input id="kFal" type="password" autocomplete="off" placeholder="blank = keep unchanged when editing" /></div>
-          <div><label>Voice key (ElevenLabs)</label><input id="kEleven" type="password" autocomplete="off" placeholder="blank = keep unchanged when editing" /></div>
+          <div><label>fal.ai key</label><div class="secret"><input id="kFal" type="password" autocomplete="off" placeholder="blank = keep current" /><button type="button" data-show="kFal">show</button></div></div>
+          <div><label>ElevenLabs key</label><div class="secret"><input id="kEleven" type="password" autocomplete="off" placeholder="blank = keep current" /><button type="button" data-show="kEleven">show</button></div></div>
         </div>
         <div class="row" style="margin-top:12px">
-          <div><label>Notes</label><input id="kNotes" placeholder="optional" /></div>
+          <div><label>Priority (lower tried first)</label><input id="kPriority" type="number" min="0" step="1" value="100" /></div>
+          <div><label>Daily minute cap</label><input id="kCap" type="number" min="0" step="1" placeholder="blank = uncapped" /></div>
+          <div style="flex:0 0 auto;display:flex;align-items:center">
+            <label class="feat" style="margin:0"><input type="checkbox" id="kEnabled" checked /> enabled</label>
+            <label class="feat" style="margin:0 0 0 16px"><input type="checkbox" id="kDefault" /> global default</label>
+          </div>
         </div>
-        <div class="row" style="margin-top:12px;align-items:center">
-          <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="kDefault" /> Make this the global default</label></div>
-          <div style="flex:0 0 auto"><button id="saveKey" class="primary">Save key pair</button></div>
-          <div style="flex:0 0 auto"><button id="clearKeyForm">Clear form</button></div>
+        <div class="btns" style="margin-top:12px">
+          <button id="saveKey" class="primary">Save key pair</button>
+          <button id="clearKeyForm">Clear form</button>
         </div>
         <div id="keyMsg"></div>
       </div>
 
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Saved key pairs</h2>
+          <h2 style="font-size:14px;margin:0">Key pool health</h2>
           <button id="refreshKeys">Refresh</button>
         </div>
         <div style="overflow:auto;margin-top:12px">
           <table id="keysTable">
-            <thead><tr><th>Label</th><th>Video</th><th>Voice</th><th>Default</th><th>Notes</th><th></th></tr></thead>
+            <thead><tr><th>Label</th><th>fal.ai</th><th>ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Recent failures</th><th>Last error</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
-        <p class="muted" style="margin-top:10px">If a user has no linked pair and there's no default, the server falls back to the <code>FAL_KEY</code> / <code>ELEVENLABS_KEY</code> environment secrets.</p>
+        <p class="muted" style="margin-top:10px">Today's burn resets on the UTC day boundary; a stale counter is ignored at pick time so a key is never locked out by an old row.</p>
       </div>
-    </section>
 
-    <!-- ══ TAB: PRICING & PROFIT ═══════════════════════════════════════════ -->
-    <section id="tab-pricing" class="hidden">
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Verified API base costs &amp; profit margin</h2>
-          <button id="resetCosts">Reset to verified defaults</button>
+          <h2 style="font-size:14px;margin:0">Per-account key assignment</h2>
         </div>
-        <p class="muted" style="margin:6px 0 12px">These anchor billing and the profit tools below. Video ≈ $0.0400/sec ($2.40/min), voice-clone ≈ $0.0025/sec ($0.15/min), natural audio ≈ $0.0001/sec.</p>
-        <div class="grid3">
-          <div><label>Video engine $/sec</label><input id="cVideo" type="number" step="0.0001" min="0" /></div>
-          <div><label>Voice-clone $/sec</label><input id="cVoice" type="number" step="0.0001" min="0" /></div>
-          <div><label>Natural audio $/sec</label><input id="cAudio" type="number" step="0.00001" min="0" /></div>
-          <div><label>Target profit margin %</label><input id="cMargin" type="number" step="1" min="0" /></div>
-          <div><label>Safety floor margin %</label><input id="cFloor" type="number" step="1" min="0" /></div>
+        <p class="muted" style="margin:6px 0 12px">Assign one key per provider to one account (e.g. a customer who bought their own ElevenLabs voice). Assigned keys are tried first for that account; everything else still fails over to the pool.</p>
+        <div class="row">
+          <div><label>User email</label><input id="asEmail" type="email" placeholder="customer@domain.com" /></div>
+          <div><label>Provider</label><select id="asProvider"><option value="fal">fal (video)</option><option value="elevenlabs">elevenlabs (voice)</option></select></div>
+          <div><label>Key</label><select id="asKey"></select></div>
+          <div style="flex:0 0 auto"><button id="addAssignment">Assign</button></div>
         </div>
-        <div style="margin-top:12px"><button id="saveCosts" class="primary">Save pricing config</button></div>
-        <div id="costMsg"></div>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size:14px;margin:0 0 12px">Live cost &amp; profit by call mode</h2>
-        <div style="overflow:auto">
-          <table id="modeTable">
-            <thead><tr><th>Mode &amp; voice</th><th style="text-align:right">Raw cost</th><th style="text-align:right">Customer price</th><th style="text-align:right">Your profit</th><th style="text-align:right">Margin</th></tr></thead>
+        <div id="assignMsg"></div>
+        <div style="overflow:auto;margin-top:12px">
+          <table id="assignTable">
+            <thead><tr><th>User</th><th>Provider</th><th>Key</th><th>Since</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
       </div>
 
       <div class="card">
-        <h2 style="font-size:14px;margin:0 0 12px">Session profit simulator</h2>
-        <div class="grid3">
-          <div><label>Mode</label>
-            <select id="simMode">
-              <option value="video_audio">Video + Audio</option>
-              <option value="audio_only">Audio only</option>
-              <option value="video_only">Video only</option>
-            </select>
-          </div>
-          <div><label>Voice source</label>
-            <select id="simVoice"><option value="cloned">Cloned (ElevenLabs)</option><option value="natural">Natural mic</option></select>
-          </div>
-          <div><label>Duration: <span id="simMinLbl" class="mono">30</span> min</label>
-            <input id="simMin" type="range" min="5" max="180" step="5" value="30" />
-          </div>
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Key usage — last 24 hours</h2>
+          <button id="refreshUsage">Refresh</button>
         </div>
-        <div class="grid4" style="margin-top:14px" id="simCards"></div>
+        <p class="muted" style="margin:6px 0 12px">Every upstream attempt lands here, so a run of <span class="pill fail">fail</span> followed by <span class="pill ok">ok</span> on the same user is the failover history.</p>
+        <div style="overflow:auto">
+          <table id="usageTable">
+            <thead><tr><th>When</th><th>Key</th><th>Provider</th><th>User</th><th>Outcome</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
       </div>
     </section>
 
-    <!-- ══ TAB: TIMER & BURN RATES ═════════════════════════════════════════ -->
-    <section id="tab-timer" class="hidden">
+    <!-- ══ TAB: BURN RATES ═════════════════════════════════════════════════ -->
+    <section id="tab-burn" class="hidden">
       <div class="card">
-        <h2 style="font-size:14px;margin:0 0 4px">Minute burn rates</h2>
-        <p class="muted" style="margin:0 0 12px">How fast the wallet drains per call mode. 1 real minute = N wallet minutes. Costly modes burn faster; audio-only conserves minutes. Applied server-side by <code>usage-heartbeat</code>.</p>
-        <div class="grid3">
-          <div><label>Video + cloned voice: <span id="lblVV" class="mono">1.5</span>x</label><input id="tVV" type="range" min="0.5" max="4" step="0.25" /></div>
-          <div><label>Video only (natural mic): <span id="lblVO" class="mono">1.0</span>x</label><input id="tVO" type="range" min="0.5" max="3" step="0.25" /></div>
-          <div><label>Audio only: <span id="lblAO" class="mono">0.5</span>x</label><input id="tAO" type="range" min="0.25" max="3" step="0.25" /></div>
-          <div><label>Low-minutes warning</label><input id="tWarn" type="number" min="1" max="60" /></div>
-          <div style="display:flex;align-items:center"><label class="feat" style="margin:0"><input type="checkbox" id="tAuto" /> Auto-terminate at zero</label></div>
-        </div>
-        <div style="margin-top:12px"><button id="saveTimer" class="primary">Save timer rules</button></div>
-        <div id="timerMsg"></div>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size:14px;margin:0 0 12px">Rule profit &amp; loss tester</h2>
-        <div class="grid3">
-          <div><label>Wallet minutes</label>
-            <select id="rMin">
-              <option value="15">15 min</option><option value="30">30 min</option>
-              <option value="60" selected>60 min</option><option value="120">120 min</option>
-              <option value="180">180 min</option><option value="300">300 min</option>
-            </select>
-          </div>
-          <div><label>Call mode</label>
-            <select id="rMode">
-              <option value="video_audio">Video + Audio (cloned voice)</option>
-              <option value="audio_only">Audio only</option>
-              <option value="video_only">Video only (natural mic)</option>
-            </select>
-          </div>
-          <div><label>Retail price to charge ($)</label><input id="rPrice" type="number" min="0" step="5" value="180" /></div>
-        </div>
-        <div id="ruleVerdict" style="margin-top:14px"></div>
-      </div>
-
-      <div class="card">
-        <h2 style="font-size:14px;margin:0 0 12px">Minute-package pricing matrix</h2>
+        <h2 style="font-size:14px;margin:0 0 4px">Currently effective multiplier</h2>
+        <p class="muted" style="margin:0 0 12px">One real minute of calling costs <b>N</b> credit minutes from that bucket, so a 60-minute grant buys 60 real minutes at 1x and 40 at 1.5x.</p>
         <div style="overflow:auto">
-          <table id="matrixTable">
-            <thead><tr><th>Package</th><th>Burn rate</th><th>Real time</th><th>API cost</th><th>Break-even</th><th>Recommended</th><th style="text-align:right">Net profit</th></tr></thead>
+          <table id="currentRates">
+            <thead><tr><th>Bucket</th><th>Multiplier</th><th>1 real minute costs</th><th>Effective from</th><th>Note</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px">Post a new rate</h2>
+        <p class="muted" style="margin:0 0 12px">Rates are versioned history: never edit a rate that already ran, post a new row. A lease in flight keeps the multiplier it started with.</p>
+        <div class="row">
+          <div><label>Bucket</label><select id="brModality"><option value="video">Video Call</option><option value="audio">Audio Call</option><option value="video_audio">Video + Audio</option></select></div>
+          <div><label>Multiplier</label><input id="brMult" type="number" min="0.05" step="0.05" value="1" /></div>
+          <div><label>Effective from</label><input id="brFrom" type="datetime-local" /></div>
+          <div style="flex:2 1 240px"><label>Note</label><input id="brNote" placeholder="e.g. ElevenLabs price rise" /></div>
+        </div>
+        <div class="btns" style="margin-top:12px"><button id="saveRate" class="primary">Insert new rate</button></div>
+        <div id="rateMsg"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Rate history</h2>
+          <button id="rateRefresh">Refresh</button>
+        </div>
+        <div style="overflow:auto;margin-top:12px">
+          <table id="ratesTable">
+            <thead><tr><th>Bucket</th><th>Multiplier</th><th>Effective from</th><th>Retired</th><th>Note</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TAB: LIVE SESSIONS ══════════════════════════════════════════════ -->
+    <section id="tab-sessions" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Open leases</h2>
+          <button id="reapAll" class="danger">Reap expired leases (all accounts)</button>
+          <button id="sessRefresh">Refresh</button>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">A call pre-debits one chunk of wallet minutes and has to heartbeat before its lease expires. Force-ending one settles what was actually used and refunds the rest, so nothing is double-billed. This is how you stop a runaway meter.</p>
+        <div style="overflow:auto">
+          <table id="sessTable">
+            <thead><tr><th>User</th><th>Tab</th><th>Bucket</th><th>Device</th><th>Started</th><th>Lease window</th><th style="text-align:right">Real min</th><th style="text-align:right">Billed min</th><th style="text-align:right">Prepaid</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="sessMsg"></div>
+      </div>
+    </section>
+
+    <!-- ══ TAB: GATEWAY ════════════════════════════════════════════════════ -->
+    <section id="tab-gateway" class="hidden">
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px">Gateway switches</h2>
+        <p class="muted" style="margin:0 0 12px">Single config row the desktop app and the gateway read on every call.</p>
+        <div class="grid2">
+          <div>
+            <label>Minimum supported version (kill switch)</label>
+            <input id="cfgMin" placeholder="1.0.0" />
+            <div class="muted" style="margin-top:6px">Desktop builds below this are refused with <code>update_required</code>. Raise it to force an upgrade.</div>
+          </div>
+          <div>
+            <label>Latest version offered</label>
+            <input id="cfgLatest" placeholder="1.0.0" />
+          </div>
+          <div>
+            <label>Lease chunk minutes (prepaid per heartbeat window)</label>
+            <input id="cfgChunk" type="number" min="1" step="0.5" />
+          </div>
+          <div>
+            <label>Lease TTL seconds (heartbeat deadline)</label>
+            <input id="cfgTtl" type="number" min="15" step="5" />
+          </div>
+        </div>
+        <div class="grid2" style="margin-top:12px">
+          <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
+            <label class="feat" style="margin:0"><input type="checkbox" id="cfgSignup" /> Self-signup enabled</label>
+            <div class="muted" style="margin-top:6px">Off = new accounts are refused at the database, existing ones keep working.</div>
+          </div>
+          <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
+            <label class="feat" style="margin:0"><input type="checkbox" id="cfgMaint" /> Maintenance mode</label>
+            <div class="muted" style="margin-top:6px">Blocks every new call while on.</div>
+          </div>
+        </div>
+        <label>Maintenance message</label>
+        <textarea id="cfgMaintMsg" placeholder="Shown to users while maintenance mode is on"></textarea>
+        <div class="btns" style="margin-top:12px"><button id="cfgSave" class="primary">Save gateway config</button></div>
+        <div id="cfgMsg"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Pool usage</h2>
+          <button id="poolRefresh">Refresh</button>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">Lifetime minutes across every bucket — granted versus actually burned.</p>
+        <div class="grid4" id="poolCards"></div>
+        <div style="overflow:auto;margin-top:14px">
+          <table id="poolTable">
+            <thead><tr><th>Bucket</th><th style="text-align:right">Outstanding</th><th style="text-align:right">Credited</th><th style="text-align:right">Spent</th><th>Accounts</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TAB: PLANS ══════════════════════════════════════════════════════ -->
+    <section id="tab-plans" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Plans</h2>
+          <button id="addPlan">+ New plan</button>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">A plan is only a label now: how many devices an account may bind and which capabilities it advertises. Minutes come from grants, never from the plan.</p>
+        <div style="overflow:auto">
+          <table id="plansTable">
+            <thead><tr><th>Id</th><th>Name</th><th>Devices</th><th>Features</th><th>Active</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="plansMsg"></div>
       </div>
     </section>
   </div>
@@ -315,94 +441,71 @@ export const ADMIN_HTML = `<!doctype html>
   const $ = (id) => document.getElementById(id);
   const N = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
   const FEATURES = ["video", "voice", "portrait_obs"];
+  const MODALITIES = ["video", "audio", "video_audio"];
+  const MOD_LABEL = { video: "Video Call", audio: "Audio Call", video_audio: "Video + Audio" };
+
+  const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const mask = (v) => (v ? "••••" + String(v).slice(-4) : "—");
-  const money = (c) => "$" + (N(c) / 100).toFixed(2);
+  const mins = (v) => { const n = N(v); const s = n.toFixed(1); return s.endsWith(".0") ? s.slice(0, -2) : s; };
+  const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
+  const bucket = (v) => (v.unlimited ? '<span class="pill yes">Unlimited</span>' : '<span class="mono">' + mins(v.balance) + "</span>");
+  const shortId = (v) => (v ? String(v).slice(0, 8) : "—");
 
-  let KEY_CACHE = [], PLAN_ROWS = [], SUB_ROWS = [], PROF_CACHE = {};
-  const VERIFIED = { lucy_video_per_sec_cost: 0.04, voice_cloning_per_sec_cost: 0.0025, natural_audio_per_sec_cost: 0.0001, profit_margin_percent: 40, min_guaranteed_margin_percent: 25 };
-  let COSTS = { ...VERIFIED };
-  let TIMER = { video_only_multiplier: 1.0, audio_only_multiplier: 0.5, video_voice_multiplier: 1.5, warning_threshold_minutes: 5, auto_terminate_at_zero: true };
+  let ADMIN_ID = null;
+  let ADMIN_EMAIL = "";
+  let PLAN_ROWS = [];
+  let KEY_ROWS = [];
+  let HEALTH_ROWS = [];
+  let ACCT_ROWS = [];
+  let EMAIL_OF = {};
+  let CUR = null;
 
-  // ── Ported profit engine (from RICH X CAM BillingRateEngine) ────────────────
-  function rawCostPerSec(mode, cloned) {
-    const isVideo = mode === "video_audio" || mode === "video_only";
-    const isVC = cloned && (mode === "video_audio" || mode === "audio_only" || mode === "video_only");
-    const lucy = isVideo ? N(COSTS.lucy_video_per_sec_cost, 0.04) : 0;
-    const voice = isVC ? N(COSTS.voice_cloning_per_sec_cost, 0.0025) : 0;
-    const natural = !isVC ? N(COSTS.natural_audio_per_sec_cost, 0.0001) : 0.00005;
-    return { lucy, voice, natural, total: lucy + voice + natural };
-  }
-  function targetMargin() { return Math.max(N(COSTS.profit_margin_percent, 40), N(COSTS.min_guaranteed_margin_percent, 25)); }
-  function billedRatePerSec(mode, cloned) {
-    const { total } = rawCostPerSec(mode, cloned);
-    const m = targetMargin();
-    const billed = total * (1 + m / 100);
-    return { rawCostSec: total, billedRateSec: billed, profitPerSec: billed - total, marginPercent: m };
-  }
-  function modeRatesPerMinute() {
-    const modes = [
-      { mode: "video_audio", cloned: true, label: "Video + Audio (Cloned Voice)" },
-      { mode: "video_audio", cloned: false, label: "Video + Audio (Natural Voice)" },
-      { mode: "audio_only", cloned: true, label: "Audio Only (Cloned Voice)" },
-      { mode: "audio_only", cloned: false, label: "Audio Only (Natural Voice)" },
-      { mode: "video_only", cloned: false, label: "Video Only (Natural Mic)" },
-      { mode: "video_only", cloned: true, label: "Video Only (Optional Cloned)" },
-    ];
-    return modes.map((m) => {
-      const r = billedRatePerSec(m.mode, m.cloned);
-      return { label: m.label, mode: m.mode, rawCostMin: r.rawCostSec * 60, userPriceMin: r.billedRateSec * 60, profitMin: r.profitPerSec * 60, marginPercent: r.marginPercent };
-    });
-  }
-  function sessionFinancials(durationSec, mode, cloned) {
-    const rc = rawCostPerSec(mode, cloned);
-    const ur = billedRatePerSec(mode, cloned);
-    const totalRaw = rc.total * durationSec;
-    const billed = ur.billedRateSec * durationSec;
-    const profit = billed - totalRaw;
-    const margin = totalRaw > 0 ? (profit / totalRaw) * 100 : ur.marginPercent;
-    return { video: rc.lucy * durationSec, voice: (rc.voice + rc.natural) * durationSec, totalRaw, billed, profit, margin };
-  }
-  function multForMode(mode) {
-    if (mode === "audio_only") return N(TIMER.audio_only_multiplier, 0.5);
-    if (mode === "video_only") return N(TIMER.video_only_multiplier, 1.0);
-    return N(TIMER.video_voice_multiplier, 1.5);
-  }
-  function ruleProfitability(allocatedMinutes, mode, price, cloned = true) {
-    const mult = Math.max(0.1, multForMode(mode));
-    const realAllowedMinutes = allocatedMinutes / mult;
-    const rc = rawCostPerSec(mode, cloned);
-    const rawPerMin = rc.total * 60;
-    const totalRawApiCost = realAllowedMinutes * rawPerMin;
-    const breakEven = totalRawApiCost;
-    const suggested = totalRawApiCost * (1 + targetMargin() / 100);
-    const p = Math.max(0, N(price));
-    const netProfit = p - totalRawApiCost;
-    const marginPct = p > 0 ? (netProfit / p) * 100 : 0;
-    let status = "unset";
-    if (p === 0) status = "unset";
-    else if (p > totalRawApiCost) status = "profitable";
-    else if (p === totalRawApiCost) status = "breakeven";
-    else status = "loss";
-    return { mult, realAllowedMinutes, rawPerMin, totalRawApiCost, breakEven, suggested, netProfit, marginPct, status, loss: totalRawApiCost - p };
+  function msg(el, text, cls = "err") { $(el).innerHTML = text ? \`<div class="\${cls}">\${esc(text)}</div>\` : ""; }
+
+  // Every balance-changing operation goes through admin-api: the money RPCs are
+  // service-role only, so a browser JWT calling them gets a 403.
+  async function api(payload) {
+    const { data } = await sb.auth.getSession();
+    const token = data?.session?.access_token;
+    if (!token) throw new Error("You are signed out — sign in again.");
+    let res, body;
+    try {
+      res = await fetch(SUPABASE_URL + "/functions/v1/admin-api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: "Bearer " + token },
+        body: JSON.stringify(payload),
+      });
+      body = await res.json().catch(() => ({}));
+    } catch (err) {
+      throw new Error("admin-api unreachable: " + err.message);
+    }
+    if (!res.ok || body.ok === false) {
+      const why = body.error || body.reason || body.message || (res.status >= 500 ? "gateway error" : "refused");
+      throw new Error(why + (body.reason && body.error ? \` (\${body.reason})\` : ""));
+    }
+    return body;
   }
 
-  function featLabel(feats) {
-    const f = feats || [];
-    const v = f.includes("video"), a = f.includes("voice");
-    if (v && a) return "video + audio";
-    if (v) return "video only";
-    if (a) return "audio only";
-    return f.join(", ") || "—";
+  async function rpc(name, params) {
+    const { data, error } = await sb.rpc(name, params);
+    if (error) throw new Error(error.message);
+    return data;
   }
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
+  const TABS = [...document.querySelectorAll(".tabs button[data-tab]")].map((b) => b.dataset.tab);
   document.querySelectorAll(".tabs button[data-tab]").forEach((b) => {
     b.onclick = () => {
       document.querySelectorAll(".tabs button[data-tab]").forEach((x) => x.classList.remove("on"));
       b.classList.add("on");
-      ["subs", "plans", "keys", "pricing", "timer"].forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== b.dataset.tab));
+      TABS.forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== b.dataset.tab));
     };
   });
+
+  function setTabLabel(tab, text) {
+    const b = [...document.querySelectorAll(".tabs button[data-tab]")].find((x) => x.dataset.tab === tab);
+    if (b) b.textContent = text;
+  }
 
   async function isAdmin(userId) {
     const { data } = await sb.from("profiles").select("is_admin").eq("id", userId).maybeSingle();
@@ -415,332 +518,708 @@ export const ADMIN_HTML = `<!doctype html>
       await sb.auth.signOut();
       return;
     }
-    $("who").textContent = user.email ?? "";
+    ADMIN_ID = user.id;
+    ADMIN_EMAIL = user.email ?? "";
+    $("who").textContent = ADMIN_EMAIL;
     $("authCard").classList.add("hidden");
     $("dash").classList.remove("hidden");
-    await Promise.all([loadKeys(), loadPlans(), loadCosts(), loadTimer()]);
-    await loadSubs(); loadUsage();
-    renderPricing(); renderTimer();
+    await loadPlans();
+    await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadConfig(), loadAccounts()]);
+    setBrFromNow();
   }
 
-  // ══ API KEY VAULT ════════════════════════════════════════════════════════
-  async function loadKeys() {
-    const { data, error } = await sb.from("gateway_keys")
-      .select("id, label, fal_key, elevenlabs_key, is_default, notes, created_at").order("created_at");
-    KEY_CACHE = error ? (console.error(error), []) : (data || []);
-    $("keysTable").querySelector("tbody").innerHTML = KEY_CACHE.map((k) => \`<tr>
-      <td>\${k.label || "(unlabeled)"}\${k.is_default ? ' <span class="pill yes">default</span>' : ""}</td>
-      <td class="muted">\${k.fal_key ? "fal " + mask(k.fal_key) : '<span class="pill n">none</span>'}</td>
-      <td class="muted">\${k.elevenlabs_key ? "11L " + mask(k.elevenlabs_key) : '<span class="pill n">none</span>'}</td>
-      <td>\${k.is_default ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
-      <td class="muted">\${k.notes || "—"}</td>
-      <td style="white-space:nowrap">
-        <button data-k="edit" data-id="\${k.id}">Edit</button>
-        \${k.is_default ? "" : \`<button data-k="default" data-id="\${k.id}">Make default</button>\`}
-        <button class="danger" data-k="del" data-id="\${k.id}">Delete</button>
-      </td></tr>\`).join("") || '<tr><td colspan="6" class="muted">No key pairs yet — add one above, or rely on the env secrets.</td></tr>';
-    $("gKey").innerHTML = '<option value="">Global default</option>' + KEY_CACHE.map((k) =>
-      \`<option value="\${k.id}">\${k.label || k.id.slice(0, 8)}\${k.is_default ? " (default)" : ""}</option>\`).join("");
+  // ══ ACCOUNTS ═════════════════════════════════════════════════════════════
+  async function emailsOf(ids) {
+    const uniq = [...new Set(ids.filter(Boolean))];
+    if (!uniq.length) return;
+    const { data } = await sb.from("profiles").select("id, email").in("id", uniq);
+    (data || []).forEach((p) => { EMAIL_OF[p.id] = p.email; });
   }
-  function clearKeyForm() { ["kId", "kLabel", "kFal", "kEleven", "kNotes"].forEach((i) => $(i).value = ""); $("kDefault").checked = false; $("keyMsg").textContent = ""; }
-  $("saveKey").onclick = async () => {
-    $("keyMsg").textContent = "";
-    const id = $("kId").value, label = $("kLabel").value.trim();
-    if (!label) { $("keyMsg").innerHTML = '<div class="err">Give the key pair a label.</div>'; return; }
-    const fal = $("kFal").value.trim(), eleven = $("kEleven").value.trim();
-    const row = { label, is_default: $("kDefault").checked, notes: $("kNotes").value.trim() || null };
-    if (fal) row.fal_key = fal;
-    if (eleven) row.elevenlabs_key = eleven;
-    if (!id && !fal && !eleven) { $("keyMsg").innerHTML = '<div class="err">Enter at least one key.</div>'; return; }
-    const res = id ? await sb.from("gateway_keys").update(row).eq("id", id) : await sb.from("gateway_keys").insert(row);
-    if (res.error) { $("keyMsg").innerHTML = \`<div class="err">\${res.error.message}</div>\`; return; }
-    $("keyMsg").innerHTML = '<div class="ok">Saved.</div>'; clearKeyForm(); await loadKeys();
-  };
-  $("clearKeyForm").onclick = clearKeyForm;
-  $("refreshKeys").onclick = loadKeys;
-  document.addEventListener("click", async (e) => {
-    const b = e.target.closest("button[data-k]"); if (!b) return;
-    const id = b.dataset.id, row = KEY_CACHE.find((k) => k.id === id);
-    if (b.dataset.k === "edit" && row) {
-      $("kId").value = row.id; $("kLabel").value = row.label || ""; $("kNotes").value = row.notes || "";
-      $("kFal").value = ""; $("kEleven").value = ""; $("kDefault").checked = !!row.is_default;
-      $("keyMsg").innerHTML = '<div class="muted">Editing “' + (row.label || id.slice(0, 8)) + '”. Leave a key blank to keep its current value.</div>';
-      window.scrollTo({ top: 0, behavior: "smooth" });
+
+  async function loadAccounts() {
+    const q = ($("acctSearch").value || "").trim();
+    let build = sb.from("profiles").select("id, email, created_at").order("created_at", { ascending: false }).limit(60);
+    if (q) build = sb.from("profiles").select("id, email, created_at").ilike("email", "%" + q + "%").order("created_at", { ascending: false }).limit(40);
+    const { data: profs, error } = await build;
+    if (error) return msg("acctMsg", error.message);
+    ACCT_ROWS = profs || [];
+    if (!ACCT_ROWS.length) {
+      $("acctTable").querySelector("tbody").innerHTML = '<tr><td colspan="8" class="muted">No accounts match.</td></tr>';
+      return;
     }
-    if (b.dataset.k === "default") { await sb.from("gateway_keys").update({ is_default: true }).eq("id", id); await loadKeys(); }
-    if (b.dataset.k === "del") {
-      if (!confirm("Delete this key pair? Users linked to it fall back to the default/env key.")) return;
-      const { error } = await sb.from("gateway_keys").delete().eq("id", id);
-      if (error) alert(error.message); else await loadKeys();
+    const ids = ACCT_ROWS.map((p) => p.id);
+    ACCT_ROWS.forEach((p) => { EMAIL_OF[p.id] = p.email; });
+    const [subsRes, balRes] = await Promise.all([
+      sb.from("subscriptions").select("user_id, plan_id, status, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions").in("user_id", ids),
+      sb.from("credit_balances").select("user_id, modality, balance, unlimited, total_credited, total_spent").in("user_id", ids),
+    ]);
+    const subOf = Object.fromEntries((subsRes.data || []).map((s) => [s.user_id, s]));
+    const wallet = {};
+    (balRes.data || []).forEach((b) => {
+      wallet[b.user_id] = wallet[b.user_id] || {};
+      wallet[b.user_id][b.modality] = b;
+    });
+    const plans = Object.fromEntries(PLAN_ROWS.map((p) => [p.id, p]));
+
+    $("acctTable").querySelector("tbody").innerHTML = ACCT_ROWS.map((p) => {
+      const s = subOf[p.id];
+      const w = wallet[p.id] || {};
+      const cell = (m) => (w[m] ? bucket(w[m]) : '<span class="mono muted">0</span>');
+      const credited = MODALITIES.reduce((a, m) => a + N(w[m]?.total_credited), 0);
+      const spent = MODALITIES.reduce((a, m) => a + N(w[m]?.total_spent), 0);
+      return \`<tr data-user="\${p.id}">
+        <td><b>\${esc(p.email)}</b><div class="muted">since \${esc((p.created_at || "").slice(0, 10))}</div></td>
+        <td class="muted">\${s ? esc(plans[s.plan_id]?.name || s.plan_id) : '<span class="pill none">no subscription</span>'}</td>
+        <td>\${s ? \`<span class="pill \${s.status}">\${s.status}</span>\` : "—"}</td>
+        <td>\${cell("video")}</td>
+        <td>\${cell("audio")}</td>
+        <td>\${cell("video_audio")}</td>
+        <td class="muted mono">+\${mins(credited)} / −\${mins(spent)}</td>
+        <td style="white-space:nowrap"><button data-act="open" data-id="\${p.id}" class="primary">Open</button></td></tr>\`;
+    }).join("");
+    msg("acctMsg", "");
+  }
+
+  async function openAccount(userId) {
+    if (!EMAIL_OF[userId]) await emailsOf([userId]);
+    const snap = await rpc("sl_account_snapshot", { p_user: userId });
+    if (snap?.ok === false) return msg("detMsg", snap.error || "snapshot failed");
+    CUR = { ...snap, user_id: userId, email: EMAIL_OF[userId] || userId };
+    $("acctDetail").classList.remove("hidden");
+    renderAccount();
+    await Promise.all([loadAssignments(), loadLedger(userId)]);
+    msg("detMsg", "Account loaded.", "ok");
+  }
+
+  function renderAccount() {
+    const c = CUR;
+    const plans = Object.fromEntries(PLAN_ROWS.map((p) => [p.id, p]));
+    $("detTitle").textContent = c.email;
+    const status = c.status === "none" ? '<span class="pill none">no subscription</span>' : \`<span class="pill \${c.status}">\${c.status}</span>\`;
+    $("detSummary").innerHTML = \`Plan <b>\${esc(plans[c.plan_id]?.name || c.plan_id || "—")}</b> · status \${status} \${c.status === "active" ? "" : '<span class="muted">(calls are refused unless active)</span>'} · open leases <b>\${(c.open_sessions || []).length}</b> of \${c.max_concurrent_sessions ?? 1} allowed · minutes never expire\`;
+
+    $("swVideo").checked = c.modalities?.video === true;
+    $("swAudio").checked = c.modalities?.audio === true;
+    $("swBoth").checked = c.modalities?.video_audio === true;
+    $("detMaxConc").value = c.max_concurrent_sessions ?? 2;
+    $("noSub").classList.toggle("hidden", c.status !== "none");
+    $("detPlan").innerHTML = PLAN_ROWS.filter((p) => p.active).map((p) => \`<option value="\${p.id}">\${esc(p.name)}</option>\`).join("") || '<option value="">no active plan</option>';
+
+    const byMod = Object.fromEntries((c.wallets || []).map((w) => [w.modality, w]));
+    $("bucketTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => {
+      const w = byMod[m] || { balance: 0, unlimited: false, total_credited: 0, total_spent: 0 };
+      return \`<tr><td>\${MOD_LABEL[m]}</td><td>\${bucket(w)}</td><td class="mono">\${mins(w.burn_rate ?? 1)}x</td>
+        <td>\${w.unlimited ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
+        <td class="mono">\${mins(w.total_credited)}</td><td class="mono">\${mins(w.total_spent)}</td></tr>\`;
+    }).join("");
+
+    $("gModality").innerHTML = MODALITIES.map((m) => \`<option value="\${m}">\${MOD_LABEL[m]}</option>\`).join("");
+    $("gMinutes").value = ""; $("gReason").value = "";
+    $("gUnlimited").checked = false; $("gClearUnlimited").checked = false;
+
+    $("deviceTable").querySelector("tbody").innerHTML = (c.devices || []).map((d, i) => \`<tr data-dev="\${i}">
+      <td class="mono">\${esc(d.device_id)}</td><td>\${esc(d.label || "—")}</td><td class="muted">\${when(d.last_seen)}</td>
+      <td>\${d.revoked ? '<span class="pill rejected">revoked</span>' : '<span class="pill active">bound</span>'}</td>
+      <td>\${d.revoked ? "" : \`<button data-act="revoke" data-id="\${esc(d.device_id)}" class="danger">Revoke</button>\`}</td></tr>\`).join("")
+      || '<tr><td colspan="5" class="muted">No device has bound yet — they bind on the first call.</td></tr>';
+    msg("deviceMsg", "");
+  }
+
+  async function loadLedger(userId) {
+    const { data, error } = await sb.from("credit_ledger")
+      .select("created_at, modality, kind, delta, balance_after, reason, session_id, request_id")
+      .eq("user_id", userId).order("created_at", { ascending: false }).limit(40);
+    if (error) return msg("detMsg", error.message);
+    $("ledgerTable").querySelector("tbody").innerHTML = (data || []).map((r) => \`<tr>
+      <td class="muted">\${when(r.created_at)}</td><td>\${MOD_LABEL[r.modality] || r.modality}</td>
+      <td><span class="pill \${r.kind === "credit" ? "ok" : r.kind === "debit" ? "past_due" : r.kind === "release" ? "yes" : "n"}">\${r.kind}</span></td>
+      <td class="mono" style="text-align:right;color:\${N(r.delta) >= 0 ? "#4ade80" : "#fb7185"}">\${N(r.delta) >= 0 ? "+" : ""}\${mins(r.delta)}</td>
+      <td class="mono" style="text-align:right">\${mins(r.balance_after)}</td>
+      <td class="muted">\${esc(r.reason || "—")} <span class="muted">\${r.session_id ? "· session " + shortId(r.session_id) : ""}\${r.request_id ? " · request " + shortId(r.request_id) : ""}</span></td></tr>\`).join("")
+      || '<tr><td colspan="6" class="muted">No ledger rows yet.</td></tr>';
+  }
+
+  $("acctSearchBtn").onclick = loadAccounts;
+  $("acctSearch").onkeydown = (e) => { if (e.key === "Enter") loadAccounts(); };
+  $("acctRefresh").onclick = loadAccounts;
+  $("detReload").onclick = () => CUR && openAccount(CUR.user_id);
+  $("detLedgerBtn").onclick = () => CUR && loadLedger(CUR.user_id);
+
+  $("detSaveSwitches").onclick = async () => {
+    if (!CUR) return;
+    msg("detMsg", "");
+    const { error } = await sb.from("subscriptions").update({
+      video_enabled: $("swVideo").checked,
+      audio_enabled: $("swAudio").checked,
+      video_audio_enabled: $("swBoth").checked,
+      max_concurrent_sessions: Math.max(1, N($("detMaxConc").value, 2)),
+    }).eq("user_id", CUR.user_id);
+    if (error) return msg("detMsg", error.message);
+    msg("detMsg", "Switches saved.", "ok");
+    await openAccount(CUR.user_id);
+  };
+
+  $("detCreateSub").onclick = async () => {
+    if (!CUR) return;
+    const plan = $("detPlan").value;
+    if (!plan) return msg("detMsg", "Create a plan first on the Plans tab.");
+    const { error } = await sb.from("subscriptions").insert({ user_id: CUR.user_id, plan_id: plan, status: "active" });
+    if (error) return msg("detMsg", error.message);
+    await openAccount(CUR.user_id);
+  };
+
+  $("detSignout").onclick = async () => {
+    if (!CUR) return;
+    if (!confirm(\`Sign \${CUR.email} out of every device and stop their leases? They must log in again.\`)) return;
+    try {
+      const res = await api({ action: "signout", userId: CUR.user_id });
+      msg("detMsg", \`Signed out \${res.sessions ?? 0} session(s), closed \${res.closed ?? 0} lease(s).\`, "ok");
+      await openAccount(CUR.user_id);
+    } catch (err) { msg("detMsg", err.message); }
+  };
+
+  $("detReap").onclick = async () => {
+    if (!CUR) return;
+    try {
+      const res = await api({ action: "reap", userId: CUR.user_id });
+      msg("detMsg", \`Closed \${res.closed ?? 0} expired lease(s) for this account.\`, "ok");
+      await openAccount(CUR.user_id);
+    } catch (err) { msg("detMsg", err.message); }
+  };
+
+  function grantPayload(sign) {
+    const minutes = N($("gMinutes").value) * sign;
+    const reason = $("gReason").value.trim();
+    if (!minutes) throw new Error("Enter how many minutes.");
+    if (reason.length < 3) throw new Error("A reason is required (audit trail).");
+    let unlimited = null;
+    if ($("gUnlimited").checked && $("gClearUnlimited").checked) throw new Error("Pick either set or clear unlimited, not both.");
+    if ($("gUnlimited").checked) unlimited = true;
+    if ($("gClearUnlimited").checked) unlimited = false;
+    return { action: "grant", userId: CUR.user_id, modality: $("gModality").value, minutes, reason, unlimited };
+  }
+
+  $("grantBtn").onclick = async () => {
+    if (!CUR) return msg("grantMsg", "Open an account first.");
+    try {
+      const res = await api(grantPayload(1));
+      msg("grantMsg", \`Granted. \${res.unlimited ? "Bucket is unlimited." : "New balance " + mins(res.balance) + " min."}\`, "ok");
+      await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
+    } catch (err) { msg("grantMsg", err.message); }
+  };
+
+  $("deductBtn").onclick = async () => {
+    if (!CUR) return msg("grantMsg", "Open an account first.");
+    let payload;
+    try { payload = grantPayload(-1); } catch (err) { return msg("grantMsg", err.message); }
+    const why = \`\${MOD_LABEL[payload.modality]} −\${mins(Math.abs(payload.minutes))} min · \${payload.reason}\`;
+    if (!confirm("Deduct from " + CUR.email + "?\\n\\n" + why + "\\n\\nThis cannot be undone from the panel — a correction is a new ledger row.")) return;
+    try {
+      const res = await api(payload);
+      msg("grantMsg", \`Deducted. New balance \${mins(res.balance)} min.\`, "ok");
+      await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
+    } catch (err) { msg("grantMsg", err.message); }
+  };
+
+  async function revokeDevice(userId, deviceId) {
+    const { error, data } = await sb.from("devices").update({ revoked: true }).eq("user_id", userId).eq("device_id", deviceId).select("id");
+    if (error) return msg("deviceMsg", error.message);
+    if (!data || !data.length) {
+      return msg("deviceMsg", "No device row was changed — this device is not bound to that account any more.");
+    }
+    msg("deviceMsg", "Device revoked.", "ok");
+    await openAccount(userId);
+  }
+
+  // ══ TOP-UP REQUESTS ══════════════════════════════════════════════════════
+  async function loadRequests() {
+    const pendingOnly = $("onlyPending").checked;
+    let build = sb.from("credit_requests").select("*").order("created_at", { ascending: false }).limit(150);
+    if (pendingOnly) build = sb.from("credit_requests").select("*").eq("status", "pending").order("created_at", { ascending: false }).limit(150);
+    const { data, error } = await build;
+    if (error) return msg("reqMsg", error.message);
+    const rows = data || [];
+    await emailsOf(rows.map((r) => r.user_id));
+
+    const { count } = await sb.from("credit_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
+    setTabLabel("topups", (count ? \`Top-ups (\${count})\` : "Top-ups"));
+
+    $("reqTable").querySelector("tbody").innerHTML = rows.map((r) => {
+      const open = r.status === "pending";
+      return \`<tr data-req="\${r.id}">
+        <td class="muted">\${when(r.created_at)}</td>
+        <td><b>\${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</b>\${open ? "" : \`<div class="muted">\${esc(r.admin_note || "")}</div>\`}</td>
+        <td>\${MOD_LABEL[r.modality]}</td>
+        <td class="mono" style="text-align:right">\${mins(r.minutes)}</td>
+        <td style="text-align:right">\${open ? \`<input data-f="grant" type="number" min="0" step="0.5" value="\${N(r.minutes)}" style="max-width:90px;text-align:right" />\` : \`<span class="mono">\${mins(r.minutes)}</span>\`}</td>
+        <td class="muted">\${esc(r.payment_channel || "—")}<div class="muted">\${esc(r.payment_reference || "")}</div></td>
+        <td>\${open ? \`<input data-f="note" value="" placeholder="optional admin note" />\` : \`<span class="muted">\${esc(r.note || "—")}</span>\`}</td>
+        <td><span class="pill \${r.status}">\${r.status}</span></td>
+        <td style="white-space:nowrap">\${open ? \`<button data-req-act="approve" data-id="\${r.id}" class="primary">Approve</button> <button data-req-act="reject" data-id="\${r.id}" class="danger">Reject</button>\` : ""}</td></tr>\`;
+    }).join("") || '<tr><td colspan="9" class="muted">Nothing in the queue.</td></tr>';
+    msg("reqMsg", "");
+  }
+  $("reqRefresh").onclick = loadRequests;
+  $("onlyPending").onchange = loadRequests;
+
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-req-act]");
+    if (!b) return;
+    const tr = document.querySelector(\`#reqTable tr[data-req="\${b.dataset.id}"]\`);
+    const approve = b.dataset.reqAct === "approve";
+    const minutes = tr?.querySelector('[data-f="grant"]') ? N(tr.querySelector('[data-f="grant"]').value) : null;
+    const note = tr?.querySelector('[data-f="note"]')?.value?.trim() || null;
+    if (approve && (!minutes || minutes <= 0)) return msg("reqMsg", "Set the minutes to grant above 0.");
+    if (approve && !confirm(\`Approve this request and credit \${mins(minutes)} minute(s)?\`)) return;
+    if (!approve && !confirm("Reject this request? No minutes move.")) return;
+    try {
+      const res = await api({ action: "resolve", requestId: b.dataset.id, approve, note, minutes: approve ? minutes : undefined });
+      msg("reqMsg", approve ? \`Approved — \${mins(res.minutes ?? minutes)} min granted (balance \${mins(res.grant?.balance)}).\` : "Rejected.", "ok");
+      await Promise.all([loadRequests(), loadAccounts(), CUR && openAccount(CUR.user_id)]);
+    } catch (err) { msg("reqMsg", err.message); }
+  });
+
+  // ══ KEY POOL ════════════════════════════════════════════════════════════
+  async function loadKeys() {
+    const [keysRes, healthRes] = await Promise.all([
+      sb.from("gateway_keys").select("id, label, fal_key, elevenlabs_key, is_default, enabled, priority, daily_minute_cap, created_at").order("priority", { ascending: true }),
+      sb.from("admin_key_health").select("id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, recent_failures").order("priority", { ascending: true }),
+    ]);
+    if (keysRes.error) return msg("keyMsg", keysRes.error.message);
+    KEY_ROWS = keysRes.data || [];
+    HEALTH_ROWS = healthRes.data || [];
+    const health = Object.fromEntries(HEALTH_ROWS.map((h) => [h.id, h]));
+
+    $("keysTable").querySelector("tbody").innerHTML = KEY_ROWS.map((k) => {
+      const h = health[k.id] || {};
+      const cap = h.daily_minute_cap ?? k.daily_minute_cap;
+      const used = N(h.minutes_today);
+      return \`<tr data-key="\${k.id}">
+        <td><b>\${esc(k.label || "(unlabeled)")}</b>\${k.is_default ? ' <span class="pill yes">default</span>' : ""}</td>
+        <td>\${k.fal_key ? \`<span class="muted mono" data-secret="fal" data-key="\${k.id}">\${mask(k.fal_key)}</span> <button data-reveal="fal" data-id="\${k.id}">show</button>\` : '<span class="pill n">none</span>'}</td>
+        <td>\${k.elevenlabs_key ? \`<span class="muted mono" data-secret="elevenlabs" data-key="\${k.id}">\${mask(k.elevenlabs_key)}</span> <button data-reveal="elevenlabs" data-id="\${k.id}">show</button>\` : '<span class="pill n">none</span>'}</td>
+        <td>\${h.enabled === false ? '<span class="pill no">disabled</span>' : '<span class="pill yes">enabled</span>'} <button data-act="toggle" data-id="\${k.id}">\${h.enabled === false ? "enable" : "disable"}</button></td>
+        <td class="mono">\${N(h.priority ?? k.priority, 100)}</td>
+        <td class="mono">\${cap == null || cap === "" ? "uncapped" : mins(used) + " / " + mins(cap)}\${cap != null && cap !== "" && used >= N(cap) ? ' <span class="pill warn">capped</span>' : ""}</td>
+        <td class="mono">\${N(h.recent_failures) ? \`<span class="pill fail">\${h.recent_failures}</span>\` : '<span class="pill ok">0</span>'}</td>
+        <td class="muted">\${esc(h.last_error || "—")}\${h.last_error_at ? \`<div class="muted">\${when(h.last_error_at)}</div>\` : ""}</td>
+        <td style="white-space:nowrap">
+          <button data-act="edit" data-id="\${k.id}">Edit</button>
+          <button data-act="del" data-id="\${k.id}" class="danger">Delete</button>
+        </td></tr>\`;
+    }).join("") || '<tr><td colspan="9" class="muted">No keys in the pool — the gateway falls back to the FAL_KEY / ELEVENLABS_KEY env secrets.</td></tr>';
+
+    $("asKey").innerHTML = KEY_ROWS.map((k) => \`<option value="\${k.id}">\${esc(k.label || shortId(k.id))}</option>\`).join("");
+    await Promise.all([loadKeyUsage(), loadAssignments()]);
+  }
+
+  async function loadKeyUsage() {
+    const cutoff = new Date(Date.now() - 864e5).toISOString();
+    const { data, error } = await sb.from("key_usage_log")
+      .select("created_at, key_id, provider, user_id, outcome, status, detail")
+      .gt("created_at", cutoff).order("created_at", { ascending: false }).limit(200);
+    if (error) return msg("keyMsg", error.message);
+    await emailsOf((data || []).map((r) => r.user_id));
+    const labelOf = Object.fromEntries(KEY_ROWS.map((k) => [k.id, k.label]));
+    $("usageTable").querySelector("tbody").innerHTML = (data || []).map((r) => \`<tr>
+      <td class="muted">\${when(r.created_at)}</td>
+      <td>\${esc(labelOf[r.key_id] || (r.key_id ? shortId(r.key_id) : "env secret"))}</td>
+      <td>\${esc(r.provider)}</td>
+      <td class="muted">\${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</td>
+      <td><span class="pill \${r.outcome}">\${r.outcome}</span></td>
+      <td class="mono">\${r.status ?? "—"}</td>
+      <td class="muted">\${esc(r.detail || "")}</td></tr>\`).join("")
+      || '<tr><td colspan="7" class="muted">No key calls in the last 24 hours.</td></tr>';
+  }
+
+  async function loadAssignments() {
+    const { data, error } = await sb.from("user_key_assignments").select("user_id, provider, key_id, created_at").order("created_at", { ascending: false });
+    if (error) return msg("assignMsg", error.message);
+    await emailsOf((data || []).map((r) => r.user_id));
+    const labelOf = Object.fromEntries(KEY_ROWS.map((k) => [k.id, k.label || shortId(k.id)]));
+    $("assignTable").querySelector("tbody").innerHTML = (data || []).map((r) => \`<tr>
+      <td><b>\${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</b></td>
+      <td>\${esc(r.provider)}</td>
+      <td>\${esc(labelOf[r.key_id] || shortId(r.key_id))}</td>
+      <td class="muted">\${when(r.created_at)}</td>
+      <td><button data-act="unassign" data-user="\${r.user_id}" data-provider="\${r.provider}" class="danger">Remove</button></td></tr>\`).join("")
+      || '<tr><td colspan="5" class="muted">No per-account assignments — every account draws on the pool by priority.</td></tr>';
+  }
+
+  $("refreshKeys").onclick = loadKeys;
+  $("refreshUsage").onclick = loadKeyUsage;
+
+  document.addEventListener("click", (e) => {
+    const t = e.target.closest("button[data-show]");
+    if (t) {
+      const inp = $(t.dataset.show);
+      const on = inp.type === "password";
+      inp.type = on ? "text" : "password";
+      t.textContent = on ? "hide" : "show";
+      return;
+    }
+    const r = e.target.closest("button[data-reveal]");
+    if (r) {
+      const row = KEY_ROWS.find((k) => k.id === r.dataset.id);
+      const field = r.dataset.reveal === "fal" ? "fal_key" : "elevenlabs_key";
+      const span = document.querySelector(\`[data-secret="\${r.dataset.reveal}"][data-key="\${r.dataset.id}"]\`);
+      if (!row?.[field] || !span) return;
+      const shown = r.textContent === "hide";
+      span.textContent = shown ? mask(row[field]) : row[field];
+      r.textContent = shown ? "show" : "hide";
     }
   });
 
-  // ══ PLANS & PRICING ══════════════════════════════════════════════════════
+  function clearKeyForm() {
+    ["kId", "kLabel", "kFal", "kEleven"].forEach((i) => $(i).value = "");
+    $("kPriority").value = 100; $("kCap").value = "";
+    $("kEnabled").checked = true; $("kDefault").checked = false;
+    msg("keyMsg", "");
+  }
+
+  $("saveKey").onclick = async () => {
+    msg("keyMsg", "");
+    const id = $("kId").value;
+    const label = $("kLabel").value.trim();
+    if (!label) return msg("keyMsg", "Give the key pair a label.");
+    const row = {
+      label,
+      enabled: $("kEnabled").checked,
+      priority: N($("kPriority").value, 100),
+      daily_minute_cap: $("kCap").value.trim() === "" ? null : N($("kCap").value),
+      is_default: $("kDefault").checked,
+    };
+    const fal = $("kFal").value.trim(), eleven = $("kEleven").value.trim();
+    if (fal) row.fal_key = fal;
+    if (eleven) row.elevenlabs_key = eleven;
+    if (!id && !fal && !eleven) return msg("keyMsg", "Enter at least one key.");
+    const res = id ? await sb.from("gateway_keys").update(row).eq("id", id) : await sb.from("gateway_keys").insert(row);
+    if (res.error) return msg("keyMsg", res.error.message);
+    msg("keyMsg", "Saved.", "ok");
+    clearKeyForm();
+    await loadKeys();
+  };
+  $("clearKeyForm").onclick = clearKeyForm;
+
+  $("addAssignment").onclick = async () => {
+    msg("assignMsg", "");
+    const email = $("asEmail").value.trim().toLowerCase();
+    if (!email) return msg("assignMsg", "Enter the user's email.");
+    const { data: prof } = await sb.from("profiles").select("id").ilike("email", email).maybeSingle();
+    if (!prof) return msg("assignMsg", "No account with that email.");
+    const { error } = await sb.from("user_key_assignments").upsert({ user_id: prof.id, provider: $("asProvider").value, key_id: $("asKey").value }, { onConflict: "user_id,provider" });
+    if (error) return msg("assignMsg", error.message);
+    msg("assignMsg", "Assigned — that key is now tried first for this account.", "ok");
+    $("asEmail").value = "";
+    await loadAssignments();
+  };
+
+  // ══ BURN RATES ══════════════════════════════════════════════════════════
+  let RATE_ROWS = [];
+
+  function effectiveRates() {
+    const nowMs = Date.now();
+    const out = {};
+    MODALITIES.forEach((m) => {
+      const live = RATE_ROWS.filter((r) => r.modality === m && !r.retired_at && new Date(r.effective_from) <= new Date(nowMs))
+        .sort((a, b) => new Date(b.effective_from) - new Date(a.effective_from) || b.id - a.id);
+      out[m] = live[0];
+    });
+    return out;
+  }
+
+  function renderRates() {
+    const eff = effectiveRates();
+    $("currentRates").querySelector("tbody").innerHTML = MODALITIES.map((m) => {
+      const r = eff[m];
+      return \`<tr><td>\${MOD_LABEL[m]}</td><td class="mono">\${r ? mins(r.multiplier) + "x" : '<span class="pill n">unset (1x)</span>'}</td>
+        <td class="mono">\${mins(r?.multiplier ?? 1)} credit min</td>
+        <td class="muted">\${r ? when(r.effective_from) : "—"}</td><td class="muted">\${esc(r?.note || "—")}</td></tr>\`;
+    }).join("");
+
+    $("ratesTable").querySelector("tbody").innerHTML = [...RATE_ROWS]
+      .sort((a, b) => MODALITIES.indexOf(a.modality) - MODALITIES.indexOf(b.modality) || new Date(b.effective_from) - new Date(a.effective_from))
+      .map((r) => \`<tr>
+        <td>\${MOD_LABEL[r.modality]}</td><td class="mono">\${mins(r.multiplier)}x</td>
+        <td class="muted">\${when(r.effective_from)}</td>
+        <td>\${r.retired_at ? \`<span class="pill rejected">\${when(r.retired_at)}</span>\` : '<span class="pill active">live</span>'}</td>
+        <td class="muted">\${esc(r.note || "—")}\${r.created_by ? \` <span class="muted">· by \${shortId(r.created_by)}</span>\` : ""}</td>
+        <td>\${r.retired_at ? "" : \`<button data-act="retire" data-id="\${r.id}" class="danger">Retire</button>\`}</td></tr>\`).join("")
+      || '<tr><td colspan="6" class="muted">No rates recorded.</td></tr>';
+  }
+
+  async function loadRates() {
+    const { data, error } = await sb.from("burn_rates").select("id, modality, multiplier, effective_from, retired_at, note, created_by").order("effective_from", { ascending: false });
+    if (error) return msg("rateMsg", error.message);
+    RATE_ROWS = data || [];
+    renderRates();
+  }
+  $("rateRefresh").onclick = loadRates;
+
+  function setBrFromNow() {
+    const d = new Date();
+    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
+    $("brFrom").value = d.toISOString().slice(0, 16);
+  }
+
+  $("saveRate").onclick = async () => {
+    msg("rateMsg", "");
+    const mult = N($("brMult").value);
+    if (mult <= 0) return msg("rateMsg", "The multiplier must be above 0.");
+    const row = {
+      modality: $("brModality").value,
+      multiplier: mult,
+      note: $("brNote").value.trim() || null,
+      effective_from: $("brFrom").value ? new Date($("brFrom").value).toISOString() : new Date().toISOString(),
+      created_by: ADMIN_ID,
+    };
+    const { error } = await sb.from("burn_rates").insert(row);
+    if (error) return msg("rateMsg", error.message);
+    msg("rateMsg", \`New \${MOD_LABEL[row.modality]} rate of \${mins(mult)}x queued from \${when(row.effective_from)}.\`, "ok");
+    $("brNote").value = ""; setBrFromNow();
+    await Promise.all([loadRates(), loadAccounts()]);
+  };
+
+  // ══ LIVE SESSIONS ═══════════════════════════════════════════════════════
+  async function loadSessions() {
+    const { data, error } = await sb.from("admin_live_sessions").select("*").order("started_at", { ascending: false }).limit(200);
+    if (error) return msg("sessMsg", error.message);
+    const rows = data || [];
+    await emailsOf(rows.map((r) => r.user_id));
+    $("sessTable").querySelector("tbody").innerHTML = rows.map((r) => {
+      const expiring = r.lease_expires_at && new Date(r.lease_expires_at) <= new Date();
+      return \`<tr>
+        <td><b>\${esc(EMAIL_OF[r.user_id] || r.email || shortId(r.user_id))}</b></td>
+        <td class="muted">\${esc(r.tab || "—")}</td>
+        <td>\${MOD_LABEL[r.modality] || r.modality}</td>
+        <td class="muted mono">\${esc(r.device_id || "—")}</td>
+        <td class="muted">\${when(r.started_at)}</td>
+        <td class="muted">\${when(r.lease_started_at)} → \${when(r.lease_expires_at)} \${expiring ? '<span class="pill warn">lease expired</span>' : ""}</td>
+        <td class="mono" style="text-align:right">\${mins(r.real_minutes)}</td>
+        <td class="mono" style="text-align:right">\${mins(r.billed_minutes)}</td>
+        <td class="mono" style="text-align:right">\${N(r.pending_debit) ? mins(r.pending_debit) + " min" : "—"}</td>
+        <td style="white-space:nowrap">
+          <button data-act="end" data-id="\${r.id}" class="danger">End now</button>
+          <button data-act="reap1" data-id="\${r.user_id}">Reap</button>
+        </td></tr>\`;
+    }).join("") || '<tr><td colspan="10" class="muted">No open leases — nothing is burning right now.</td></tr>';
+  }
+  $("sessRefresh").onclick = loadSessions;
+
+  $("reapAll").onclick = async () => {
+    if (!confirm("Close every lease that ran past its TTL across all accounts? Used minutes stay billed, unused pre-debits are refunded.")) return;
+    try {
+      const res = await api({ action: "reap" });
+      msg("sessMsg", \`Closed \${res.closed ?? 0} expired lease(s).\`, "ok");
+      await Promise.all([loadSessions(), loadAccounts()]);
+    } catch (err) { msg("sessMsg", err.message); }
+  };
+
+  async function endSession(sessionId) {
+    if (!confirm("Force-end this session now? The prepaid chunk is settled and refunded to the bucket.")) return;
+    try {
+      const res = await api({ action: "end_session", sessionId });
+      msg("sessMsg", \`Session ended\${res.billed != null ? ", total billed " + mins(res.billed) + " min" : ""}\${res.balance != null ? " · balance " + mins(res.balance) + " min" : ""}.\`, "ok");
+      await Promise.all([loadSessions(), loadAccounts(), CUR && openAccount(CUR.user_id)]);
+    } catch (err) { msg("sessMsg", err.message); }
+  }
+
+  // Delegated actions that live inside table rows.
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-act]");
+    if (!b) return;
+    const id = b.dataset.id;
+
+    if (b.dataset.act === "open") {
+      try { await openAccount(id); } catch (err) { msg("acctMsg", err.message); }
+      $("acctDetail").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (b.dataset.act === "revoke") {
+      if (!confirm(\`Revoke device \${id} for \${CUR.email}? That machine can no longer start a call on this account.\`)) return;
+      await revokeDevice(CUR.user_id, id);
+      return;
+    }
+    if (b.dataset.act === "end") return endSession(id);
+    if (b.dataset.act === "reap1") {
+      try {
+        const res = await api({ action: "reap", userId: id });
+        msg("sessMsg", \`Closed \${res.closed ?? 0} expired lease(s) for that account.\`, "ok");
+        await loadSessions();
+      } catch (err) { msg("sessMsg", err.message); }
+      return;
+    }
+    if (b.dataset.act === "retire") {
+      const row = RATE_ROWS.find((r) => String(r.id) === id);
+      if (!confirm(\`Retire the \${row ? MOD_LABEL[row.modality] + " " + mins(row.multiplier) + "x" : ""} rate from now on? History is kept.\`)) return;
+      const { error } = await sb.from("burn_rates").update({ retired_at: new Date().toISOString() }).eq("id", id);
+      if (error) return msg("rateMsg", error.message);
+      msg("rateMsg", "Retired.", "ok");
+      await loadRates();
+      return;
+    }
+    if (b.dataset.act === "toggle") {
+      const h = HEALTH_ROWS.find((x) => x.id === id);
+      const { error } = await sb.from("gateway_keys").update({ enabled: !(h?.enabled !== false) }).eq("id", id);
+      if (error) return msg("keyMsg", error.message);
+      await loadKeys();
+      return;
+    }
+    if (b.dataset.act === "edit") {
+      const row = KEY_ROWS.find((k) => k.id === id);
+      if (!row) return;
+      const h = HEALTH_ROWS.find((x) => x.id === id) || {};
+      $("kId").value = row.id; $("kLabel").value = row.label || "";
+      $("kFal").value = row.fal_key || ""; $("kEleven").value = row.elevenlabs_key || "";
+      $("kPriority").value = N(h.priority ?? row.priority, 100);
+      $("kCap").value = (h.daily_minute_cap ?? row.daily_minute_cap) ?? "";
+      $("kEnabled").checked = h.enabled !== false;
+      $("kDefault").checked = !!row.is_default;
+      msg("keyMsg", \`Editing “\${row.label || shortId(id)}”. Clear a field to drop that half of the pair.\`, "ok");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    if (b.dataset.act === "del") {
+      const row = KEY_ROWS.find((k) => k.id === id);
+      if (!confirm(\`Delete “\${row?.label || shortId(id)}”? Accounts assigned to it fall back to the pool, then the env secret.\`)) return;
+      const { error } = await sb.from("gateway_keys").delete().eq("id", id);
+      if (error) return msg("keyMsg", error.message);
+      msg("keyMsg", "Deleted.", "ok");
+      await loadKeys();
+      return;
+    }
+    if (b.dataset.act === "unassign") {
+      if (!confirm("Remove this assignment? The account keeps using the shared pool.")) return;
+      const { error } = await sb.from("user_key_assignments").delete().eq("user_id", b.dataset.user).eq("provider", b.dataset.provider);
+      if (error) return msg("assignMsg", error.message);
+      await loadAssignments();
+      return;
+    }
+  });
+
+  // ══ GATEWAY ═════════════════════════════════════════════════════════════
+  async function loadConfig() {
+    const { data, error } = await sb.from("app_config").select("*").eq("id", 1).maybeSingle();
+    if (error) return msg("cfgMsg", error.message);
+    if (!data) return msg("cfgMsg", "No app_config row (id = 1) — run the credits migration.");
+    $("cfgMin").value = data.min_supported_version || "";
+    $("cfgLatest").value = data.latest_version || "";
+    $("cfgChunk").value = N(data.lease_chunk_minutes, 5);
+    $("cfgTtl").value = N(data.lease_ttl_seconds, 120);
+    $("cfgSignup").checked = data.signup_enabled !== false;
+    $("cfgMaint").checked = data.maintenance === true;
+    $("cfgMaintMsg").value = data.maintenance_message || "";
+    await loadPool();
+  }
+
+  $("cfgSave").onclick = async () => {
+    msg("cfgMsg", "");
+    const min = $("cfgMin").value.trim();
+    if (!/^\\d+(\\.\\d+){0,2}$/.test(min)) return msg("cfgMsg", "Minimum supported version must look like 1.2.3.");
+    const row = {
+      min_supported_version: min,
+      latest_version: $("cfgLatest").value.trim() || null,
+      lease_chunk_minutes: N($("cfgChunk").value, 5),
+      lease_ttl_seconds: Math.max(15, N($("cfgTtl").value, 120)),
+      signup_enabled: $("cfgSignup").checked,
+      maintenance: $("cfgMaint").checked,
+      maintenance_message: $("cfgMaintMsg").value.trim() || null,
+    };
+    const { error } = await sb.from("app_config").update(row).eq("id", 1);
+    if (error) return msg("cfgMsg", error.message);
+    msg("cfgMsg", "Gateway config saved — applies to the next call.", "ok");
+  };
+
+  async function loadPool() {
+    const { data, error } = await sb.from("credit_balances").select("user_id, modality, balance, unlimited, total_credited, total_spent").limit(5000);
+    if (error) return msg("cfgMsg", error.message);
+    const rows = data || [];
+    const sum = { credited: 0, spent: 0, outstanding: 0, unlimited: 0, accounts: new Set() };
+    const byMod = {};
+    MODALITIES.forEach((m) => { byMod[m] = { outstanding: 0, credited: 0, spent: 0, accounts: new Set(), unlimited: 0 }; });
+    rows.forEach((r) => {
+      const b = byMod[r.modality];
+      if (!b) return;
+      b.credited += N(r.total_credited); b.spent += N(r.total_spent); b.accounts.add(r.user_id);
+      if (r.unlimited) { b.unlimited++; sum.unlimited++; } else { b.outstanding += N(r.balance); sum.outstanding += N(r.balance); }
+      sum.credited += N(r.total_credited); sum.spent += N(r.total_spent); sum.accounts.add(r.user_id);
+    });
+    $("poolCards").innerHTML = \`
+      <div class="stat"><div class="l">Minutes credited</div><div class="v" style="color:#4ade80">\${mins(sum.credited)}</div><div class="l">lifetime grants</div></div>
+      <div class="stat"><div class="l">Minutes spent</div><div class="v" style="color:#c4b5fd">\${mins(sum.spent)}</div><div class="l">settled by the lease meter</div></div>
+      <div class="stat"><div class="l">Still in wallets</div><div class="v">\${mins(sum.outstanding)}</div><div class="l">\${sum.accounts.size} account(s), \${sum.unlimited} bucket(s) unlimited</div></div>
+      <div class="stat"><div class="l">Burn ratio</div><div class="v">\${sum.credited > 0 ? Math.round((sum.spent / sum.credited) * 100) + "%" : "—"}</div><div class="l">of granted minutes used</div></div>\`;
+    $("poolTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => \`<tr>
+      <td>\${MOD_LABEL[m]}</td>
+      <td class="mono" style="text-align:right">\${mins(byMod[m].outstanding)}\${byMod[m].unlimited ? ' <span class="pill yes">' + byMod[m].unlimited + " unlimited</span>" : ""}</td>
+      <td class="mono" style="text-align:right">\${mins(byMod[m].credited)}</td>
+      <td class="mono" style="text-align:right">\${mins(byMod[m].spent)}</td>
+      <td class="muted">\${byMod[m].accounts.size}</td></tr>\`).join("");
+  }
+  $("poolRefresh").onclick = loadPool;
+
+  // ══ PLANS ═══════════════════════════════════════════════════════════════
   async function loadPlans() {
-    const { data, error } = await sb.from("plans")
-      .select("id, name, monthly_minutes, max_devices, features, price_cents, currency, active").order("price_cents");
+    const { data, error } = await sb.from("plans").select("id, name, max_devices, features, active").order("id");
     if (error) return console.error(error);
     PLAN_ROWS = data || [];
-    $("gPlan").innerHTML = PLAN_ROWS.filter((p) => p.active).map((p) =>
-      \`<option value="\${p.id}">\${p.name} — \${p.monthly_minutes === 0 ? "unlimited" : p.monthly_minutes + " min"} · \${featLabel(p.features)}</option>\`).join("");
     $("plansTable").querySelector("tbody").innerHTML = PLAN_ROWS.map((p) => {
       const feats = p.features || [];
       return \`<tr data-id="\${p.id}">
-        <td><code>\${p.id}</code></td>
-        <td><input data-f="name" value="\${p.name ?? ""}" /></td>
-        <td><input data-f="price" type="number" min="0" step="1" value="\${p.price_cents ?? 0}" title="cents" style="max-width:90px" /></td>
-        <td><input data-f="minutes" type="number" min="0" value="\${p.monthly_minutes ?? 0}" title="0 = unlimited" style="max-width:90px" /></td>
-        <td><input data-f="devices" type="number" min="1" value="\${p.max_devices ?? 1}" style="max-width:70px" /></td>
+        <td><code>\${esc(p.id)}</code></td>
+        <td><input data-f="name" value="\${esc(p.name ?? "")}" /></td>
+        <td><input data-f="devices" type="number" min="1" value="\${N(p.max_devices, 1)}" style="max-width:80px" /></td>
         <td>\${FEATURES.map((f) => \`<label class="feat"><input type="checkbox" data-f="feat_\${f}" \${feats.includes(f) ? "checked" : ""} />\${f}</label>\`).join("")}</td>
         <td><input type="checkbox" data-f="active" \${p.active ? "checked" : ""} /></td>
         <td style="white-space:nowrap"><button data-p="save" data-id="\${p.id}" class="primary">Save</button> <button data-p="del" data-id="\${p.id}" class="danger">Delete</button></td></tr>\`;
-    }).join("") || '<tr><td colspan="8" class="muted">No plans yet.</td></tr>';
+    }).join("") || '<tr><td colspan="6" class="muted">No plans yet.</td></tr>';
   }
+
   $("addPlan").onclick = async () => {
-    const id = prompt("New plan id (lowercase, no spaces, e.g. 'duo'):"); if (!id) return;
+    const id = prompt("New plan id (lowercase, no spaces, e.g. 'duo'):");
+    if (!id) return;
     const clean = id.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
-    if (!clean) { $("plansMsg").innerHTML = '<div class="err">Invalid id.</div>'; return; }
-    const { error } = await sb.from("plans").insert({ id: clean, name: clean, monthly_minutes: 300, max_devices: 1, features: ["video"], price_cents: 0, active: true });
-    $("plansMsg").innerHTML = error ? \`<div class="err">\${error.message}</div>\` : '<div class="ok">Plan created — edit and Save.</div>';
+    if (!clean) return msg("plansMsg", "Invalid id.");
+    const { error } = await sb.from("plans").insert({ id: clean, name: clean, max_devices: 2, features: ["video"], active: true });
+    msg("plansMsg", error ? error.message : "Plan created — edit and Save.", error ? "err" : "ok");
     await loadPlans();
   };
+
   document.addEventListener("click", async (e) => {
-    const b = e.target.closest("button[data-p]"); if (!b) return;
-    const id = b.dataset.id, tr = document.querySelector(\`#plansTable tr[data-id="\${id}"]\`);
+    const b = e.target.closest("button[data-p]");
+    if (!b) return;
+    const id = b.dataset.id;
+    const tr = document.querySelector(\`#plansTable tr[data-id="\${id}"]\`);
     if (b.dataset.p === "save" && tr) {
       const get = (f) => tr.querySelector(\`[data-f="\${f}"]\`);
-      const row = { name: get("name").value.trim() || id, price_cents: N(get("price").value), monthly_minutes: N(get("minutes").value), max_devices: N(get("devices").value, 1), features: FEATURES.filter((f) => get("feat_" + f)?.checked), active: get("active").checked };
+      const row = {
+        name: get("name").value.trim() || id,
+        max_devices: N(get("devices").value, 1),
+        features: FEATURES.filter((f) => get("feat_" + f)?.checked),
+        active: get("active").checked,
+      };
       const { error } = await sb.from("plans").update(row).eq("id", id);
-      $("plansMsg").innerHTML = error ? \`<div class="err">\${error.message}</div>\` : '<div class="ok">Saved “' + row.name + '”.</div>';
+      msg("plansMsg", error ? error.message : "Saved “" + row.name + "”.", error ? "err" : "ok");
       await loadPlans();
     }
     if (b.dataset.p === "del") {
-      if (!confirm("Delete plan '" + id + "'? Fails if any account still uses it.")) return;
+      if (!confirm("Delete plan '" + id + "'? Fails while an account still uses it.")) return;
       const { error } = await sb.from("plans").delete().eq("id", id);
-      $("plansMsg").innerHTML = error ? \`<div class="err">\${error.message}</div>\` : '<div class="ok">Deleted.</div>';
+      msg("plansMsg", error ? error.message : "Deleted.", error ? "err" : "ok");
       await loadPlans();
     }
   });
 
-  // ══ USERS / SUBSCRIPTIONS ════════════════════════════════════════════════
-  async function loadSubs() {
-    const { data, error } = await sb.from("subscriptions")
-      .select("id, user_id, plan_id, status, minutes_used, minutes_allocated, unlimited, current_period_end, billing_provider, key_id")
-      .order("updated_at", { ascending: false }).limit(300);
-    if (error) return console.error(error);
-    SUB_ROWS = data || [];
-    const ids = [...new Set(SUB_ROWS.map((r) => r.user_id))];
-    const { data: profs } = await sb.from("profiles").select("id, email").in("id", ids);
-    PROF_CACHE = Object.fromEntries((profs || []).map((p) => [p.id, p.email]));
-    const { data: devs } = await sb.from("devices").select("user_id, revoked").in("user_id", ids);
-    const devCount = {}; (devs || []).forEach((d) => { if (!d.revoked) devCount[d.user_id] = (devCount[d.user_id] || 0) + 1; });
-    const plans = {}; PLAN_ROWS.forEach((p) => plans[p.id] = p);
-    const keys = {}; KEY_CACHE.forEach((k) => keys[k.id] = k);
-    window.__devCount = devCount;
-    renderSubs();
-  }
-  function walletOf(r) {
-    const plan = PLAN_ROWS.find((p) => p.id === r.plan_id) || {};
-    if (r.unlimited || plan.monthly_minutes === 0) return "∞";
-    const alloc = r.minutes_allocated ?? plan.monthly_minutes ?? 0;
-    const rem = Math.max(0, alloc - N(r.minutes_used));
-    return \`\${N(r.minutes_used).toFixed(0)} / \${alloc} <span class="muted">(\${rem.toFixed(0)} left)</span>\`;
-  }
-  function renderSubs() {
-    const q = ($("subSearch").value || "").toLowerCase();
-    const plans = {}; PLAN_ROWS.forEach((p) => plans[p.id] = p);
-    const keys = {}; KEY_CACHE.forEach((k) => keys[k.id] = k);
-    const rows = SUB_ROWS.filter((r) => {
-      if (!q) return true;
-      const email = PROF_CACHE[r.user_id] || "";
-      return email.toLowerCase().includes(q) || (plans[r.plan_id]?.name || r.plan_id).toLowerCase().includes(q) || r.status.includes(q);
-    });
-    $("subsTable").querySelector("tbody").innerHTML = rows.map((r) => {
-      const plan = plans[r.plan_id] || {};
-      const end = r.current_period_end ? new Date(r.current_period_end).toLocaleDateString() : "—";
-      const keyLabel = r.key_id ? (keys[r.key_id]?.label || "linked") : "default";
-      const dev = (window.__devCount || {})[r.user_id] || 0;
-      return \`<tr>
-        <td>\${PROF_CACHE[r.user_id] || r.user_id.slice(0, 8)}</td>
-        <td>\${plan.name || r.plan_id}</td>
-        <td class="muted">\${featLabel(plan.features)}</td>
-        <td><span class="pill \${r.status}">\${r.status}</span></td>
-        <td class="mono">\${walletOf(r)}</td>
-        <td>\${end}</td>
-        <td class="muted">\${keyLabel}</td>
-        <td class="muted">\${dev}</td>
-        <td style="white-space:nowrap">
-          <button data-act="topup" data-id="\${r.user_id}">+Min</button>
-          <button data-act="reset" data-id="\${r.user_id}">Reset</button>
-          <button data-act="suspend" data-id="\${r.user_id}">\${r.status === "canceled" ? "Resume" : "Suspend"}</button>
-          <button data-act="unbind" data-id="\${r.user_id}">Unbind</button>
-          <button class="danger" data-act="del" data-id="\${r.user_id}">Delete</button>
-        </td></tr>\`;
-    }).join("") || '<tr><td colspan="9" class="muted">No accounts yet.</td></tr>';
-  }
-  $("subSearch").oninput = renderSubs;
-
-  async function loadUsage() {
-    const { data } = await sb.from("usage_sessions").select("user_id, tab, started_at, ended_at, minutes").order("started_at", { ascending: false }).limit(100);
-    const ids = [...new Set((data || []).map((r) => r.user_id))];
-    const { data: profs } = await sb.from("profiles").select("id, email").in("id", ids);
-    const emailOf = Object.fromEntries((profs || []).map((p) => [p.id, p.email]));
-    $("usageTable").querySelector("tbody").innerHTML = (data || []).map((r) => \`<tr>
-      <td>\${emailOf[r.user_id] || r.user_id.slice(0, 8)}</td>
-      <td>\${r.tab || "—"}</td>
-      <td>\${new Date(r.started_at).toLocaleString()}</td>
-      <td>\${r.ended_at ? new Date(r.ended_at).toLocaleString() : '<span class="pill active">live</span>'}</td>
-      <td class="mono">\${N(r.minutes).toFixed(2)}</td></tr>\`).join("") || '<tr><td colspan="5" class="muted">No usage yet.</td></tr>';
-  }
-
-  // ── User events ───────────────────────────────────────────────────────────
+  // ── Auth ──────────────────────────────────────────────────────────────────
   $("signIn").onclick = async () => {
-    $("authMsg").textContent = "";
+    msg("authMsg", "");
     const { data, error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
-    if (error) { $("authMsg").innerHTML = \`<div class="err">\${error.message}</div>\`; return; }
+    if (error) return msg("authMsg", error.message);
     await showDash(data.user);
   };
   $("signOut").onclick = async () => { await sb.auth.signOut(); location.reload(); };
-  $("refresh").onclick = async () => { await Promise.all([loadKeys(), loadPlans()]); await loadSubs(); loadUsage(); };
+  sb.auth.onAuthStateChange((_event, session) => { if (!session) $("dash").classList.add("hidden"); });
 
-  $("grant").onclick = async () => {
-    $("grantMsg").textContent = "";
-    const email = $("gEmail").value.trim().toLowerCase();
-    if (!email) { $("grantMsg").innerHTML = '<div class="err">Enter a user email.</div>'; return; }
-    const { data: prof } = await sb.from("profiles").select("id").ilike("email", email).maybeSingle();
-    if (!prof) { $("grantMsg").innerHTML = '<div class="err">No account with that email yet — they must sign up once first.</div>'; return; }
-    const end = $("gEnd").value ? new Date($("gEnd").value + "T23:59:59Z").toISOString() : null;
-    const allocRaw = $("gAlloc").value.trim();
-    const row = {
-      user_id: prof.id, plan_id: $("gPlan").value, status: $("gStatus").value,
-      minutes_used: N($("gUsed").value), current_period_end: end,
-      minutes_allocated: allocRaw === "" ? null : N(allocRaw),
-      unlimited: $("gUnlimited").checked,
-      billing_provider: "manual", cancel_at_period_end: false,
-      key_id: $("gKey").value || null,
-    };
-    const { error } = await sb.from("subscriptions").upsert(row, { onConflict: "user_id" });
-    if (error) { $("grantMsg").innerHTML = \`<div class="err">\${error.message}</div>\`; return; }
-    $("grantMsg").innerHTML = '<div class="ok">Saved.</div>';
-    await loadSubs();
-  };
-
-  document.addEventListener("click", async (e) => {
-    const b = e.target.closest("button[data-act]"); if (!b) return;
-    const id = b.dataset.id, act = b.dataset.act;
-    const sub = SUB_ROWS.find((r) => r.user_id === id);
-    if (act === "reset") await sb.from("subscriptions").update({ minutes_used: 0 }).eq("user_id", id);
-    if (act === "suspend") await sb.from("subscriptions").update({ status: sub?.status === "canceled" ? "active" : "canceled" }).eq("user_id", id);
-    if (act === "topup") {
-      const amt = parseInt(prompt("Minutes to ADD to this wallet:", "30"), 10);
-      if (!amt || amt <= 0) return;
-      const plan = PLAN_ROWS.find((p) => p.id === sub?.plan_id) || {};
-      const base = sub?.minutes_allocated ?? plan.monthly_minutes ?? 0;
-      await sb.from("subscriptions").update({ minutes_allocated: base + amt, unlimited: false }).eq("user_id", id);
-    }
-    if (act === "unbind") {
-      if (!confirm("Unbind all devices for this user? They can then activate on a new PC.")) return;
-      await sb.from("devices").delete().eq("user_id", id);
-    }
-    if (act === "del") {
-      if (!confirm("Delete this account's subscription? The login account itself remains.")) return;
-      await sb.from("subscriptions").delete().eq("user_id", id);
-    }
-    await loadSubs();
-  });
-
-  // ══ PRICING & PROFIT ═════════════════════════════════════════════════════
-  async function loadCosts() {
-    const { data } = await sb.from("billing_config").select("*").eq("id", 1).maybeSingle();
-    COSTS = { ...VERIFIED, ...(data || {}) };
-    $("cVideo").value = N(COSTS.lucy_video_per_sec_cost, 0.04).toFixed(4);
-    $("cVoice").value = N(COSTS.voice_cloning_per_sec_cost, 0.0025).toFixed(4);
-    $("cAudio").value = N(COSTS.natural_audio_per_sec_cost, 0.0001).toFixed(5);
-    $("cMargin").value = N(COSTS.profit_margin_percent, 40);
-    $("cFloor").value = N(COSTS.min_guaranteed_margin_percent, 25);
-  }
-  $("saveCosts").onclick = async () => {
-    const row = { lucy_video_per_sec_cost: N($("cVideo").value, 0.04), voice_cloning_per_sec_cost: N($("cVoice").value, 0.0025), natural_audio_per_sec_cost: N($("cAudio").value, 0.0001), profit_margin_percent: N($("cMargin").value, 40), min_guaranteed_margin_percent: N($("cFloor").value, 25), last_verified_at: new Date().toISOString().split("T")[0] };
-    const { error } = await sb.from("billing_config").update(row).eq("id", 1);
-    $("costMsg").innerHTML = error ? \`<div class="err">\${error.message}</div>\` : '<div class="ok">Saved.</div>';
-    if (!error) { COSTS = { ...COSTS, ...row }; renderPricing(); renderTimer(); }
-  };
-  $("resetCosts").onclick = async () => {
-    if (!confirm("Reset API pricing to the verified baseline?")) return;
-    const { error } = await sb.from("billing_config").update({ ...VERIFIED, last_verified_at: new Date().toISOString().split("T")[0] }).eq("id", 1);
-    if (!error) { COSTS = { ...VERIFIED }; await loadCosts(); renderPricing(); renderTimer(); }
-  };
-  function renderPricing() {
-    $("modeTable").querySelector("tbody").innerHTML = modeRatesPerMinute().map((r) => \`<tr>
-      <td>\${r.label}</td>
-      <td style="text-align:right" class="mono">$\${r.rawCostMin.toFixed(2)}/min</td>
-      <td style="text-align:right" class="mono"><b>$\${r.userPriceMin.toFixed(2)}/min</b></td>
-      <td style="text-align:right" class="mono" style="color:#4ade80">+$\${r.profitMin.toFixed(2)}/min</td>
-      <td style="text-align:right" class="mono">\${r.marginPercent}%</td></tr>\`).join("");
-    renderSim();
-  }
-  function renderSim() {
-    const mins = N($("simMin").value, 30); $("simMinLbl").textContent = mins;
-    const f = sessionFinancials(mins * 60, $("simMode").value, $("simVoice").value === "cloned");
-    $("simCards").innerHTML = \`
-      <div class="stat"><div class="l">Video engine cost</div><div class="v" style="color:#c4b5fd">$\${f.video.toFixed(2)}</div></div>
-      <div class="stat"><div class="l">Voice engine cost</div><div class="v" style="color:#7dd3fc">$\${f.voice.toFixed(2)}</div></div>
-      <div class="stat"><div class="l">Billed to customer</div><div class="v">$\${f.billed.toFixed(2)}</div><div class="l">\${mins} min deducted</div></div>
-      <div class="stat" style="border-color:#166534"><div class="l">Net owner profit</div><div class="v" style="color:#4ade80">+$\${f.profit.toFixed(2)}</div><div class="l">+\${f.margin.toFixed(0)}% margin</div></div>\`;
-  }
-  ["simMode", "simVoice"].forEach((i) => $(i).onchange = renderSim);
-  $("simMin").oninput = renderSim;
-
-  // ══ TIMER & BURN RATES ═══════════════════════════════════════════════════
-  async function loadTimer() {
-    const { data } = await sb.from("timer_config").select("*").eq("id", 1).maybeSingle();
-    TIMER = { ...TIMER, ...(data || {}) };
-    $("tVV").value = N(TIMER.video_voice_multiplier, 1.5); $("lblVV").textContent = N(TIMER.video_voice_multiplier, 1.5);
-    $("tVO").value = N(TIMER.video_only_multiplier, 1.0); $("lblVO").textContent = N(TIMER.video_only_multiplier, 1.0);
-    $("tAO").value = N(TIMER.audio_only_multiplier, 0.5); $("lblAO").textContent = N(TIMER.audio_only_multiplier, 0.5);
-    $("tWarn").value = N(TIMER.warning_threshold_minutes, 5);
-    $("tAuto").checked = TIMER.auto_terminate_at_zero !== false;
-  }
-  [["tVV", "lblVV"], ["tVO", "lblVO"], ["tAO", "lblAO"]].forEach(([src, lbl]) => {
-    $(src).oninput = () => { $(lbl).textContent = $(src).value; renderTimer(); };
-  });
-  $("saveTimer").onclick = async () => {
-    const row = { video_voice_multiplier: N($("tVV").value, 1.5), video_only_multiplier: N($("tVO").value, 1.0), audio_only_multiplier: N($("tAO").value, 0.5), warning_threshold_minutes: N($("tWarn").value, 5), auto_terminate_at_zero: $("tAuto").checked };
-    const { error } = await sb.from("timer_config").update(row).eq("id", 1);
-    $("timerMsg").innerHTML = error ? \`<div class="err">\${error.message}</div>\` : '<div class="ok">Saved.</div>';
-    if (!error) { TIMER = { ...TIMER, ...row }; renderTimer(); }
-  };
-  function renderTimer() {
-    // Rule tester
-    const mins = N($("rMin").value, 60), mode = $("rMode").value, price = N($("rPrice").value);
-    const a = ruleProfitability(mins, mode, price, true);
-    const cls = a.status === "profitable" ? "profit" : a.status === "loss" ? "loss" : a.status === "breakeven" ? "be" : "";
-    const head = a.status === "profitable" ? \`🟢 MAKING PROFIT (+$\${a.netProfit.toFixed(2)})\`
-      : a.status === "loss" ? \`🔴 LOSING MONEY (-$\${a.loss.toFixed(2)})\`
-      : a.status === "breakeven" ? "🟡 BREAK-EVEN" : "Enter a price to evaluate";
-    $("ruleVerdict").innerHTML = \`<div class="verdict \${cls}">
-      <div style="font-weight:800;margin-bottom:8px">\${head} \${a.status === "profitable" ? \`<span class="pill yes">+\${a.marginPct.toFixed(0)}% margin</span>\` : ""} \${a.status === "loss" ? \`<span class="pill no">need $\${a.breakEven.toFixed(2)} min</span>\` : ""}</div>
-      <div class="grid4">
-        <div class="stat"><div class="l">Burn rate</div><div class="v">\${a.mult}x</div><div class="l">= \${a.realAllowedMinutes.toFixed(1)} real min</div></div>
-        <div class="stat"><div class="l">Total API cost</div><div class="v" style="color:#c4b5fd">$\${a.totalRawApiCost.toFixed(2)}</div></div>
-        <div class="stat"><div class="l">Break-even</div><div class="v" style="color:#fcd34d">$\${a.breakEven.toFixed(2)}</div></div>
-        <div class="stat"><div class="l">Recommended (+\${targetMargin()}%)</div><div class="v" style="color:#4ade80">$\${a.suggested.toFixed(2)}</div></div>
-      </div></div>\`;
-    // Matrix
-    $("matrixTable").querySelector("tbody").innerHTML = [15, 30, 60, 120, 300].map((m) => {
-      const r = ruleProfitability(m, "video_audio", 0, true);
-      const net = r.suggested - r.totalRawApiCost;
-      return \`<tr><td><b>\${m} min</b></td><td class="mono">\${r.mult}x</td><td class="mono">\${r.realAllowedMinutes.toFixed(1)} real</td>
-        <td class="mono" style="color:#c4b5fd">$\${r.totalRawApiCost.toFixed(2)}</td>
-        <td class="mono" style="color:#fcd34d">$\${r.breakEven.toFixed(2)}</td>
-        <td class="mono"><b>$\${r.suggested.toFixed(2)}</b></td>
-        <td class="mono" style="text-align:right;color:#4ade80">+$\${net.toFixed(2)}</td></tr>\`;
-    }).join("");
-  }
-  ["rMin", "rMode"].forEach((i) => $(i).onchange = renderTimer);
-  $("rPrice").oninput = renderTimer;
-
-  // Restore an existing session on load.
   sb.auth.getSession().then(({ data }) => { if (data?.session) showDash(data.session.user); });
 </script>
 </body>

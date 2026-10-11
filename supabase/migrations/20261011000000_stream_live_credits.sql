@@ -57,6 +57,50 @@ alter table public.subscriptions
   add column if not exists video_audio_enabled     boolean not null default true,
   add column if not exists max_concurrent_sessions integer not null default 2;
 
+-- ── Self-signup provisioning ─────────────────────────────────────────────────
+-- An account created at the sign-up screen must be usable immediately: without a
+-- subscription row the gateway answers 'no_subscription', which reads like a bug to
+-- a new user. They get the starter plan with an empty wallet, so the first call
+-- still refuses with 'out_of_minutes' until an admin credits it. This is not a
+-- trial — nothing is granted here.
+create or replace function public.sl_provision_subscription()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_plan text;
+begin
+  v_plan := coalesce(
+    (select id from public.plans where id = 'starter'),
+    (select min(id) from public.plans where active),
+    (select min(id) from public.plans));
+  if v_plan is null then return new; end if;   -- plans not configured yet
+  insert into public.subscriptions (user_id, plan_id, status)
+  values (new.id, v_plan, 'active')
+  on conflict (user_id) do nothing;
+  return new;
+end; $$;
+
+drop trigger if exists sl_provision_subscription on public.profiles;
+create trigger sl_provision_subscription
+  after insert on public.profiles
+  for each row execute function public.sl_provision_subscription();
+
+-- Accounts that signed up before this migration.
+insert into public.subscriptions (user_id, plan_id, status)
+select p.id, coalesce((select id from public.plans where id = 'starter'), (select min(id) from public.plans)), 'active'
+  from public.profiles p
+ where not exists (select 1 from public.subscriptions s where s.user_id = p.id)
+   and coalesce((select id from public.plans where id = 'starter'), (select min(id) from public.plans)) is not null
+on conflict (user_id) do nothing;
+
+-- Concurrent devices are allowed by product decision, so the plan every new account
+-- lands on has to permit more than one install; otherwise device binding would
+-- contradict max_concurrent_sessions. Adjust per plan in the panel afterwards.
+update public.plans set max_devices = greatest(max_devices, 2) where id = 'starter';
+
 -- ── credit_balances: one row per user x modality ─────────────────────────────
 create table if not exists public.credit_balances (
   user_id    uuid        not null references public.profiles (id) on delete cascade,
@@ -924,11 +968,14 @@ as $$
            -- day rollover is applied at read time so a stale counter can never
            -- lock an account out of a healthy key
            case when k.usage_day < (now() at time zone 'utc')::date then 0 else k.minutes_today end as used_today,
-           case when a.key_id is not null then 0 else 1 end as assign_rank,
+           -- explicitly assigned (new table, or the legacy per-subscription key)
+           case when a.key_id is not null or k.id = s.key_id then 0 else 1 end as assign_rank,
+           case when k.is_default then 0 else 1 end as default_rank,
            k.created_at
     from public.gateway_keys k
     left join public.user_key_assignments a
       on a.key_id = k.id and a.user_id = p_user and a.provider = p_provider
+    left join public.subscriptions s on s.user_id = p_user
     where k.enabled
       and (p_provider <> 'fal'     or k.fal_key        is not null)
       and (p_provider <> 'elevenlabs' or k.elevenlabs_key is not null)
@@ -937,7 +984,7 @@ as $$
   from candidates
   where secret is not null and secret <> ''
     and (daily_minute_cap is null or used_today < daily_minute_cap)
-  order by assign_rank, priority asc nulls last, created_at asc;
+  order by assign_rank, default_rank, priority asc nulls last, created_at asc;
 $$;
 
 -- Bookkeeping after an upstream attempt: minutes burned against the key (daily cap)

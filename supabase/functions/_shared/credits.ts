@@ -139,7 +139,7 @@ export async function startLease(
 export async function updateLease(
   sessionId: string,
   action: "renew" | "end",
-): Promise<{ ok: boolean; ended: boolean; reason?: string; balance: number | null; expiresAt: string | null; billed: number | null; ttlSeconds: number; unlimited: boolean }> {
+): Promise<{ ok: boolean; ended: boolean; reason?: string; error?: string; balance: number | null; expiresAt: string | null; billed: number | null; ttlSeconds: number; unlimited: boolean }> {
   const db = adminClient();
   const data = unwrap(await db.rpc("sl_lease", { p_session_id: sessionId, p_action: action }));
 
@@ -148,6 +148,7 @@ export async function updateLease(
     ok: data.ok === true,
     ended: data.ended === true,
     reason: data.reason ? String(data.reason) : undefined,
+    error: data.error ? String(data.error) : undefined,
     balance: data.balance === null || data.balance === undefined ? null : Number(data.balance),
     expiresAt: data.ended === true ? null : new Date(Date.now() + ttl * 1000).toISOString(),
     billed: data.billed_minutes === undefined ? null : Number(data.billed_minutes),

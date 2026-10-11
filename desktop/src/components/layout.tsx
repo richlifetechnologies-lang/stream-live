@@ -1,11 +1,12 @@
 import { Link, useLocation } from "wouter";
-import { Video, Settings, Zap } from "lucide-react";
+import { Video, Settings, Zap, User } from "lucide-react";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
 
   const navItems = [
     { href: "/", icon: Video, label: "Stream" },
+    { href: "/account", icon: User, label: "Account" },
     { href: "/usage", icon: Zap, label: "Usage" },
     { href: "/settings", icon: Settings, label: "Settings" },
   ];

@@ -27,6 +27,28 @@ function classify(path: string): "inference" | "library" | null {
   return null;
 }
 
+/**
+ * The client sends either JSON, plain text, or a pre-serialised multipart body (a
+ * FormData it wanted ElevenLabs to see byte-for-byte, base64'd so the boundary and
+ * the file bytes survive the hop through this JSON envelope).
+ */
+function upstreamPayload(body: Record<string, never>): { headers: Record<string, string>; payload?: Uint8Array | string } {
+  const mp = body.multipart as { contentType?: string; bodyBase64?: string } | undefined;
+  if (mp?.bodyBase64) {
+    const binary = atob(mp.bodyBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return { headers: { "Content-Type": mp.contentType ?? "multipart/form-data" }, payload: bytes };
+  }
+  if (typeof body.text === "string") {
+    return { headers: { "Content-Type": "text/plain" }, payload: body.text };
+  }
+  if (body.json !== undefined) {
+    return { headers: { "Content-Type": "application/json" }, payload: JSON.stringify(body.json) };
+  }
+  return { headers: {} };
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return preflight();
   if (req.method !== "POST") return fail("method not allowed", 405);
@@ -71,14 +93,15 @@ Deno.serve(async (req: Request) => {
     }
 
     const proxied = await runWithKeys<Response>(user.id, "elevenlabs", async (key) => {
+      const { headers, payload } = upstreamPayload(body);
       const upstream = await fetch(ELEVEN_BASE + path, {
         method,
         headers: {
           "xi-api-key": key.secret,
-          "Content-Type": "application/json",
           Accept: body.isStream ? "audio/mpeg" : "application/json",
+          ...headers,
         },
-        body: method === "POST" && body.body !== undefined ? JSON.stringify(body.body) : undefined,
+        body: method === "POST" ? payload : undefined,
       });
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "");

@@ -4,6 +4,7 @@ import http from "http";
 import fs from "fs";
 import os from "os";
 import path from "path";
+import crypto from "crypto";
 import { initVirtualCameraIpc, shutdownVirtualCamera } from "./virtual-camera";
 
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
@@ -11,7 +12,7 @@ const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 
 const GITHUB_OWNER = "richlifetechnologies-lang";
-const GITHUB_REPO  = "stream-studio";
+const GITHUB_REPO  = "stream-live";
 
 // ─── Asset pattern for the current platform + architecture ─────────────────
 function getAssetPattern(): RegExp {
@@ -183,44 +184,18 @@ async function startInAppDownload(win: BrowserWindow, overrideUrl?: string) {
   }
 }
 
-// ─── IPC: fal.ai token mint (keeps API key in Main Process) ──────────────────
-// The renderer asks for a short-lived JWT; we call fal's token endpoint here
-// where the API key never touches the renderer bundle.
-ipcMain.handle("get-fal-token", async (_event, apiKey: string, appId: string) => {
-  // Strip "Key " prefix if user accidentally stored it that way, then re-add it cleanly
-  const rawKey = apiKey.startsWith("Key ") ? apiKey.slice(4).trim() : apiKey.trim();
-  if (!rawKey) throw new Error("FAL_KEY is missing or empty");
-
-  // The token server validates scope against the alias only (e.g. "lucy-2-5" not "decart/lucy-2-5/realtime")
-  // appId is already the alias when called from our tokenProvider
-  const res = await fetch("https://rest.fal.ai/tokens/", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Key ${rawKey}`,
-    },
-    body: JSON.stringify({
-      allowed_apps: [appId],
-      token_expiration: 120,
-    }),
-  });
-  if (!res.ok) {
-    const txt = await res.text().catch(() => "");
-    throw new Error(`fal.ai token error (${res.status}): ${txt}`);
-  }
-  // The tokens endpoint returns either a plain string token or a JSON object
-  const raw = await res.text();
+// ─── IPC: stable per-machine device id ───────────────────────────────────────
+// The gateway binds metered leases to a device. Node exposes the OS machine id
+// (Windows MachineGuid / macOS IOPlatformUUID), which survives app reinstall;
+// fall back to a host fingerprint if the OS refuses.
+ipcMain.handle("get-device-id", () => {
   try {
-    const parsed = JSON.parse(raw);
-    // Could be { detail: "token..." } or just the token string wrapped in JSON
-    if (typeof parsed === "string") return parsed;
-    if (parsed && typeof parsed.detail === "string") return parsed.detail;
-    if (parsed && typeof parsed.token === "string") return parsed.token;
-    // If it's some other object, stringify is wrong — return raw text
-    return raw.replace(/^"|"$/g, ""); // strip quotes if it was a quoted string
+    return (os as typeof os & { machineIdSync(): string }).machineIdSync();
   } catch {
-    // Response was plain text token
-    return raw.trim();
+    return crypto
+      .createHash("sha256")
+      .update(`${os.hostname()}|${os.arch()}|${os.platform()}`)
+      .digest("hex");
   }
 });
 
@@ -305,7 +280,11 @@ function createWindow() {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
-          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.fal.ai wss://*.fal.ai https://wma.fal.run https://fal.run wss://fal.run https://*.fal.run wss://*.fal.run https://fonts.googleapis.com https://fonts.gstatic.com; media-src *; connect-src *;",
+          // connect-src is an explicit allow-list: the Supabase gateway (https + wss),
+          // the fal relay hosts, the GitHub updater, and blob/data. rest.fal.ai is gone
+          // — the gateway mints the JWT now, so the renderer must never reach a key endpoint.
+          // localhost stays for the dev server and the app's own local API server.
+          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.fal.ai wss://*.fal.ai https://wma.fal.run https://fal.run wss://fal.run https://*.fal.run wss://*.fal.run https://fonts.googleapis.com https://fonts.gstatic.com; media-src *; connect-src 'self' http://localhost:* ws://localhost:* https://onhanfathvfkkliayvrn.supabase.co wss://onhanfathvfkkliayvrn.supabase.co https://*.fal.run wss://*.fal.run https://fal.run wss://fal.run https://api.github.com https://objects.githubusercontent.com data: blob:;",
         ],
       },
     });

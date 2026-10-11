@@ -32,9 +32,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.send("quit-and-install");
   },
 
-  // Mint a short-lived fal.ai JWT in the Main Process (keeps API key off renderer)
-  getFalToken: (apiKey: string, appId: string): Promise<string> => {
-    return ipcRenderer.invoke("get-fal-token", apiKey, appId);
+  // Stable per-machine id the gateway binds metered leases to
+  getDeviceId: (): Promise<string> => {
+    return ipcRenderer.invoke("get-device-id");
   },
 
   // ─── Virtual camera ("Stream Studio Camera") frame feeder ───────────────────

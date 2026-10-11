@@ -4,12 +4,16 @@ import { useState, useEffect } from "react";
 import StreamPage from "./pages/stream";
 import SettingsPage from "./pages/settings";
 import UsagePage from "./pages/usage";
+import AccountPage from "./pages/account";
 import PopoutPage from "./pages/popout";
 import ObsoutPage from "./pages/obsout";
 import ObsoutPortraitPage from "./pages/obsoutp";
 import Toaster from "./components/toaster";
+import { ArtBackdrop } from "./components/brand";
+import { useAccount, restore } from "./lib/gateway";
 
 const C = "hsl(187 100% 52%)";
+const BG = "hsl(222 47% 4%)";
 
 declare global {
   interface Window {
@@ -187,7 +191,47 @@ function UpdateBanner() {
   );
 }
 
+function Splash() {
+  return (
+    <div style={{ position: "fixed", inset: 0, overflow: "hidden", background: BG }}>
+      <ArtBackdrop />
+      <div style={{
+        position: "relative", height: "100%", display: "flex", alignItems: "flex-end",
+        justifyContent: "center", paddingBottom: "7vh",
+      }}>
+        <div style={{
+          display: "flex", alignItems: "center", gap: 10, padding: "9px 18px", borderRadius: 999,
+          background: "hsl(228 62% 4% / 0.86)", backdropFilter: "blur(16px)",
+          border: "1px solid hsl(187 100% 52% / 0.22)",
+          boxShadow: "0 12px 40px hsl(226 80% 2% / 0.55)",
+        }}>
+          <div style={{
+            width: 14, height: 14, borderRadius: "50%",
+            border: `2px solid ${C}33`, borderTopColor: C,
+            animation: "ss-spin 0.8s linear infinite",
+          }} />
+          <span style={{ fontFamily: "'Orbitron',monospace", fontSize: 11, letterSpacing: "0.14em", color: "hsl(187 100% 74%)" }}>
+            CONNECTING…
+          </span>
+        </div>
+      </div>
+      <style>{`@keyframes ss-spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  );
+}
+
+// The stream tab is account-gated: no session means sign-in, never the console.
+// OBS output windows (popout/obsout) are separate processes and stay ungated.
+function StreamGate() {
+  const account = useAccount();
+  if (account.loading) return <Splash />;
+  if (!account.signedIn) return <AccountPage />;
+  return <StreamPage />;
+}
+
 export default function App() {
+  useEffect(() => { void restore(); }, []);
+
   return (
     <Router hook={useHashLocation}>
       <Toaster />
@@ -208,8 +252,11 @@ export default function App() {
         <Route path="/settings">
           <SettingsPage />
         </Route>
+        <Route path="/account">
+          <AccountPage />
+        </Route>
         <Route>
-          <StreamPage />
+          <StreamGate />
         </Route>
       </Switch>
     </Router>

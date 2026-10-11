@@ -1,186 +1,131 @@
-# STREAM STUDIO Login Web
+# STREAM LIVE
 
-Auth, licensing gateway, and subscription/usage backend for the **Stream Studio**
-desktop app. This is a **separate project** from the `stream-studio` app — it does
-not modify that repo. Its job is to move the AI API keys off users' machines and
-onto a server you control, and to gate access with subscription accounts, plan
-minutes, and device binding.
+Stream Studio, production-ready: the desktop app **plus** the account gateway it
+runs on. Users create an account and sign in; an administrator grants **minutes**
+per modality; every AI key stays on the server. A user never enters an API key.
 
-## Why this exists
-Today each Stream Studio user pastes their **own** fal.ai and ElevenLabs keys into
-the app, stored in plaintext `localStorage`. That means:
-- You have no central control and no usage metering.
-- Keys are exposed on every user's machine.
-- The voice key is sent in a raw header straight to ElevenLabs.
+Everything lives in this one repo:
 
-This backend fixes all three: users **sign in** instead of pasting keys; the master
-keys live only in server-side secrets; and every call is authorized + metered at a
-single chokepoint.
-
-## Architecture
 ```
-Desktop app ──sign in──▶ Supabase Auth (email/password)
-     │                          │
-     │  Bearer <user JWT>       ▼
-     ├──mint-fal-token──▶ Edge Function ──checks plan/minutes/device──▶ mints ≤120s fal JWT (master FAL_KEY)
-     ├──proxy-voice─────▶ Edge Function ──checks 'voice' entitlement──▶ forwards to ElevenLabs (master key)
-     ├──usage-heartbeat─▶ Edge Function ──credits minutes to subscription──▶ Postgres
-     │
-Administrator ──admin panel──▶ grants / edits / cancels ──▶ subscriptions
+desktop/           Electron app (Stream Studio) — version 1.0.0
+  electron/          main process: updater, virtual camera, local API server, device id
+  src/pages/         stream console, account panel, usage, settings, OBS output windows
+  src/lib/gateway.ts singleton client + React store for the signed-in account
+client/            the gateway SDK the app imports (stream-live-client.ts) + protocol doc
+supabase/          the gateway itself
+  migrations/        schema: wallets, ledger, leases, key pool, top-ups, config
+  functions/         start-session · lease · proxy-voice · admin-api · admin
+scripts/           gen-admin-html.mjs (bundles the panel HTML into html.ts)
 ```
 
-## Stack (chosen for low cost + low maintenance)
-- **Supabase** — auth, Postgres, Row-Level Security, Edge Functions (Deno), and
-  **Supabase Studio** as a day-one admin UI. Free tier to start.
-- **Contact-the-administrator access** — there is **no online self-serve billing**.
-  A user contacts you (email/DM/etc.), you agree payment offline, and you grant or
-  extend their subscription from the admin panel. Simple, no card processing, no
-  merchant-of-record, no webhook to maintain.
-- **Admin panel** (`supabase/functions/admin/`) — a lightweight, `is_admin`-gated
-  web page for granting/editing/canceling subscriptions and viewing usage. It is
-  served by an Edge Function, so it is **hosted on Supabase's free tier** with no
-  separate web host.
+## The product rules this implements
 
-## Repository layout
-```
-supabase/
-  migrations/            # SQL schema: profiles, plans, subscriptions, devices,
-                         #   usage, gateway_keys + admin write policies
-  functions/
-    _shared/             # cors, auth, db clients, entitlement checks, key resolution
-    mint-fal-token/      # authorize + mint short-lived fal JWT (the chokepoint)
-    proxy-voice/         # authorize + proxy ElevenLabs (keeps voice key server-side)
-    usage-heartbeat/     # meter minutes during/after a call
-    admin/               # serves the admin panel HTML (index.ts + index.html)
-client/
-  stream-studio-auth.ts  # drop-in SDK for the desktop app
-  integration-guide.md   # how to wire it into stream-studio later
-```
+| Rule | Where it is enforced |
+| --- | --- |
+| No API keys on the user's machine | `start-session` mints a ≤120 s fal JWT; `proxy-voice` forwards to ElevenLabs. Master keys are gateway secrets or admin-only `gateway_keys` rows. |
+| Minutes are granted by an administrator | `sl_grant_credits` / `sl_resolve_request` are `security definer` and **service-role only**; the browser can only reach them through `admin-api`, which checks `profiles.is_admin`. |
+| Three independent buckets | `credit_balances(user_id, modality)` — `video`, `audio`, `video_audio`. A call can only spend from its own bucket. |
+| Minutes never expire | No date column on a balance; the ledger has no expiry entries. |
+| No trials | `subscriptions.status` defaults to `active` and the migration rewrites any `trialing` row. Signup creates no free minutes. |
+| Multiple devices per account | `subscriptions.max_concurrent_sessions` (default 2) caps simultaneous leases, not logins. |
+| Manual top-up, no payment processing | `credit_requests` queue: the user files a request with a payment reference, the admin approves and credits. No Stripe, no webhooks. |
+| Open self-signup, no email verification | Dashboard auth settings (see the runbook). |
+| Admin can shut an old build down | `app_config.min_supported_version`; `start-session` answers `412 update_required`. |
+
+## How a call is paid for
+
+Prepaid leases, so a crashed call can never run up a bill:
+
+1. `start-session` → `sl_start_session` locks the bucket row (`FOR UPDATE`), refuses
+   if the balance is under a minute or the concurrency cap is reached, then
+   **debits one chunk** (`app_config.lease_chunk_minutes`, default 5) and opens a
+   session whose `lease_expires_at` is `now() + lease_ttl_seconds` (default 120).
+2. The app calls `lease` every 45 s. Each renew **settles the window that just
+   elapsed** (real minutes × burn-rate multiplier, billed against the prepaid chunk),
+   refunds the unused remainder to the bucket and pre-pays the next chunk.
+3. `lease` answers `ended: true` when the bucket cannot fund another chunk — the app
+   tears the stream down and tells the user to ask for a top-up.
+4. Ending a call (or losing the heartbeat) settles and refunds; a reaper
+   (`sl_reap_sessions`) closes abandoned leases lazily so minutes and concurrency
+   slots are never stranded.
+
+Every movement is an append-only row in `credit_ledger`; balances are never
+rewritten in place.
+
+## Table map
+
+| Table | Purpose |
+| --- | --- |
+| `credit_balances` | one row per (user, modality): balance, `unlimited`, totals |
+| `credit_ledger` | append-only history — credit / debit / release / adjust |
+| `credit_requests` | manual top-up queue (pending → approved / rejected) |
+| `burn_rates` | versioned per-modality multipliers; a new row never edits history |
+| `usage_sessions` | one metered lease per call (`modality`, `pending_debit`, `billed_minutes`) |
+| `gateway_keys` | admin key pool: provider, priority, daily caps, health, failover log |
+| `user_key_assignments` | pin an account to a specific fal / ElevenLabs key |
+| `key_usage_log` | which key served which account and the outcome |
+| `devices` | per-install device ids bound to an account |
+| `app_config` | kill switch, lease chunk/TTL, signup + maintenance flags |
+| `subscriptions` | account status, enabled modalities, `max_concurrent_sessions` |
 
 ## Admin panel
-`supabase/functions/admin/` is a static, `is_admin`-gated page with five tabs,
-served by an Edge Function. Access is **account-based — there are no license keys.**
-- **Users** — grant/edit an account: plan, status, period end, and a **prepaid
-  minute wallet** (allocated minutes, or unlimited). The plan sets capability
-  (audio-only vs video+audio); the wallet is what you allocate and the user
-  consumes until it hits zero. Per row: **top-up minutes**, reset, suspend/resume,
-  **unbind devices**, delete, and an optional **linked API key pair**. Searchable.
-- **Plans & Pricing** — edit each plan's price, monthly minutes (0 = unlimited),
-  device limit, features (`video` / `voice` / `portrait_obs`), and active flag;
-  add or delete plans.
-- **API Key Vault** — store video (fal.ai) + voice (ElevenLabs) key pairs with
-  notes, keep several on file, mark one as the **global default** (master
-  fallback), edit, or delete. Readable only by admins and the server (RLS).
-- **Pricing & Profit** — set verified base API costs (video / voice-clone /
-  natural audio $ per sec) and target profit margin + safety floor; a live
-  cost/profit table per call mode; and an interactive **session profit simulator**.
-- **Timer & Burn Rates** — per-mode **burn-rate multipliers** (1 real minute = N
-  wallet minutes: video+cloned-voice faster, audio-only slower), low-minutes
-  warning, auto-terminate at zero; a **rule profit/loss tester** and a
-  **minute-package pricing matrix** (break-even + recommended retail).
 
-### How minutes drain (burn rate)
-`usage-heartbeat` stores **real** elapsed minutes on the session, then credits
-`real × multiplier` to the wallet, where the multiplier comes from `timer_config`
-for that call mode (`video-audio` → video_voice, `audio-only` → audio_only,
-`video-only` → video_only). Entitlement stops the call when the wallet is empty.
+`supabase/functions/admin/` serves the panel (HTML bundled into `html.ts` by
+`scripts/gen-admin-html.mjs`). Sign in with an account whose `profiles.is_admin` is
+true. Tabs: **Accounts** (snapshot, modality toggles, concurrent cap, grant/deduct
+with a mandatory reason, devices, sign-out-everywhere, ledger), **Top-ups**
+(approve/reject with editable minutes), **Key pool** (CRUD + health + assignments +
+24 h usage), **Burn rates** (version, never edit), **Live sessions** (end now, reap),
+**Gateway** (`app_config`, minimum-version kill switch, maintenance mode) and
+**Plans**. Writes go through `admin-api`, never straight to the database.
 
-### How a key is chosen for a call
-`_shared/keys.ts` resolves, in order: the key pair **linked to the user**
-(`subscriptions.key_id`) → the **default** `gateway_keys` row → the
-`FAL_KEY` / `ELEVENLABS_KEY` **env secret**. So the dashboard is optional; env
-secrets remain the most secure fallback.
+After editing `index.html`, regenerate the bundle:
 
-
-## Setup
-### 1. Create a Supabase project
-At [supabase.com](https://supabase.com), create a project. Grab the **URL**,
-**anon key**, and **service_role key** from Settings → API.
-
-### 2. Apply the schema
 ```bash
-npm i -g supabase
-supabase login
-supabase link --project-ref YOUR_PROJECT_REF
-supabase db push          # applies all migrations
+node scripts/gen-admin-html.mjs
 ```
-(Or paste the files in `supabase/migrations/` into the SQL editor, in order.)
 
-### 3. Set Edge Function secrets (dashboard → Edge Functions → Secrets)
-```
-FAL_KEY=...                 # your master fal.ai key
-ELEVENLABS_KEY=...          # your master ElevenLabs key
-SUPABASE_SERVICE_ROLE_KEY=...
-```
-> These secrets never live in this repo. The anon key is the only value that ships
-> to the client, and it grants nothing by itself (RLS + `is_admin` enforce access).
+## Desktop app
 
-### 4. Deploy the functions
+Build (from `desktop/`, Node ≥ 20):
+
 ```bash
-supabase functions deploy mint-fal-token
-supabase functions deploy proxy-voice
-supabase functions deploy usage-heartbeat
-supabase functions deploy admin      # hosts the admin panel (see step 6)
+npm install
+npx vite build                       # renderer
+npx tsc -p tsconfig.electron.json    # main process
+npx electron-builder --win --x64     # installer → release/
 ```
 
-### 5. Make yourself an admin
-In Supabase Studio → Table editor → `profiles`, set `is_admin = true` for your
-account (sign up once first so the row exists).
+The gateway URL and anon key are read at build time:
 
-### 6. Open the hosted admin panel
-The panel is served by the `admin` Edge Function on Supabase's free tier — no
-separate web host, and you never commit your URL or anon key. Once deployed
-(step 4), open:
+```bash
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co \
+VITE_SUPABASE_ANON_KEY=<publishable anon key> \
+npx vite build
 ```
-https://YOUR_PROJECT_REF.supabase.co/functions/v1/admin
-```
-The function injects the project URL and the public anon key at serve time, so
-the page is ready to use. Sign in with your admin account (from step 5).
 
-> Prefer to run it locally without deploying? Open
-> `supabase/functions/admin/index.html` directly in a browser and paste your
-> `SUPABASE_URL` + `SUPABASE_ANON_KEY` over the two placeholder tokens at the top.
+Both are public values (the anon key only opens RLS-guarded reads). A build without
+them refuses to sign in and says why instead of surfacing a confusing auth error.
 
-### 7. Grant access (contact-the-administrator model)
-There is no online checkout. When a user contacts you and you've agreed payment
-offline:
-1. They sign up once in the app (so a `profiles` row exists).
-2. In the admin panel, find their account and **Grant / edit subscription** — pick a
-   plan, set status `active`, and set `current_period_end`. This writes
-   `billing_provider = 'manual'`.
-3. To renew, extend `current_period_end`; to reset a metered plan, use **Reset
-   minutes**; to cut access, **Cancel**.
+Versioning starts at **1.0.0**. Releases are published to
+`richlifetechnologies-lang/stream-live` with `StreamStudio-Setup-<version>.exe`,
+`.blockmap` and `latest.yml`; the in-app updater reads that repo's latest release,
+so a build older than `app_config.min_supported_version` shows the update button.
 
-### 8. Connect the desktop app
-See [`client/integration-guide.md`](client/integration-guide.md). The existing
-`stream-studio` repo is untouched until you choose to wire it up; a
-`VITE_USE_GATEWAY` flag lets you roll out gradually and keep BYO-key as a fallback.
+## Deploying / going live
 
-## Usage-control model
-- **Plans** define `monthly_minutes` (0 = unlimited), `max_devices`, and `features`
-  (`video`, `voice`, `portrait_obs`).
-- On each call start, `mint-fal-token` checks: subscription active? not expired?
-  feature included? minutes left? device under the limit? Only then does it mint a
-  token — so time/feature control is enforced server-side and can't be bypassed by
-  editing the client.
-- `usage-heartbeat` credits elapsed minutes every 30s and on stop, applying the
-  per-mode **burn-rate multiplier** from `timer_config` to the prepaid wallet.
+Follow [`DEPLOY.md`](DEPLOY.md) — it covers the migration, the five functions,
+deleting the retired ones, secrets, dashboard auth settings, making the first admin
+and the smoke test that proves money is actually being metered.
 
-## Security notes & limits
-- A short-lived fal token (≤120s, model-scoped) is still visible to its own client;
-  that's inherent to browser WebRTC. Blast radius is small. Fully hiding it would
-  require proxying media through your server (latency + cost) — not recommended.
-- Keep `SUPABASE_SERVICE_ROLE_KEY`, `FAL_KEY`, and `ELEVENLABS_KEY` server-side only.
-- This repo contains **no secrets**. `.env.example` lists the variables to set.
+## Security posture
 
-## Status
-Phase 2: account-based access (no license keys) with a prepaid minute wallet,
-per-mode burn rates, an API key vault, and a pricing/profit engine — merged from
-the RICH X CAM LIVE admin. Schema (3 migrations), four Edge Functions (three
-gateway functions + `admin`, which hosts the panel on Supabase's free tier), a
-5-tab admin panel, and a client SDK.
-
-**Live:** deployed to Supabase project `onhanfathvfkkliayvrn` via the GitHub
-integration (push to `main` auto-applies migrations + redeploys functions).
-Admin panel: `https://onhanfathvfkkliayvrn.supabase.co/functions/v1/admin`.
-The `stream-studio` desktop app is unchanged.
+- Money RPCs (`sl_start_session`, `sl_lease`, `sl_grant_credits`, `sl_resolve_request`,
+  `sl_pick_keys`, …) are `security definer` and revoked from `anon`/`authenticated`.
+  Supabase grants new public functions to those roles by default, so the revoke is
+  explicit in the migration — never drop it.
+- Views are `security_invoker = true` so RLS keeps applying through them.
+- Key material never leaves an Edge Function: `runWithKeys` tries candidates in
+  priority order, logs each outcome and returns only the response body.
+- The renderer's CSP allow-lists the gateway, the fal relays and the GitHub updater;
+  `rest.fal.ai` (the old client-side token endpoint) is gone.

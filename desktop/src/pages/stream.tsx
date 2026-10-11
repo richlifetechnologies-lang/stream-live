@@ -3,10 +3,10 @@ import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout";
 import { useToast } from "../hooks/use-toast";
 import {
-  getApiKey, hasCredentials, getVoiceKey, hasVoiceKey,
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { sessionStart, sessionTick, sessionEnd } from "../lib/session-store";
+import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances } from "../lib/gateway";
+import { GatewayError, REASON_MESSAGES, type TabName } from "@stream-live/client";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
@@ -140,7 +140,7 @@ class AudioSyncPipeline {
   private analyser:   AnalyserNode  | null = null;
   private delayNode:  DelayNode     | null = null;
   private dest:       MediaStreamAudioDestinationNode | null = null;
-  private freqData:   Uint8Array    = new Uint8Array(0);
+  private freqData:   Uint8Array<ArrayBuffer> = new Uint8Array(0);
   private audioSig:   number[]      = [];
   private videoSig:   number[]      = [];
   private offCanvas:  OffscreenCanvas | null = null;
@@ -244,7 +244,7 @@ class VoiceCloningEngine {
   private monitorGain: GainNode | null = null;
   private monitored = false;
 
-  apiKey  = "";
+  call    = null as null | ((path: string, body: FormData) => Promise<Response>);
   voiceId = BUILTIN_VOICES[0].id;
   onVu?:   (level: number) => void;
   onError?: (msg: string) => void;
@@ -302,17 +302,13 @@ class VoiceCloningEngine {
   }
 
   private async _process(blob: Blob) {
-    if (!this.running || !this.audioCtx || !this.apiKey || !this.voiceId) return;
+    if (!this.running || !this.audioCtx || !this.call || !this.voiceId) return;
     try {
       const form = new FormData();
       form.append("audio", blob, "chunk.webm");
       form.append("model_id", "eleven_multilingual_sts_v2");
       form.append("voice_settings", JSON.stringify({ stability: 0.5, similarity_boost: 0.8, style: 0.0, use_speaker_boost: true }));
-      const res = await fetch(`https://api.elevenlabs.io/v1/speech-to-speech/${this.voiceId}/stream`, {
-        method: "POST",
-        headers: { "xi-api-key": this.apiKey },
-        body: form,
-      });
+      const res = await this.call(`/v1/speech-to-speech/${this.voiceId}/stream`, form);
       if (!res.ok) { this.onError?.(`Voice engine error ${res.status}`); return; }
       const buf = await res.arrayBuffer();
       if (!this.running || !this.audioCtx) return;
@@ -396,16 +392,13 @@ function Waveform({ analyser, color = C, height = 80 }: { analyser: AnalyserNode
 }
 
 // ─── Voice upload helper ──────────────────────────────────────────────────────
-async function uploadVoice(apiKey: string, name: string, file: File): Promise<SavedVoice> {
+// Voice-library work needs no lease, so it goes through the gateway with no sessionId.
+async function uploadVoice(name: string, file: File): Promise<SavedVoice> {
   const form = new FormData();
   form.append("name", name);
   form.append("files", file);
   form.append("description", `Uploaded via ${APP}`);
-  const res = await fetch("https://api.elevenlabs.io/v1/voices/add", {
-    method: "POST",
-    headers: { "xi-api-key": apiKey },
-    body: form,
-  });
+  const res = await gateway.voice("/v1/voices/add", form);
   if (!res.ok) throw new Error(`Voice upload failed (${res.status})`);
   const data = await res.json() as { voice_id: string };
   return { id: data.voice_id, name, createdAt: Date.now() };
@@ -414,14 +407,12 @@ async function uploadVoice(apiKey: string, name: string, file: File): Promise<Sa
 // ─── Video engine (proven — DO NOT MODIFY) ───────────────────────────────────
 const _RELAY_APP   = "decart/lucy-2-5/realtime";
 const _RELAY_WS    = `wss://fal.run/${_RELAY_APP}`;
-const _TOKEN_URL   = "https://rest.fal.ai/tokens/";
-const _TOKEN_ALIAS = "lucy-2-5";
 
 interface VideoSession { close(): void; send(d: Record<string, unknown>): void; }
 
 type VcamResult = { supported: boolean; active: boolean; ready: boolean; error: string | null };
 interface ElectronAPI {
-  getFalToken?: (k: string, a: string) => Promise<string>;
+  getDeviceId?: () => Promise<string>;
   vcamStart?: () => Promise<VcamResult>;
   vcamStop?: () => Promise<VcamResult>;
   vcamStatus?: () => Promise<VcamResult & { cameraName: string }>;
@@ -431,19 +422,7 @@ function getElectronAPI(): ElectronAPI | undefined {
   return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
 }
 
-async function _mintToken(apiKey: string): Promise<string> {
-  const api = (window as unknown as { electronAPI?: { getFalToken?: (k: string, a: string) => Promise<string> } }).electronAPI;
-  if (api?.getFalToken) return api.getFalToken(apiKey, _TOKEN_ALIAS);
-  const rawKey = apiKey.startsWith("Key ") ? apiKey.slice(4).trim() : apiKey.trim();
-  const res = await fetch(_TOKEN_URL, { method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Key ${rawKey}` }, body: JSON.stringify({ allowed_apps: [_TOKEN_ALIAS], token_expiration: 120 }) });
-  if (!res.ok) throw new Error(`Engine connection failed (${res.status})`);
-  const raw = await res.text();
-  try { const p = JSON.parse(raw); if (typeof p === "string") return p; if (p?.detail) return p.detail; if (p?.token) return p.token; } catch { /* plain text */ }
-  return raw.replace(/^"|"$/g, "").trim();
-}
-
-async function _startVideoSession(apiKey: string, localStream: MediaStream, onRemote: (s: MediaStream) => void, onDisconnect: () => void, prompt: string, refB64: string | null): Promise<VideoSession> {
-  const token = await _mintToken(apiKey);
+async function _startVideoSession(token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void, onDisconnect: () => void, prompt: string, refB64: string | null): Promise<VideoSession> {
   const ws = new WebSocket(`${_RELAY_WS}?fal_jwt_token=${encodeURIComponent(token)}&max_buffering=8`);
   ws.binaryType = "arraybuffer";
   const send = (o: Record<string, unknown>) => { if (ws.readyState === WebSocket.OPEN) ws.send(encode(o)); };
@@ -574,6 +553,7 @@ function _notifyPopup(w: Window | null) { if (w && !w.closed) try { w.postMessag
 export default function StreamPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const account = useAccount();
 
   // ── Tab state ──────────────────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<TabId>("video-audio");
@@ -683,6 +663,8 @@ export default function StreamPage() {
   const cloneAudioRef   = useRef<HTMLAudioElement | null>(null);
   const localStreamRef  = useRef<MediaStream|null>(null);
   const videoSessionRef = useRef<VideoSession|null>(null);
+  // Open lease id: heartbeat/endCall live on the gateway, this mirrors it for cleanup.
+  const sessionIdRef    = useRef<string|null>(null);
   // Monotonic session generation. A socket that dies late (a previous attempt's
   // ghost) must not tear down the session the user is watching now.
   const sessionGenRef = useRef(0);
@@ -706,8 +688,8 @@ export default function StreamPage() {
   const micOnlyAnalyserRef  = useRef<AnalyserNode|null>(null);
   const micOnlyStreamRef    = useRef<MediaStream|null>(null);
 
-  const credsMissing = !hasCredentials();
-  const voiceKeySet  = hasVoiceKey();
+  const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
+  const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
 
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
@@ -1070,6 +1052,10 @@ export default function StreamPage() {
     sessionGenRef.current++;
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     isStartingRef.current = false;
+    // Close the lease so the unused prepaid chunk is refunded and the heartbeat stops.
+    await gateway.endCall().catch(() => {});
+    sessionIdRef.current = null;
+    void refreshBalances();
     videoSessionRef.current?.close(); videoSessionRef.current = null;
     clonerRef.current?.stop(); clonerRef.current = null;
     if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
@@ -1079,7 +1065,6 @@ export default function StreamPage() {
     [popoutRef, obsWindowRef, obsPortraitWindowRef].forEach(r => {
       if (r.current && !r.current.closed) try { r.current.postMessage("stream-studio-clear", "*"); } catch { /**/ }
     });
-    sessionEnd();
     setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
     setAudioActive(false); setSyncDelay(0.8); setVuLevel(0);
     setVcActive(false); setVcVu(0); setVcAnalyser(null);
@@ -1094,18 +1079,21 @@ export default function StreamPage() {
     if (isStartingRef.current || isStreaming) return;
     const needsVideo = activeTab !== "audio-only";
     const needsVoice = activeTab !== "video-only" && vcEnabled;
+    const tabName: TabName = activeTab;
 
-    if (credsMissing && needsVideo) { setLocation("/settings"); return; }
+    if (credsMissing) { setLocation("/account"); return; }
     if (needsVideo && (!cameraReady || !localStreamRef.current)) {
       toast({ title: "Camera not ready", description: "Enable your camera first.", variant: "destructive" }); return;
     }
 
-    const apiKey    = getApiKey()!;
-    const voiceKey  = getVoiceKey() ?? "";
-
     isStartingRef.current = true; setIsStarting(true); setConnStep("auth"); setConnStatus("connecting");
 
     try {
+      // Open the metered lease first: nothing touches WebRTC until the gateway
+      // confirms this account and bucket can pay for the call.
+      const ticket = await gateway.startCall(tabName, await deviceId());
+      sessionIdRef.current = ticket.sessionId;
+
       setConnStep("engine");
       const style  = STYLES.find(s => s.id === selectedStyle)!;
       const prompt = customPrompt.trim() || style.prompt;
@@ -1130,10 +1118,13 @@ export default function StreamPage() {
       }
 
       // ── Start video session ────────────────────────────────────────────
+      // The Audio Call tab has no video token (ticket.token === null): it is
+      // voice-only and must never open the fal session.
       if (needsVideo) {
+        if (!ticket.token) throw new Error(`${APP}: gateway returned no video token`);
         const gen = ++sessionGenRef.current;
         const session = await _startVideoSession(
-          apiKey, sendStream,
+          ticket.token, sendStream,
           remote => {
             if (sessionGenRef.current !== gen) return;
             remoteStreamRef.current = remote;
@@ -1157,9 +1148,9 @@ export default function StreamPage() {
       }
 
       // ── Start voice cloning ────────────────────────────────────────────
-      if (needsVoice && voiceKeySet && (micStreamForCloner || micOnlyStreamRef.current)) {
+      if (needsVoice && (micStreamForCloner || micOnlyStreamRef.current)) {
         const cloner = new VoiceCloningEngine();
-        cloner.apiKey  = voiceKey;
+        cloner.call    = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
         cloner.voiceId = vcVoiceId;
         cloner.setVideoDelay(syncPipeRef.current?.detectedDelay ?? 0.3);
         cloner.onVu    = v => setVcVu(v);
@@ -1175,17 +1166,39 @@ export default function StreamPage() {
         }
       }
 
-      sessionStart();
+      // Heartbeat well inside the 120 s lease TTL. When it reports ended the
+      // bucket has run dry: stop cleanly and tell the user to ask for a top-up.
+      gateway.beginHeartbeat(state => {
+        void refreshBalances();
+        if (state.ended) {
+          void teardownStream();
+          toast({ title: "Out of minutes", description: "Your minutes ran out — ask your administrator to top up.", variant: "destructive" });
+        }
+      }, 45_000);
+
       const t0 = Date.now();
-      timerRef.current = setInterval(() => { const s = Math.floor((Date.now() - t0) / 1000); setElapsed(s); sessionTick(s); }, 1000);
+      timerRef.current = setInterval(() => { setElapsed(Math.floor((Date.now() - t0) / 1000)); }, 1000);
       setIsStreaming(true);
 
     } catch (err) {
-      teardownStream();
-      toast({ title: "Stream Failed", description: err instanceof Error ? err.message : "Check your keys in Settings.", variant: "destructive" });
+      // Give back any prepaid chunk before unwinding the UI.
+      await gateway.endCall().catch(() => {});
+      sessionIdRef.current = null;
+      void teardownStream();
+      if (err instanceof GatewayError) {
+        const msg = REASON_MESSAGES[err.reason] ?? err.message;
+        if (err.reason === "out_of_minutes") {
+          toast({ title: "Out of minutes", description: `${msg} Open your account to request more.`, variant: "destructive" });
+          setLocation("/account");
+        } else {
+          toast({ title: "Cannot start", description: msg, variant: "destructive" });
+        }
+      } else {
+        toast({ title: "Stream Failed", description: err instanceof Error ? err.message : "Could not start the call.", variant: "destructive" });
+      }
     } finally { isStartingRef.current = false; setIsStarting(false); }
   }, [isStreaming, credsMissing, cameraReady, activeTab, selectedStyle, customPrompt, refImageB64,
-      selectedMicId, vcEnabled, vcVoiceId, voiceKeySet, noiseCancel, teardownStream, toast]);
+      selectedMicId, vcEnabled, vcVoiceId, noiseCancel, teardownStream, toast, setLocation]);
 
   const handleStop = useCallback(() => teardownStream(), [teardownStream]);
 
@@ -1222,11 +1235,11 @@ export default function StreamPage() {
   const handleVoiceUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; e.target.value = "";
     if (!file) return;
-    if (!voiceKeySet) { toast({ title: "Voice Studio Key required", description: "Add your Voice Studio Key in Settings first.", variant: "destructive" }); return; }
+    if (!account.signedIn) { toast({ title: "Sign in required", description: "Open your account to sign in before uploading a voice.", variant: "destructive" }); return; }
     const name = uploadVoiceName.trim() || file.name.replace(/\.[^.]+$/, "");
     setUploadingVoice(true);
     try {
-      const voice = await uploadVoice(getVoiceKey()!, name, file);
+      const voice = await uploadVoice(name, file);
       addSavedVoice(voice);
       setSavedVoices(getSavedVoices());
       setVcVoiceId(voice.id);
@@ -1235,7 +1248,7 @@ export default function StreamPage() {
     } catch (err) {
       toast({ title: "Upload failed", description: err instanceof Error ? err.message : "Could not upload voice.", variant: "destructive" });
     } finally { setUploadingVoice(false); }
-  }, [voiceKeySet, uploadVoiceName, toast]);
+  }, [account.signedIn, uploadVoiceName, toast]);
 
   const handleDeleteVoice = useCallback((id: string) => {
     removeSavedVoice(id); setSavedVoices(getSavedVoices());
@@ -1455,7 +1468,7 @@ export default function StreamPage() {
   );
 
   // ─── Stream button ─────────────────────────────────────────────────────────
-  const canStart = activeTab === "audio-only" ? true : (cameraReady && !credsMissing);
+  const canStart = !credsMissing && (needsVideo ? cameraReady : true);
   const StreamBtn = () => (
     <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 60, width: "min(440px, calc(100vw - 110px))", filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.55))" }}>
       {isStreaming ? (
@@ -1466,12 +1479,12 @@ export default function StreamPage() {
           <Square style={{ width: 18, height: 18 }} /> Stop
         </button>
       ) : (
-        <button onClick={handleStartStream} disabled={isStarting || (!canStart)}
+        <button onClick={credsMissing ? () => setLocation("/account") : handleStartStream} disabled={isStarting || (!credsMissing && !canStart)}
           style={{ width: "100%", height: 54, background: (canStart && !isStarting) ? "linear-gradient(135deg, hsl(187 100% 52%) 0%, hsl(200 100% 45%) 100%)" : "hsl(222 40% 11%)", border: "none", borderRadius: 12, cursor: (canStart && !isStarting) ? "pointer" : "not-allowed", color: (canStart && !isStarting) ? "hsl(222 47% 4%)" : "hsl(222 25% 40%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: (canStart && !isStarting) ? "0 0 28px hsl(187 100% 52% / 0.3)" : "none" }}
           onMouseEnter={e => { if (canStart && !isStarting) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}>
           {isStarting ? <><Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} /> Starting…</>
-            : credsMissing && needsVideo ? <><Settings style={{ width: 18, height: 18 }} /> Open Settings</>
+            : credsMissing ? <><Settings style={{ width: 18, height: 18 }} /> Request credits</>
             : !cameraReady && needsVideo ? <><Camera style={{ width: 18, height: 18 }} /> Enable Camera</>
             : <><Play style={{ width: 18, height: 18 }} /> Start</>}
         </button>
@@ -1490,7 +1503,7 @@ export default function StreamPage() {
         </div>
         {/* Toggle */}
         <button onClick={() => {
-          if (!voiceKeySet && !vcEnabled) { toast({ title: "Voice Studio Key required", description: "Add your Voice Studio Key in Settings.", variant: "destructive" }); return; }
+          if (!voiceKeySet && !vcEnabled) { toast({ title: "Out of minutes", description: "Ask your administrator to top up this bucket before using voice cloning.", variant: "destructive" }); return; }
           setVcEnabled(v => !v);
         }}
           style={{ width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer", background: vcEnabled ? VC : "hsl(222 40% 14%)", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
@@ -1501,8 +1514,8 @@ export default function StreamPage() {
       {!voiceKeySet && (
         <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(40 100% 52% / 0.08)", border: "1px solid hsl(40 100% 52% / 0.2)", marginBottom: 10 }}>
           <p style={{ fontSize: 11, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif" }}>
-            Voice Studio Key not set.{" "}
-            <button onClick={() => setLocation("/settings")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>Settings →</button>
+            You have no credit minutes in this bucket. Ask your administrator to top up your account.{" "}
+            <button onClick={() => setLocation("/account")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>Request credits →</button>
           </p>
         </div>
       )}
@@ -1781,15 +1794,15 @@ export default function StreamPage() {
           apps and OBS hear the persona voice instead of the raw mic. */}
       <audio ref={cloneAudioRef} autoPlay style={{ display: "none" }} />
 
-      {/* Missing key banner */}
-      {credsMissing && needsVideo && (
+      {/* Out-of-minutes banner */}
+      {credsMissing && (
         <div style={{ margin: "16px 32px 0", padding: "12px 18px", borderRadius: 10, background: "hsl(40 100% 52% / 0.1)", border: "1px solid hsl(40 100% 52% / 0.35)", display: "flex", alignItems: "center", gap: 12 }}>
           <Settings style={{ width: 16, height: 16, color: "hsl(40 100% 62%)", flexShrink: 0 }} />
           <p style={{ fontSize: 13, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif", flex: 1 }}>
-            <strong>Video Engine Key not set.</strong> Open Settings to add it before streaming.
+            You have no credit minutes in this bucket. Ask your administrator to top up your account.
           </p>
-          <button onClick={() => setLocation("/settings")} style={{ padding: "6px 14px", borderRadius: 8, background: "hsl(40 100% 52% / 0.25)", border: "1px solid hsl(40 100% 52% / 0.5)", color: "hsl(40 100% 80%)", fontWeight: 700, fontSize: 12, fontFamily: "'Orbitron',monospace", cursor: "pointer" }}>
-            Settings
+          <button onClick={() => setLocation("/account")} style={{ padding: "6px 14px", borderRadius: 8, background: "hsl(40 100% 52% / 0.25)", border: "1px solid hsl(40 100% 52% / 0.5)", color: "hsl(40 100% 80%)", fontWeight: 700, fontSize: 12, fontFamily: "'Orbitron',monospace", cursor: "pointer" }}>
+            Request credits
           </button>
         </div>
       )}
@@ -1803,7 +1816,7 @@ export default function StreamPage() {
             <div>
               <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>Starting…</h3>
               <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
-                {connStep === "engine" ? "2/2 · Connecting to AI engine…" : "1/2 · Validating key…"}
+                {connStep === "engine" ? "2/2 · Connecting to AI engine…" : "1/2 · Authorizing your account…"}
               </p>
             </div>
             <button onClick={() => teardownStream()} style={{ padding: "10px 20px", borderRadius: 8, width: "100%", background: "transparent", border: "1px solid hsl(187 100% 52% / 0.25)", color: "hsl(187 100% 52% / 0.8)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>

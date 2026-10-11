@@ -274,7 +274,10 @@ export class StreamLiveClient {
   beginHeartbeat(onState: (state: LeaseState) => void, intervalMs?: number): void {
     this.stopHeartbeat();
     const ms = intervalMs ?? 45_000;
-    this.heartbeat = setInterval(() => void this.ping().then(onState).catch(() => null), ms);
+    this.heartbeat = setInterval(
+      () => void this.ping().then((state) => { if (state) onState(state); }).catch(() => null),
+      ms,
+    );
   }
 
   private stopHeartbeat(): void {
@@ -316,19 +319,41 @@ export class StreamLiveClient {
   /**
    * ElevenLabs through the gateway. `sessionId` is required for speech-to-speech /
    * text-to-speech (it proves the call is being metered); voice-library calls pass none.
+   *
+   * A FormData body must arrive at ElevenLabs as the exact multipart payload the
+   * browser would have sent, so it is serialised here and carried as base64 —
+   * re-encoding it server-side would lose the boundary and the file bytes.
    */
-  async voice(path: string, body?: unknown, opts: { isStream?: boolean; method?: "POST" | "GET"; sessionId?: string | null } = {}): Promise<Response> {
+  async voice(
+    path: string,
+    body?: FormData | Record<string, unknown> | string,
+    opts: { isStream?: boolean; method?: "POST" | "GET"; sessionId?: string | null } = {},
+  ): Promise<Response> {
     const token = await this.token();
+    const payload: Record<string, unknown> = {
+      path,
+      method: opts.method ?? (body === undefined ? "GET" : "POST"),
+      isStream: opts.isStream ?? false,
+      sessionId: opts.sessionId ?? this.sessionId ?? undefined,
+    };
+
+    if (body instanceof FormData) {
+      const form = new Request("https://stream-live.local/form", { method: "POST", body });
+      const bytes = new Uint8Array(await form.arrayBuffer());
+      payload.multipart = {
+        contentType: form.headers.get("content-type") ?? "multipart/form-data",
+        bodyBase64: toBase64(bytes),
+      };
+    } else if (typeof body === "string") {
+      payload.text = body;
+    } else if (body !== undefined) {
+      payload.json = body;
+    }
+
     return fetch(`${this.cfg.supabaseUrl}/functions/v1/proxy-voice`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-      body: JSON.stringify({
-        path,
-        method: opts.method ?? "POST",
-        body,
-        isStream: opts.isStream ?? false,
-        sessionId: opts.sessionId ?? this.sessionId ?? undefined,
-      }),
+      body: JSON.stringify(payload),
     });
   }
 
@@ -360,8 +385,16 @@ export class StreamLiveClient {
   }
 }
 
-/** Stable per-machine id for device binding (Electron machineId / hostname + mac). */
-export function deviceIdFrom(seed: string): string {
+function toBase64(bytes: Uint8Array): string {
+  const chunk = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
+/** Stable per-machine id for device binding (Electron machineId / hostname + mac). */export function deviceIdFrom(seed: string): string {
   let h = 2166136261;
   for (let i = 0; i < seed.length; i++) {
     h ^= seed.charCodeAt(i);
