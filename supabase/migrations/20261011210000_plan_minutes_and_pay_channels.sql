@@ -23,14 +23,10 @@ alter table public.app_config
   drop column if exists contact_email,
   drop column if exists contact_phone;
 
--- Seed the existing catalogue from the legacy monthly allowance so the packages
--- are not shown as "0 minutes" on the first release that reads these columns.
-update public.plans
-   set video_minutes = monthly_minutes,
-       audio_minutes = case when 'voice' = any (features) then monthly_minutes else 0 end,
-       video_audio_minutes = case when 'voice' = any (features) then monthly_minutes else 0 end
- where monthly_minutes > 0
-   and video_minutes = 0 and audio_minutes = 0 and video_audio_minutes = 0;
+-- The three amounts start at zero on purpose: legacy plans.monthly_minutes was a
+-- single allowance under a retired model, and guessing a split from it would put
+-- numbers in front of buyers that nobody agreed to. The administrator types the
+-- real amounts on the panel's Plans tab.
 
 -- The snapshot is the desktop's single round-trip for account state, so the
 -- payment and contact blocks travel with it rather than costing another query.
