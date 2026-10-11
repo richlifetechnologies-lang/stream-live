@@ -1,4 +1,5 @@
 import { useRef, useEffect, useState, useCallback } from "react";
+import { FeedMark } from "../components/brand";
 
 // Portrait (9:16) OBS clean-output window.
 // The AI stream is natively 16:9, so it must be fit into the portrait frame.
@@ -18,7 +19,7 @@ export default function ObsoutPortraitPage() {
   useEffect(() => {
     const attach = () => {
       try {
-        const stream = (window.opener as any)?.__ssRemoteStream as MediaStream | undefined;
+        const stream = (window.opener as any)?.__slRemoteStream as MediaStream | undefined;
         if (!stream) return;
         if (bgRef.current && bgRef.current.srcObject !== stream) bgRef.current.srcObject = stream;
         if (fgRef.current && fgRef.current.srcObject !== stream) fgRef.current.srcObject = stream;
@@ -28,8 +29,8 @@ export default function ObsoutPortraitPage() {
     attach();
 
     const handler = (e: MessageEvent) => {
-      if (e.data?.type === "stream-studio-stream") attach();
-      if (e.data === "stream-studio-clear") {
+      if (e.data?.type === "stream-live-stream") attach();
+      if (e.data === "stream-live-clear") {
         if (bgRef.current) bgRef.current.srcObject = null;
         if (fgRef.current) fgRef.current.srcObject = null;
       }
@@ -90,6 +91,7 @@ export default function ObsoutPortraitPage() {
           transform: "scaleX(-1)",
         }}
       />
+      <FeedMark size={Math.max(26, Math.round(window.innerHeight * 0.045))} />
 
       {/* Fit-mode toggle — faded grey + auto-hides so it never distracts from,
           or shows up in, the OBS capture. */}

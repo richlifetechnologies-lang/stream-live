@@ -1,4 +1,5 @@
 import { useRef, useEffect } from "react";
+import { FeedMark } from "../components/brand";
 
 export default function ObsoutPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -6,7 +7,7 @@ export default function ObsoutPage() {
   useEffect(() => {
     const tryGetStream = () => {
       try {
-        const stream = (window.opener as any)?.__ssRemoteStream as MediaStream | undefined;
+        const stream = (window.opener as any)?.__slRemoteStream as MediaStream | undefined;
         if (stream && videoRef.current) {
           videoRef.current.srcObject = stream;
         }
@@ -16,10 +17,10 @@ export default function ObsoutPage() {
     tryGetStream();
 
     const handler = (e: MessageEvent) => {
-      if (e.data?.type === "stream-studio-stream") {
+      if (e.data?.type === "stream-live-stream") {
         tryGetStream();
       }
-      if (e.data === "stream-studio-clear" && videoRef.current) {
+      if (e.data === "stream-live-clear" && videoRef.current) {
         videoRef.current.srcObject = null;
       }
     };
@@ -29,7 +30,7 @@ export default function ObsoutPage() {
   }, []);
 
   return (
-    <div style={{ width: "100vw", height: "100vh", background: "#000", overflow: "hidden", margin: 0, padding: 0 }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", background: "#000", overflow: "hidden", margin: 0, padding: 0 }}>
       <video
         ref={videoRef}
         autoPlay
@@ -42,6 +43,7 @@ export default function ObsoutPage() {
           display: "block",
         }}
       />
+      <FeedMark size={Math.max(28, Math.round(window.innerHeight * 0.07))} />
     </div>
   );
 }

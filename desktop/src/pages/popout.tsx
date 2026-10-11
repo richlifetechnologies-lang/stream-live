@@ -6,7 +6,7 @@ export default function PopoutPage() {
   useEffect(() => {
     const tryGetStream = () => {
       try {
-        const stream = (window.opener as any)?.__ssRemoteStream as MediaStream | undefined;
+        const stream = (window.opener as any)?.__slRemoteStream as MediaStream | undefined;
         if (stream && videoRef.current) {
           videoRef.current.srcObject = stream;
         }
@@ -16,10 +16,10 @@ export default function PopoutPage() {
     tryGetStream();
 
     const handler = (e: MessageEvent) => {
-      if (e.data?.type === "stream-studio-stream") {
+      if (e.data?.type === "stream-live-stream") {
         tryGetStream();
       }
-      if (e.data === "stream-studio-clear" && videoRef.current) {
+      if (e.data === "stream-live-clear" && videoRef.current) {
         videoRef.current.srcObject = null;
       }
     };
@@ -29,12 +29,12 @@ export default function PopoutPage() {
   }, []);
 
   const handleStop = () => {
-    if (window.opener) window.opener.postMessage("stream-studio-stop", "*");
+    if (window.opener) window.opener.postMessage("stream-live-stop", "*");
     window.close();
   };
 
   const handleReconnect = () => {
-    if (window.opener) window.opener.postMessage("stream-studio-reconnect", "*");
+    if (window.opener) window.opener.postMessage("stream-live-reconnect", "*");
   };
 
   return (

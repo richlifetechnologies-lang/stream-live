@@ -150,9 +150,9 @@ The anon key is a public client credential, but the build must carry it — with
 the app refuses to sign in and says the gateway is not configured.
 
 Publish to `richlifetechnologies-lang/stream-live` as tag `v<version>` with three
-assets: `StreamStudio-Setup-<version>.exe`, its `.blockmap` and `latest.yml`. The
+assets: `StreamLive-Setup-<version>.exe`, its `.blockmap` and `latest.yml`. The
 in-app updater lists releases from that repo and matches
-`StreamStudio-Setup-*.exe`, so **verify the uploaded exe's sha256 equals the local
+`StreamLive-Setup-*.exe`, so **verify the uploaded exe's sha256 equals the local
 file** before telling anyone the release is out — a truncated upload is the failure
 mode that looks like a broken installer.
 

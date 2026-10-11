@@ -15,7 +15,7 @@ import {
 import { encode, decode } from "@msgpack/msgpack";
 
 // ─── Branding ─────────────────────────────────────────────────────────────────
-const APP = "Stream Studio";
+const APP = "Stream Live";
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
 type TabId = "video-audio" | "audio-only" | "video-only";
@@ -545,7 +545,7 @@ function _updatePrompt(session: VideoSession, prompt: string, refB64?: string | 
 }
 
 function _getBaseUrl() { return window.location.href.split("#")[0]; }
-function _notifyPopup(w: Window | null) { if (w && !w.closed) try { w.postMessage({ type: "stream-studio-stream" }, "*"); } catch { /**/ } }
+function _notifyPopup(w: Window | null) { if (w && !w.closed) try { w.postMessage({ type: "stream-live-stream" }, "*"); } catch { /**/ } }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Main component
@@ -630,7 +630,7 @@ export default function StreamPage() {
   const [isObsPortraitActive, setIsObsPortraitActive] = useState(false);
   const [obsPortraitInstructions, setObsPortraitInstructions] = useState(false);
 
-  // ── Virtual devices (Stream Studio Camera / Microphone) ───────────────────
+  // ── Virtual devices (Stream Live Camera / Microphone) ───────────────────
   const [vcamEnabled, setVcamEnabled]     = useState(false);
   const [vcamSupported, setVcamSupported] = useState(true);
   const [vcamReady, setVcamReady]         = useState(false);
@@ -799,7 +799,7 @@ export default function StreamPage() {
   // ─── Virtual camera: pump AI output frames to the native feeder ─────────────
   // Draws the AI output video into a fixed 1280x720 RGBA8 canvas and pushes each
   // frame over IPC to the Electron main process, which writes it into the
-  // "Stream Studio Camera" shared-memory buffer. resizemode=LINEAR in the header
+  // "Stream Live Camera" shared-memory buffer. resizemode=LINEAR in the header
   // makes the filter scale to whatever resolution the calling app negotiated.
   const VCAM_W = 1280, VCAM_H = 720;
   const vcamTick = useCallback(() => {
@@ -836,7 +836,7 @@ export default function StreamPage() {
     const api = getElectronAPI();
     if (!api?.vcamStart || !api?.vcamStop) {
       setVcamSupported(false);
-      toast({ title: "Virtual camera unavailable", description: "Run in the Stream Studio desktop app on Windows, and install the Stream Studio Camera driver.", variant: "destructive" });
+      toast({ title: "Virtual camera unavailable", description: "Run in the Stream Live desktop app on Windows, and install the Stream Live Camera driver.", variant: "destructive" });
       return;
     }
     if (!vcamEnabled) {
@@ -849,7 +849,7 @@ export default function StreamPage() {
       setVcamEnabled(true);
       vcamOnRef.current = true;
       vcamTick();
-      toast({ title: "Stream Studio Camera ON", description: "Select “Stream Studio Camera” in Zoom/Teams/Chrome. It shows the AI output while streaming." });
+      toast({ title: "Stream Live Camera ON", description: "Select “Stream Live Camera” in Zoom/Teams/Chrome. It shows the AI output while streaming." });
     } else {
       stopVCamPump();
       await api.vcamStop();
@@ -1061,9 +1061,9 @@ export default function StreamPage() {
     if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
     syncPipeRef.current?.stop(); syncPipeRef.current = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-    remoteStreamRef.current = null; window.__ssRemoteStream = null;
+    remoteStreamRef.current = null; window.__slRemoteStream = null;
     [popoutRef, obsWindowRef, obsPortraitWindowRef].forEach(r => {
-      if (r.current && !r.current.closed) try { r.current.postMessage("stream-studio-clear", "*"); } catch { /**/ }
+      if (r.current && !r.current.closed) try { r.current.postMessage("stream-live-clear", "*"); } catch { /**/ }
     });
     setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
     setAudioActive(false); setSyncDelay(0.8); setVuLevel(0);
@@ -1129,7 +1129,7 @@ export default function StreamPage() {
             if (sessionGenRef.current !== gen) return;
             remoteStreamRef.current = remote;
             if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remote;
-            window.__ssRemoteStream = remote;
+            window.__slRemoteStream = remote;
             _notifyPopup(popoutRef.current); _notifyPopup(obsWindowRef.current); _notifyPopup(obsPortraitWindowRef.current);
             setConnStatus("connected");
           },
@@ -1286,8 +1286,8 @@ export default function StreamPage() {
 
   useEffect(() => {
     const h = (e: MessageEvent) => {
-      if (e.data === "stream-studio-stop") teardownStream();
-      else if (e.data === "stream-studio-reconnect" && cameraReady) { teardownStream(); setTimeout(() => handleStartStream(), 300); }
+      if (e.data === "stream-live-stop") teardownStream();
+      else if (e.data === "stream-live-reconnect" && cameraReady) { teardownStream(); setTimeout(() => handleStartStream(), 300); }
     };
     window.addEventListener("message", h); return () => window.removeEventListener("message", h);
   }, [teardownStream, cameraReady, handleStartStream]);
@@ -1381,7 +1381,7 @@ export default function StreamPage() {
                     <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "monospace" }}>● OBS WINDOW OPEN</span>
                     <button onClick={() => setObsInstructions(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16 }}>×</button>
                   </div>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Studio OBS". For AI audio add Sources → + → Audio Input Capture → "CABLE Output (VB-Audio Virtual Cable)".</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS". For AI audio add Sources → + → Audio Input Capture → "CABLE Output (VB-Audio Virtual Cable)".</p>
                 </div>
               )}
             </div>
@@ -1408,7 +1408,7 @@ export default function StreamPage() {
                     <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "monospace" }}>● PORTRAIT OBS OPEN</span>
                     <button onClick={() => setObsPortraitInstructions(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16 }}>×</button>
                   </div>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Studio OBS Portrait" for a clean 9:16 feed.</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS Portrait" for a clean 9:16 feed.</p>
                 </div>
               )}
             </div>
@@ -1678,7 +1678,7 @@ export default function StreamPage() {
     </>
   );
 
-  // ─── Virtual device broadcast panel (Stream Studio Camera / Microphone) ─────
+  // ─── Virtual device broadcast panel (Stream Live Camera / Microphone) ─────
   // Plain render function (not a nested component) so it reconciles in place and
   // never remounts the video subtree.
   const renderVirtualDevices = (showCamera: boolean) => {
@@ -1704,12 +1704,12 @@ export default function StreamPage() {
                 <Camera style={{ width: 14, height: 14, color: vcamEnabled ? C : "hsl(222 25% 45%)" }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Studio Camera</p>
+                <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Camera</p>
                 <p style={{ fontSize: 10, color: vcamReady ? C : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif" }}>
                   {!vcamSupported ? "Driver layer unavailable" : vcamReady ? "Live — a call app is receiving video" : vcamEnabled ? "Waiting for a call app to open it…" : "Off"}
                 </p>
               </div>
-              {toggleBtn(vcamEnabled, toggleVCam, false, "Toggle Stream Studio Camera")}
+              {toggleBtn(vcamEnabled, toggleVCam, false, "Toggle Stream Live Camera")}
             </div>
           )}
 
@@ -1718,12 +1718,12 @@ export default function StreamPage() {
               <Mic style={{ width: 14, height: 14, color: audioRouteOn ? VC : "hsl(222 25% 45%)" }} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Studio Microphone</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Microphone</p>
               <p style={{ fontSize: 10, color: audioRouteOn ? VC : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {audioRouteOn ? (cableSinkLabel ? `Routing → ${cableSinkLabel}` : "Routing AI audio to cable") : "Off — AI audio plays to speakers"}
               </p>
             </div>
-            {toggleBtn(audioRouteOn, toggleAudioRoute, false, "Toggle Stream Studio Microphone")}
+            {toggleBtn(audioRouteOn, toggleAudioRoute, false, "Toggle Stream Live Microphone")}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -1743,11 +1743,11 @@ export default function StreamPage() {
 
         <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 10, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)", fontSize: 10, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.55 }}>
           <p style={{ fontWeight: 700, color: "hsl(190 80% 90%)", marginBottom: 4 }}>What to pick inside OBS / Zoom / Teams</p>
-          <p>• VIDEO → <span style={{ color: C }}>Stream Studio Camera</span> = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.</p>
-          <p>• AUDIO (AI voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Studio Microphone</span> — same device, two possible names.</p>
+          <p>• VIDEO → <span style={{ color: C }}>Stream Live Camera</span> = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.</p>
+          <p>• AUDIO (AI voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Live Microphone</span> — same device, two possible names.</p>
           <p>• AUDIO (your own voice) → your Realtek / USB mic. Add it only if you want yourself heard as well.</p>
           <p>• On “Video + Audio” and “Audio Call”, with voice cloning on the cable carries the <span style={{ color: VC }}>cloned voice</span>; your raw voice is muted on the outgoing side. “Video Call” always sends your real voice.</p>
-          <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Video Capture Device → “Stream Studio Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.</p>
+          <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Video Capture Device → “Stream Live Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.</p>
         </div>
       </div>
     );

@@ -18,7 +18,7 @@ const BG = "hsl(222 47% 4%)";
 declare global {
   interface Window {
     isElectron?: boolean;
-    __ssRemoteStream?: MediaStream | null;
+    __slRemoteStream?: MediaStream | null;
     electronAPI?: {
       onUpdateAvailable: (cb: (info: { version: string }) => void) => void;
       onDownloadProgress: (cb: (info: { percent: number; transferred: number; total: number }) => void) => void;
@@ -95,7 +95,7 @@ function UpdateBanner() {
                 Update Available
               </span>
               <span style={{ fontSize: 12, color: "hsl(222 25% 65%)", fontFamily: "'Rajdhani', sans-serif", marginLeft: 8 }}>
-                Stream Studio v{version} — download and install automatically
+                Stream Live v{version} — download and install automatically
               </span>
             </>
           )}

@@ -1,7 +1,7 @@
 {
-  "name": "stream-studio",
-  "version": "1.0.0",
-  "description": "Stream Studio desktop app — real-time AI webcam transformation powered by fal.ai Lucy 2.5. Account-gated: all AI keys are served by the STREAM LIVE gateway, the user never enters one.",
+  "name": "stream-live",
+  "version": "1.0.1",
+  "description": "Stream Live desktop app — real-time AI webcam transformation powered by fal.ai Lucy 2.5. Account-gated: all AI keys are served by the STREAM LIVE gateway, the user never enters one.",
   "main": "dist-electron/main.js",
   "author": "Rich Life Technologies",
   "private": true,
@@ -52,8 +52,8 @@
     "vite": "^6.0.6"
   },
   "build": {
-    "appId": "com.richlife.streamstudio",
-    "productName": "Stream Studio",
+    "appId": "com.richlife.streamlive",
+    "productName": "Stream Live",
     "copyright": "Copyright © 2025 Rich Life Technologies",
     "directories": {
       "output": "release",
@@ -71,12 +71,23 @@
       {
         "from": "drivers",
         "to": "drivers",
-        "filter": ["*.exe", "*.nsh", "*.md", "*.ps1", "**/*.dll", "**/*.exe", "**/*.ps1", "**/*.md"]
+        "filter": [
+          "*.exe",
+          "*.nsh",
+          "*.md",
+          "*.ps1",
+          "**/*.dll",
+          "**/*.exe",
+          "**/*.ps1",
+          "**/*.md"
+        ]
       },
       {
         "from": "drivers/vbcable",
         "to": "drivers/vbcable",
-        "filter": ["**/*"]
+        "filter": [
+          "**/*"
+        ]
       }
     ],
     "extraMetadata": {
@@ -92,7 +103,7 @@
         }
       ],
       "icon": "public/icon.ico",
-      "artifactName": "StreamStudio-Setup-${version}.exe"
+      "artifactName": "StreamLive-Setup-${version}.exe"
     },
     "nsis": {
       "oneClick": false,
@@ -103,7 +114,7 @@
       "uninstallerSidebar": "public/installer-sidebar.bmp",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Stream Studio",
+      "shortcutName": "Stream Live",
       "displayLanguageSelector": false,
       "include": "drivers/install-drivers.nsh",
       "warningsAsErrors": false
@@ -125,12 +136,12 @@
       ],
       "icon": "public/icon.png",
       "category": "public.app-category.video",
-      "artifactName": "StreamStudio-${version}-${arch}.dmg"
+      "artifactName": "StreamLive-${version}-${arch}.dmg"
     },
     "linux": {
       "target": "AppImage",
       "category": "Video",
-      "artifactName": "StreamStudio-${version}.AppImage"
+      "artifactName": "StreamLive-${version}.AppImage"
     },
     "publish": {
       "provider": "github",

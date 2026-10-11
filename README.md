@@ -1,13 +1,13 @@
 # STREAM LIVE
 
-Stream Studio, production-ready: the desktop app **plus** the account gateway it
+Stream Live, production-ready: the desktop app **plus** the account gateway it
 runs on. Users create an account and sign in; an administrator grants **minutes**
 per modality; every AI key stays on the server. A user never enters an API key.
 
 Everything lives in this one repo:
 
 ```
-desktop/           Electron app (Stream Studio) — version 1.0.0
+desktop/           Electron app (Stream Live) — version 1.0.0
   electron/          main process: updater, virtual camera, local API server, device id
   src/pages/         stream console, account panel, usage, settings, OBS output windows
   src/lib/gateway.ts singleton client + React store for the signed-in account
@@ -108,7 +108,7 @@ Both are public values (the anon key only opens RLS-guarded reads). A build with
 them refuses to sign in and says why instead of surfacing a confusing auth error.
 
 Versioning starts at **1.0.0**. Releases are published to
-`richlifetechnologies-lang/stream-live` with `StreamStudio-Setup-<version>.exe`,
+`richlifetechnologies-lang/stream-live` with `StreamLive-Setup-<version>.exe`,
 `.blockmap` and `latest.yml`; the in-app updater reads that repo's latest release,
 so a build older than `app_config.min_supported_version` shows the update button.
 

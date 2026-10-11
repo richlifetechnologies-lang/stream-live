@@ -1,5 +1,5 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// STREAM LIVE client — the account/credit gateway used by the Stream Studio
+// STREAM LIVE client — the account/credit gateway used by the Stream Live
 // desktop app and by the user web dashboard.
 // ─────────────────────────────────────────────────────────────────────────────
 // Replaces "the user pastes their own API key". The user signs in with an email
@@ -413,7 +413,7 @@ export const REASON_MESSAGES: Record<string, string> = {
   status_canceled: "This account was cancelled by the administrator.",
   status_past_due: "This account is on hold. Contact your administrator.",
   status_expired: "This account is inactive. Contact your administrator.",
-  update_required: "This version of Stream Studio is no longer supported. Update to continue.",
+  update_required: "This version of Stream Live is no longer supported. Update to continue.",
   maintenance: "The service is under maintenance. Try again shortly.",
   signed_out: "Please sign in again.",
   upstream_key: "The service is temporarily unavailable. Try again shortly.",

@@ -78,7 +78,7 @@ export default function SettingsPage() {
             </a>
           </Link>
           <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani', sans-serif", lineHeight: 1.5, marginTop: 10 }}>
-            Stream Studio is account-gated — the service keys are managed by your administrator and never entered here.
+            Stream Live is account-gated — the service keys are managed by your administrator and never entered here.
           </p>
         </div>
 

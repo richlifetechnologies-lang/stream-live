@@ -1,9 +1,9 @@
 <#
-  Stream Studio - Virtual Device Installer
+  Stream Live - Virtual Device Installer
   ----------------------------------------
-  Registers the "Stream Studio Camera" DirectShow virtual camera (UnityCapture
+  Registers the "Stream Live Camera" DirectShow virtual camera (UnityCapture
   filter) for both 64-bit and 32-bit calling apps, and installs the VB-Audio
-  Virtual Cable ("Stream Studio Microphone").
+  Virtual Cable ("Stream Live Microphone").
 
   BITNESS-SAFE: this script is often launched from the 32-bit NSIS installer.
   Under WOW64, a 32-bit process writing HKLM:\SOFTWARE or calling
@@ -14,7 +14,7 @@
   regardless of who launched us.
 
   Run manually (right-click > Run with PowerShell) or it is invoked silently by
-  the Stream Studio setup. Requires Administrator; it self-elevates if needed.
+  the Stream Live setup. Requires Administrator; it self-elevates if needed.
 
   Exit codes: 0 = all requested components OK, 1 = one or more failed.
 #>
@@ -24,7 +24,7 @@ param(
   [switch]$Uninstall,
   [switch]$NoAudio,
   [switch]$NoVideo,
-  [string]$CameraName = "Stream Studio Camera"
+  [string]$CameraName = "Stream Live Camera"
 )
 
 $ErrorActionPreference = 'Stop'
@@ -133,7 +133,7 @@ function Set-CategoryInstance([string]$view, [string]$instanceSub, [string]$clsi
 }
 
 # Some apps (OBS) show the filter's OWN name (CLSID default), not the category
-# FriendlyName - overwrite it too so the device reads "Stream Studio Camera".
+# FriendlyName - overwrite it too so the device reads "Stream Live Camera".
 function Set-FilterDisplayName([string]$view, [string]$clsid, [string]$name) {
   if (-not $clsid) { return }
   Set-ViewProp $view (Join-Path $ClsidRootSub $clsid) '(default)' $name
@@ -156,7 +156,7 @@ function Invoke-Regsvr($exe, $dll, [switch]$Remove) {
   return $p.ExitCode
 }
 
-# ── VIDEO: Stream Studio Camera (UnityCapture DirectShow filter) ──────────────
+# ── VIDEO: Stream Live Camera (UnityCapture DirectShow filter) ──────────────
 if (-not $NoVideo) {
   if ($Uninstall) {
     Write-Step "Unregistering '$CameraName'..."
@@ -208,7 +208,7 @@ if (-not $NoVideo) {
   }
 }
 
-# ── AUDIO: VB-Audio Virtual Cable ("Stream Studio Microphone") ────────────────
+# ── AUDIO: VB-Audio Virtual Cable ("Stream Live Microphone") ────────────────
 if (-not $NoAudio) {
   # The setup exe reads its .inf/.sys/.cat siblings from its own folder, so the
   # full pack lives in drivers\vbcable\ (exe alone fails: "Missing 'inf' file").
@@ -227,7 +227,7 @@ if (-not $NoAudio) {
     if ($already) {
       Write-Ok "VB-Cable audio driver already installed."
     } elseif (Test-Path $vbSetup) {
-      Write-Step "Installing VB-Audio Virtual Cable (Stream Studio Microphone)..."
+      Write-Step "Installing VB-Audio Virtual Cable (Stream Live Microphone)..."
       $p = Start-Process $vbSetup -ArgumentList "/VERYSILENT","/NORESTART","/SUPPRESSMSGBOXES" -Wait -PassThru
       Start-Sleep -Seconds 3
       $svc2 = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, 'Registry64').OpenSubKey('SYSTEM\CurrentControlSet\Services\VBAudioVACMM')

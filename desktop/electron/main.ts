@@ -16,12 +16,12 @@ const GITHUB_REPO  = "stream-live";
 
 // ─── Asset pattern for the current platform + architecture ─────────────────
 function getAssetPattern(): RegExp {
-  if (process.platform === "win32") return /StreamStudio-Setup-.*\.exe$/i;
+  if (process.platform === "win32") return /StreamLive-Setup-.*\.exe$/i;
   if (process.platform === "darwin") {
     const arch = process.arch === "arm64" ? "arm64" : "x64";
-    return new RegExp(`StreamStudio-.*-${arch}\\.dmg`, "i");
+    return new RegExp(`StreamLive-.*-${arch}\\.dmg`, "i");
   }
-  return /StreamStudio-.*\.AppImage$/i;
+  return /StreamLive-.*\.AppImage$/i;
 }
 
 // ─── Generic HTTPS GET with redirect following ────────────────────────────────
@@ -30,7 +30,7 @@ function httpsGet(url: string, headers: Record<string, string> = {}): Promise<Bu
     const lib = url.startsWith("https") ? https : http;
     const req = (lib as typeof https).get(
       url,
-      { headers: { "User-Agent": `stream-studio/${app.getVersion()}`, ...headers } },
+      { headers: { "User-Agent": `stream-live/${app.getVersion()}`, ...headers } },
       (res) => {
         if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
           resolve(httpsGet(res.headers.location, headers));
@@ -65,7 +65,7 @@ function downloadFile(
 
     const fetchOnce = (u: string, start: number): Promise<void> => new Promise((res, rej) => {
       const lib = u.startsWith("https") ? https : http;
-      const headers: Record<string, string> = { "User-Agent": `stream-studio/${app.getVersion()}` };
+      const headers: Record<string, string> = { "User-Agent": `stream-live/${app.getVersion()}` };
       if (start > 0) headers.Range = `bytes=${start}-`;
       const req = (lib as typeof https).get(u, { headers }, (resp) => {
         if ([301, 302, 307, 308].includes(resp.statusCode ?? 0) && resp.headers.location) {
@@ -248,7 +248,7 @@ function createWindow() {
     height: 900,
     minWidth: 1024,
     minHeight: 700,
-    title: "Stream Studio",
+    title: "Stream Live",
     backgroundColor: "#070d1a",
     autoHideMenuBar: true,
     webPreferences: {
@@ -331,15 +331,15 @@ function showMacFirstLaunchNotice() {
     if (!mainWindow) return;
     dialog.showMessageBox(mainWindow, {
       type: "info",
-      title: "Welcome to Stream Studio",
+      title: "Welcome to Stream Live",
       message: "One-time Mac setup complete",
       detail:
         "If macOS blocked this app when you first opened it, here's how to fix it:\n\n" +
-        "1. Close Stream Studio\n" +
+        "1. Close Stream Live\n" +
         "2. Right-click the app icon (or DMG) → Open\n" +
         "3. Click Open in the security dialog\n\n" +
         "You only need to do this once. After that it launches normally.\n\n" +
-        "This happens because Stream Studio isn't signed with a paid Apple Developer certificate.",
+        "This happens because Stream Live isn't signed with a paid Apple Developer certificate.",
       buttons: ["Got it"],
       defaultId: 0,
     });

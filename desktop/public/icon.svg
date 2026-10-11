@@ -1,7 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
-  <rect width="256" height="256" rx="56" fill="#070d1a"/>
-  <circle cx="128" cy="128" r="90" fill="none" stroke="#00d4d8" stroke-width="6" opacity="0.2"/>
-  <circle cx="128" cy="128" r="60" fill="none" stroke="#00d4d8" stroke-width="2" opacity="0.4"/>
-  <polygon points="108,88 108,168 188,128" fill="#00d4d8"/>
-  <circle cx="128" cy="128" r="8" fill="#00d4d8" opacity="0.6"/>
+  <!-- Simplified app-icon lockup. The shipped raster (icon.png / icon.ico) is cut
+       from the brand artwork; this is the scalable fallback for contexts that
+       cannot embed a bitmap. -->
+  <defs>
+    <linearGradient id="sl-mark" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3ec6ff"/>
+      <stop offset="0.55" stop-color="#1b3ff2"/>
+      <stop offset="1" stop-color="#8b2ff5"/>
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="58" fill="#0a1026"/>
+  <path d="M78 52 L150 96 a16 16 0 0 1 0 27 L78 168 a16 16 0 0 1-24-13 V65 a16 16 0 0 1 24-13 Z"
+        fill="url(#sl-mark)"/>
+  <path d="M96 84 L126 103 a5 5 0 0 1 0 8 L96 130 a5 5 0 0 1-7-4 v-38 a5 5 0 0 1 7-4 Z" fill="#f7fbff"/>
+  <g fill="none" stroke="url(#sl-mark)" stroke-width="13" stroke-linecap="round">
+    <path d="M170 92 a40 40 0 0 1 0 44"/>
+    <path d="M196 74 a68 68 0 0 1 0 80"/>
+  </g>
 </svg>

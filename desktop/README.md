@@ -1,4 +1,4 @@
-# Stream Studio
+# Stream Live
 
 Real-time AI webcam transformation powered by **Decart Lucy 2.1**.
 
@@ -25,22 +25,22 @@ No Python, no Docker, no GPU required. Download, install, enter your API key, an
 ## Setup
 
 1. Get a Decart API key from [app.decart.ai](https://app.decart.ai)
-2. Download and install Stream Studio
+2. Download and install Stream Live
 3. Enter your API key on first launch
 4. Enable your camera → click **Stream Now**
 
 ## Using with OBS
 
-1. Start streaming in Stream Studio first
-2. In OBS: **Sources → + → Window Capture → Stream Studio**
+1. Start streaming in Stream Live first
+2. In OBS: **Sources → + → Window Capture → Stream Live**
 3. Toggle **Audio Sync ON** in the app's right panel
-4. Do **not** add a separate mic source in OBS — Stream Studio handles audio routing
+4. Do **not** add a separate mic source in OBS — Stream Live handles audio routing
 
 ## Building from source
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/stream-studio.git
-cd stream-studio
+git clone https://github.com/YOUR_USERNAME/stream-live.git
+cd stream-live
 npm install
 npm run dev          # development (Vite only, browser)
 npm run dist:win     # build Windows installer → release/

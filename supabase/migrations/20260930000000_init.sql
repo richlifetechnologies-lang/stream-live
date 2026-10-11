@@ -1,6 +1,6 @@
 -- ─────────────────────────────────────────────────────────────────────────────
 -- STREAM STUDIO Login Web — initial schema
--- Subscription accounts + usage metering + device binding for the Stream Studio
+-- Subscription accounts + usage metering + device binding for the Stream Live
 -- desktop app. Master AI keys (fal.ai / ElevenLabs) live ONLY in Edge Function
 -- secrets, never in this database and never in the client.
 -- ─────────────────────────────────────────────────────────────────────────────

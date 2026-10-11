@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout";
-import { ArtBackdrop } from "../components/brand";
+import { ArtBackdrop, Logo } from "../components/brand";
 import { useToast } from "../hooks/use-toast";
 import { gateway, useAccount, signIn, signUp, signOut, requestTopup } from "../lib/gateway";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
@@ -81,7 +81,7 @@ export default function AccountPage() {
           toast({ title: "Account created", description: "Your account works immediately — sign in to continue." });
           setAuthMode("signin");
         } else {
-          toast({ title: "Welcome to Stream Studio" });
+          toast({ title: "Welcome to Stream Live" });
         }
       } else {
         await signIn(email.trim(), password);
@@ -169,6 +169,7 @@ export default function AccountPage() {
             boxShadow: "0 26px 70px hsl(226 80% 2% / 0.6), 0 0 40px hsl(187 100% 52% / 0.1)",
           }}>
             <div style={{ textAlign: "center", marginBottom: 2 }}>
+              <Logo size={54} style={{ justifyContent: "center", marginBottom: 10 }} />
               <h1 style={{ fontFamily: "'Orbitron', monospace", fontWeight: 700, fontSize: 21, color: "hsl(190 80% 96%)", marginBottom: 6 }}>
                 {authMode === "signup" ? "Create your account" : "Welcome back"}
               </h1>

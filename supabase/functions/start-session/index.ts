@@ -74,7 +74,7 @@ Deno.serve(async (req: Request) => {
     const acct = await readAccount(user.id, modality);
 
     if (appVersion && acct.minSupportedVersion && compareVersions(appVersion, acct.minSupportedVersion) < 0) {
-      return fail(`Stream Studio ${appVersion} is no longer supported`, 412, {
+      return fail(`Stream Live ${appVersion} is no longer supported`, 412, {
         reason: "update_required",
         min_supported_version: acct.minSupportedVersion,
         latest_version: acct.latestVersion ?? null,

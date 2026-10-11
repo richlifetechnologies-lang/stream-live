@@ -1,5 +1,6 @@
 import { Link, useLocation } from "wouter";
 import { Video, Settings, Zap, User } from "lucide-react";
+import { Logo } from "./brand";
 
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -27,13 +28,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         flexShrink: 0,
       }}>
         {/* Logo */}
-        <div style={{
-          width: 40, height: 40, borderRadius: 10,
-          background: "linear-gradient(135deg, hsl(187 100% 52%) 0%, hsl(200 100% 45%) 100%)",
-          display: "flex", alignItems: "center", justifyContent: "center",
-          marginBottom: 16,
-        }}>
-          <Video style={{ width: 18, height: 18, color: "hsl(222 47% 4%)" }} />
+        <div style={{ display: "flex", justifyContent: "center", width: "100%", marginBottom: 16 }}>
+          <Logo size={34} />
         </div>
 
         {navItems.map(({ href, icon: Icon, label }) => {
