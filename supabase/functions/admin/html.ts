@@ -518,82 +518,91 @@ export const ADMIN_HTML = `<!doctype html>
     <!-- ══ TAB: PRICE GENERATOR ════════════════════════════════════════════ -->
     <section id="tab-price" class="hidden">
       <div class="card">
+        <h2 style="font-size:15px;margin:0 0 6px">Set your prices in three steps</h2>
+        <p class="muted" style="margin:0">Step 1 says what the AI services charge you. Step 2 says how much of each sale you want to keep. Step 3 writes the price for any package you like. Nothing here goes on sale — every package created here starts switched off, and you turn it on in the Plans tab.</p>
+      </div>
+
+      <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">What the two providers charge you</h2>
-          <div class="btns"><button id="pgReload">Reload saved rates</button><button id="pgSaveRates" class="primary">Save rates</button></div>
+          <h2 style="font-size:14px;margin:0">Step 1 · What the AI services charge you</h2>
+          <div class="btns"><button id="pgReload">Reload saved</button><button id="pgSaveRates" class="primary">Save</button></div>
         </div>
-        <p class="muted" style="margin:6px 0 12px">These are the only two bills the service pays: fal.ai charges for the live video transform <b>by the second</b>, and ElevenLabs charges for the cloned voice <b>by the minute</b>. Everything below is in USD.</p>
-        <div class="grid3">
+        <p class="muted" style="margin:6px 0 12px">Two companies bill you: fal.ai for the live video, ElevenLabs for the cloned voice. Write down what each one costs for <b>one minute</b> of use, in dollars.</p>
+        <div class="grid2">
           <div>
-            <label>fal.ai Lucy 2.5 realtime — $ per second</label>
-            <input id="pgFalSec" type="number" min="0" step="0.001" />
-            <div class="muted" style="margin-top:6px">The model page lists the realtime rate per second; <span id="pgFalPerMin" class="mono">—</span> per minute of airtime.</div>
+            <label>Live video · fal.ai · $ per minute</label>
+            <input id="pgFalMin" type="number" min="0" step="0.01" />
           </div>
           <div>
-            <label>ElevenLabs speech to speech — $ per minute</label>
-            <input id="pgVoiceMin" type="number" min="0" step="0.001" />
-            <div class="muted" style="margin-top:6px">What one minute of cloned-voice airtime costs you.</div>
-          </div>
-          <div>
-            <label>Target margin on the sale price</label>
-            <input id="pgMargin" type="number" min="0" max="95" step="1" />
-            <div class="muted" style="margin-top:6px">Never sell below <input id="pgFloor" type="number" min="0" max="95" step="1" style="width:64px;display:inline-block;padding:3px 6px" />% — anything lower is flagged as a loss of margin.</div>
+            <label>Voice · ElevenLabs · $ per minute</label>
+            <input id="pgVoiceMin" type="number" min="0" step="0.01" />
           </div>
         </div>
-        <label class="feat" style="margin-top:14px">Work out the ElevenLabs rate from your subscription instead of guessing it</label>
-        <div class="grid4" style="margin-top:14px">
-          <div><label>Plan, $ per month</label><input id="pgElUsd" type="number" min="0" step="1" value="22" /></div>
-          <div><label>ElevenLabs credits per month</label><input id="pgElCredits" type="number" min="0" step="1000" value="121000" /></div>
-          <div><label>ElevenLabs credits per minute of speech to speech</label><input id="pgElCpm" type="number" min="1" step="10" value="1000" /></div>
-          <div style="display:flex;align-items:flex-end"><button id="pgDerive" class="primary">Fill in $ per minute</button></div>
-        </div>
-        <p class="muted" style="margin:6px 0 0">ElevenLabs charges in its own subscription credits rather than dollars per minute, so those three boxes only convert its bill into the number this tab needs: dollars per minute of cloned-voice airtime. Your users never see a credit — they buy minutes.</p>
-        <p class="muted" style="margin:12px 0 0">Current published prices: <a href="https://fal.ai/models/decart/lucy-2-5/realtime" target="_blank" rel="noreferrer">fal.ai · Lucy 2.5 realtime</a> and <a href="https://elevenlabs.io/pricing" target="_blank" rel="noreferrer">ElevenLabs · plans and credits</a>. Both change without notice, so re-check before you quote a customer. Saved as of <span id="pgVerified" class="mono">—</span>.</p>
+        <details style="margin-top:14px">
+          <summary class="muted">ElevenLabs shows credits instead of a dollar price? Work it out here</summary>
+          <p class="muted" style="margin:10px 0 6px">Copy the three numbers from your ElevenLabs account and press the button. It only fills in the voice box above. Your buyers never see credits — they buy minutes.</p>
+          <div class="grid4">
+            <div><label style="margin-top:0">My plan costs $ per month</label><input id="pgElUsd" type="number" min="0" step="1" value="22" /></div>
+            <div><label style="margin-top:0">My plan gives credits per month</label><input id="pgElCredits" type="number" min="0" step="1000" value="121000" /></div>
+            <div><label style="margin-top:0">One minute of voice uses credits</label><input id="pgElCpm" type="number" min="1" step="10" value="1000" /></div>
+            <div style="display:flex;align-items:flex-end"><button id="pgDerive" class="primary">Work it out</button></div>
+          </div>
+        </details>
+        <p class="muted" style="margin:14px 0 0">What they publish today: <a href="https://fal.ai/models/decart/lucy-2-5/realtime" target="_blank" rel="noreferrer">fal.ai · Lucy 2.5 realtime</a> and <a href="https://elevenlabs.io/pricing" target="_blank" rel="noreferrer">ElevenLabs · plans and credits</a>. Both change without notice, so check before you quote a customer. Saved on <span id="pgVerified" class="mono">—</span>.</p>
         <div id="pgMsg"></div>
       </div>
 
       <div class="card">
-        <h2 style="font-size:14px;margin:0 0 4px">What one minute you sell actually costs you</h2>
-        <p class="muted" style="margin:0 0 12px">There are two minutes on this tab and they are not the same thing. A <b>minute you sell</b> is what leaves the user's wallet. A <b>minute of airtime</b> is what fal.ai and ElevenLabs bill you for. The burn rates on the Burn rates tab are the bridge: at 1.5x, one minute of airtime spends 1.5 wallet minutes, so a wallet minute of Video + Audio costs you <b>less</b> than a minute of airtime does. Every number below is the API bill only — hosting, MoMo fees and your time are not in it.</p>
-        <div style="overflow:auto">
-          <table id="pgUnitTable">
-            <thead><tr><th>Bucket</th><th style="text-align:right">Burn rate</th><th style="text-align:right">Cost per minute of airtime</th><th style="text-align:right">Cost per minute sold</th><th style="text-align:right">Lowest price at your floor</th><th style="text-align:right">Price at target margin</th></tr></thead>
-            <tbody></tbody>
-          </table>
+        <h2 style="font-size:14px;margin:0 0 6px">Step 2 · How much of each sale you want to keep</h2>
+        <div class="row" style="align-items:flex-end">
+          <div style="flex:0 0 200px"><label style="margin-top:0">Profit I want, % of the price</label><input id="pgMargin" type="number" min="0" max="95" step="1" /></div>
+          <p class="muted" style="flex:1 1 300px;margin:0 0 8px">Of every dollar a buyer pays, this part is yours and the rest pays the AI services. 40% is a normal place to start.</p>
         </div>
       </div>
 
       <div class="card">
-        <div class="row" style="align-items:flex-end">
-          <div style="flex:0 0 150px">
-            <label style="margin-top:0">Minutes you are pricing</label>
-            <input id="pgMinutes" type="number" min="1" step="1" value="60" />
-          </div>
-          <div><label style="margin-top:0">Price — Video Call</label><input id="pgPrice_video" type="number" min="0" step="0.01" placeholder="0.00" /></div>
-          <div><label style="margin-top:0">Price — Audio Call</label><input id="pgPrice_audio" type="number" min="0" step="0.01" placeholder="0.00" /></div>
-          <div><label style="margin-top:0">Price — Video + Audio</label><input id="pgPrice_video_audio" type="number" min="0" step="0.01" placeholder="0.00" /></div>
-          <div style="flex:0 0 auto"><button id="pgSuggest">Fill at target margin</button></div>
+        <h2 style="font-size:14px;margin:0 0 6px">Step 3 · Make a package</h2>
+        <p class="muted" style="margin:0 0 12px">Choose what the buyer gets and how many minutes they buy. The three boxes below answer the only questions that matter: what to charge, what it costs you, what you keep.</p>
+        <p style="margin:0 0 6px;font-size:12px;color:#cfe6ef">What does the buyer get?</p>
+        <div class="row" style="gap:20px;margin:0 0 16px">
+          <label class="feat" style="margin-top:0"><input type="radio" name="pgMod" value="video" checked /> Video only</label>
+          <label class="feat" style="margin-top:0"><input type="radio" name="pgMod" value="audio" /> Voice only</label>
+          <label class="feat" style="margin-top:0"><input type="radio" name="pgMod" value="video_audio" /> Video + voice</label>
         </div>
-        <p class="muted" style="margin:6px 0 12px">Type the price you are thinking of charging for each bucket and read the profit or loss straight back. Change any number on this tab and everything recalculates on the spot. <b>Fill at target margin</b> writes the three suggested prices into those boxes for you.</p>
-        <div style="overflow:auto">
-          <table id="pgPriceTable">
-            <thead><tr><th>Bucket</th><th style="text-align:right">Minutes sold</th><th style="text-align:right">Airtime billed</th><th style="text-align:right">API cost</th><th style="text-align:right">Your price</th><th style="text-align:right">Profit / loss</th><th style="text-align:right">Margin</th><th>Verdict</th></tr></thead>
-            <tbody></tbody>
-          </table>
+        <div class="row" style="align-items:flex-end;gap:14px">
+          <div style="flex:0 0 170px"><label style="margin-top:0">Minutes they buy</label><input id="pgMinutes" type="number" min="1" step="1" value="60" /></div>
+          <p class="muted" style="flex:1 1 200px;margin:0 0 8px">Or pick a size: <span id="pgQuick"></span></p>
         </div>
-        <div class="grid4" id="pgStats" style="margin-top:14px"></div>
+        <div class="grid3" id="pgResult" style="margin-top:16px"></div>
+        <div class="row" style="align-items:flex-end;gap:14px;margin-top:16px">
+          <div style="flex:0 0 210px"><label style="margin-top:0">Rather set your own price? Type it</label><input id="pgCustom" type="number" min="0" step="0.01" placeholder="leave blank for our suggestion" /></div>
+          <p class="muted" style="flex:1 1 260px;margin:0 0 8px">The boxes above follow the price you type.</p>
+        </div>
+        <div id="pgVerdict" style="margin-top:10px"></div>
+        <div class="btns" style="margin-top:16px"><button id="pgMake" class="primary">Add this package</button></div>
         <div id="pgPriceMsg"></div>
+        <details style="margin-top:14px">
+          <summary class="muted">Why a minute you sell costs less than a minute of airtime</summary>
+          <p class="muted" style="margin:10px 0">A minute you sell is what leaves the buyer's balance. A minute of airtime is what fal.ai and ElevenLabs bill you for. The burn rates you set on the Burn rates tab decide how many sold minutes fit into one airtime minute, and that is the only reason the two numbers differ. Every figure here is the AI bill alone — hosting, MoMo fees and your own time are not in it.</p>
+          <div style="overflow:auto">
+            <table id="pgUnitTable">
+              <thead><tr><th>What the buyer gets</th><th style="text-align:right">One minute of airtime costs</th><th style="text-align:right">Sold minutes per airtime minute</th><th style="text-align:right">One sold minute costs</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
       </div>
 
       <div class="card">
-        <div class="row" style="align-items:flex-end">
-          <div style="flex:0 0 190px"><label style="margin-top:0">Bucket</label><select id="pgLadderMod"><option value="video">Video Call</option><option value="audio">Audio Call</option><option value="video_audio">Video + Audio</option></select></div>
-          <div style="flex:1 1 320px"><label style="margin-top:0">Minute bundles to price</label><input id="pgBundles" value="30, 60, 120, 300, 600" /></div>
+        <h2 style="font-size:14px;margin:0 0 6px">Several sizes at once</h2>
+        <p class="muted" style="margin:0 0 12px">Type the minute amounts you want to offer, separated by commas. Each line shows the price and what you keep at that price. <b>Add</b> creates that package, switched off.</p>
+        <div class="row" style="align-items:flex-end;gap:14px">
+          <div style="flex:0 0 190px"><label style="margin-top:0">For which service?</label><select id="pgLadderMod"><option value="video">Video only</option><option value="audio">Voice only</option><option value="video_audio">Video + voice</option></select></div>
+          <div style="flex:1 1 300px"><label style="margin-top:0">Minute amounts</label><input id="pgBundles" value="30, 60, 120, 300, 600" /></div>
         </div>
-        <p class="muted" style="margin:10px 0 12px">One row per bundle, priced at your target margin. <b>Create package</b> writes it into the catalogue the desktop app shows, turned <b>off</b> so nothing is sold until you review it on the Plans tab.</p>
-        <div style="overflow:auto">
+        <div style="overflow:auto;margin-top:12px">
           <table id="pgLadderTable">
-            <thead><tr><th style="text-align:right">Minutes sold</th><th style="text-align:right">Airtime billed</th><th style="text-align:right">API cost</th><th style="text-align:right">Price at target margin</th><th style="text-align:right">Profit</th><th></th></tr></thead>
+            <thead><tr><th style="text-align:right">Minutes</th><th style="text-align:right">Price</th><th style="text-align:right">Costs you</th><th style="text-align:right">You keep</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1234,7 +1243,7 @@ export const ADMIN_HTML = `<!doctype html>
         <td>\${r.retired_at ? "" : \`<button data-act="retire" data-id="\${r.id}" class="danger">Retire</button>\`}</td></tr>\`).join("")
       || '<tr><td colspan="6" class="muted">No rates recorded.</td></tr>';
 
-    if ($("pgFalSec")) pgRenderAll();
+    if ($("pgFalMin")) pgRenderAll();
   }
 
   async function loadRates() {
@@ -1540,27 +1549,46 @@ export const ADMIN_HTML = `<!doctype html>
       await loadPlans();
     }
     if (b.dataset.p === "del") {
-      if (!confirm("Delete plan '" + id + "'? Fails while an account still uses it.")) return;
-      const { error } = await sb.from("plans").delete().eq("id", id);
-      msg("plansMsg", error ? error.message : "Deleted.", error ? "err" : "ok");
+      const name = card ? (card.querySelector('[data-f="name"]')?.value.trim() || id) : id;
+      if (!confirm(\`Delete “\${name}”? Buyers who already have it keep the minutes they hold.\`)) return;
+      // .select() is what makes this debuggable: a delete that RLS silently refuses
+      // still answers 204 with no error, so without it the panel would say "Deleted"
+      // while the row stayed.
+      const { data, error } = await sb.from("plans").delete().eq("id", id).select("id");
+      if (error) {
+        msg("plansMsg", /foreign key|referential integrity/i.test(error.message)
+          ? \`“\${name}” is still attached to at least one account, so the database refused to remove it. Tick off “Sell this package” and press Save instead — new buyers stop seeing it and the accounts using it stay intact.\`
+          : error.message, "err");
+      } else if (!data || !data.length) {
+        msg("plansMsg", \`“\${name}” was not removed: the request was accepted but 0 rows came back, which means this login is not allowed to delete plans.\`, "err");
+      } else {
+        msg("plansMsg", \`Deleted “\${name}”.\`, "ok");
+      }
       await loadPlans();
+      return;
     }
   });
 
   // ══ PRICE GENERATOR ═════════════════════════════════════════════════════
-  // billing_config holds the two provider rates (fal.ai per second, ElevenLabs
-  // per minute); the live burn multipliers are what turn "what the provider
-  // bills for a real minute" into "what one credit minute costs you". Margin is
-  // measured on the sale price, so price = cost / (1 - margin).
-  const PG_DEFAULT = { falSec: 0.04, voiceMin: 0.18, margin: 40, floor: 25, creditsPerMin: 1000 };
+  // billing_config stores both provider rates per SECOND, but the owner thinks in
+  // dollars per minute, so this tab shows minutes and converts on the way in and
+  // out. The burn multipliers from the Burn rates tab turn "what one airtime minute
+  // costs" into "what one sold minute costs" — the unit actually priced here.
+  // Margin is measured on the sale price, so a price that keeps M% of itself is
+  // cost / (1 - M).
+  const PG_DEFAULT = { falMin: 2.4, voiceMin: 0.18, margin: 40 };
   const PG_MINCOL = { video: "video_minutes", audio: "audio_minutes", video_audio: "video_audio_minutes" };
+  const PG_SHOP_LABEL = { video: "Video only", audio: "Voice only", video_audio: "Video + voice" };
+  const PG_QUICK = [15, 30, 60, 120, 300, 600];
+  const PG_PLURAL = (n) => (N(n) === 1 ? "" : "s");
 
   const pgUsd = (v, dp = 2) => (N(v) < 0 ? "-$" : "$") + Math.abs(N(v)).toFixed(dp);
   const pgIn = (id, d) => { const el = $(id); if (!el) return d; const s = String(el.value ?? "").trim(); return s === "" ? d : N(s, d); };
+  const pgMod = () => { const el = document.querySelector('input[name="pgMod"]:checked'); return el ? el.value : "video"; };
 
   // $ per REAL minute of airtime, per bucket.
   function pgProviders() {
-    const video = pgIn("pgFalSec", PG_DEFAULT.falSec) * 60;
+    const video = pgIn("pgFalMin", PG_DEFAULT.falMin);
     const audio = pgIn("pgVoiceMin", PG_DEFAULT.voiceMin);
     return { video, audio, video_audio: video + audio };
   }
@@ -1572,7 +1600,7 @@ export const ADMIN_HTML = `<!doctype html>
     return out;
   }
 
-  // $ per CREDIT minute (the unit you actually sell).
+  // $ per SOLD minute (the unit you actually price).
   function pgCreditCost() {
     const rate = pgProviders(), mult = pgMultipliers(), out = {};
     MODALITIES.forEach((m) => { out[m] = rate[m] / mult[m]; });
@@ -1580,66 +1608,49 @@ export const ADMIN_HTML = `<!doctype html>
   }
 
   const pgAt = (cost, pct) => cost / (1 - Math.min(95, Math.max(0, pct)) / 100);
-  const pgMargins = () => ({
-    target: Math.min(95, Math.max(0, pgIn("pgMargin", PG_DEFAULT.margin))),
-    floor: Math.min(95, Math.max(0, pgIn("pgFloor", PG_DEFAULT.floor))),
-  });
+  const pgTarget = () => Math.min(95, Math.max(0, pgIn("pgMargin", PG_DEFAULT.margin)));
 
   function pgRenderUnits() {
-    const rate = pgProviders(), mult = pgMultipliers(), cc = pgCreditCost(), mg = pgMargins();
-    $("pgFalPerMin").textContent = pgUsd(rate.video, 3);
+    const rate = pgProviders(), mult = pgMultipliers(), cc = pgCreditCost();
     $("pgUnitTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => \`<tr>
-      <td>\${MOD_LABEL[m]}</td>
-      <td class="mono" style="text-align:right">\${mins(mult[m])}x</td>
+      <td>\${PG_SHOP_LABEL[m]}</td>
       <td class="mono" style="text-align:right">\${pgUsd(rate[m])}</td>
-      <td class="mono" style="text-align:right">\${pgUsd(cc[m], 3)}</td>
-      <td class="mono" style="text-align:right">\${pgUsd(pgAt(cc[m], mg.floor))}</td>
-      <td class="mono" style="text-align:right">\${pgUsd(pgAt(cc[m], mg.target))}</td></tr>\`).join("");
+      <td class="mono" style="text-align:right">\${mins(mult[m])}</td>
+      <td class="mono" style="text-align:right">\${pgUsd(cc[m], 3)}</td></tr>\`).join("");
   }
 
-  function pgRenderPrices() {
-    const creditMin = Math.max(0, pgIn("pgMinutes", 0));
-    const cc = pgCreditCost(), mult = pgMultipliers(), mg = pgMargins();
-    let pricedCost = 0, revenue = 0, priced = 0;
-    const rows = MODALITIES.map((m) => {
-      const c = cc[m] * creditMin;
-      const price = pgIn("pgPrice_" + m, NaN);
-      if (!(price >= 0)) {
-        return \`<tr>
-          <td>\${MOD_LABEL[m]}</td>
-          <td class="mono" style="text-align:right">\${mins(creditMin)}</td>
-          <td class="mono" style="text-align:right">\${mins(creditMin / mult[m])}</td>
-          <td class="mono" style="text-align:right">\${pgUsd(c)}</td>
-          <td class="muted" style="text-align:right">not set</td>
-          <td class="muted" style="text-align:right">—</td><td class="muted" style="text-align:right">—</td>
-          <td><span class="pill n">set a price</span></td></tr>\`;
-      }
-      revenue += price; pricedCost += c; priced++;
-      const profit = price - c, pct = price > 0 ? (profit / price) * 100 : -100;
-      const verdict = profit < 0
-        ? '<span class="pill fail">loss — under break-even</span>'
-        : pct < mg.floor
-          ? '<span class="pill warn">above cost, below your floor</span>'
-          : pct < mg.target
-            ? '<span class="pill warn">thin — under target margin</span>'
-            : '<span class="pill ok">at or above target</span>';
-      return \`<tr>
-        <td>\${MOD_LABEL[m]}</td>
-        <td class="mono" style="text-align:right">\${mins(creditMin)}</td>
-        <td class="mono" style="text-align:right">\${mins(creditMin / mult[m])}</td>
-        <td class="mono" style="text-align:right">\${pgUsd(c)}</td>
-        <td class="mono" style="text-align:right">\${pgUsd(price)}</td>
-        <td class="mono" style="text-align:right;color:\${profit < 0 ? "#fb7185" : "#4ade80"}">\${pgUsd(profit)}</td>
-        <td class="mono" style="text-align:right">\${pct.toFixed(1)}%</td>
-        <td>\${verdict}</td></tr>\`;
-    }).join("");
-    $("pgPriceTable").querySelector("tbody").innerHTML = rows;
-    const totalProfit = revenue - pricedCost;
-    $("pgStats").innerHTML = \`
-      \${MODALITIES.map((m) => \`<div class="stat"><div class="l">\${MOD_LABEL[m]} API cost</div>
-        <div class="v">\${pgUsd(cc[m] * creditMin)}</div><div class="l">\${mins(creditMin)} min sold · \${mins(creditMin / mult[m])} min of airtime at \${mins(mult[m])}x</div></div>\`).join("")}
-      <div class="stat"><div class="l">Profit on what you priced</div><div class="v" style="color:\${priced === 0 ? "#6b8296" : totalProfit < 0 ? "#fb7185" : "#4ade80"}">\${priced ? pgUsd(totalProfit) : "—"}</div>
-        <div class="l">\${priced ? priced + " of 3 priced · revenue " + pgUsd(revenue) + " · cost " + pgUsd(pricedCost) : "enter a price above"}</div></div>\`;
+  function pgRenderQuick() {
+    const now = pgIn("pgMinutes", 60);
+    $("pgQuick").innerHTML = PG_QUICK.map((v) => \`<button data-pg="quick" data-min="\${v}"\${v === now ? ' class="primary"' : ""}>\${v}</button>\`).join(" ");
+  }
+
+  // The whole point of the tab: three numbers for one package, following whatever
+  // price is in the box (ours or his).
+  function pgRenderResult() {
+    const m = pgMod(), mult = pgMultipliers(), target = pgTarget();
+    const minutes = Math.max(0, pgIn("pgMinutes", 0));
+    const cost = pgCreditCost()[m] * minutes;
+    const suggested = pgAt(cost, target);
+    const own = String($("pgCustom")?.value ?? "").trim();
+    const price = own === "" ? suggested : N(own, 0);
+    const profit = price - cost;
+    const pct = price > 0 ? (profit / price) * 100 : -100;
+
+    $("pgResult").innerHTML = \`
+      <div class="stat"><div class="l">Price the buyer pays</div><div class="v">\${pgUsd(price)}</div>
+        <div class="l">\${mins(minutes)} \${PG_SHOP_LABEL[m]} minute\${PG_PLURAL(minutes)}\${own === "" ? " · our suggestion" : " · your price"}</div></div>
+      <div class="stat"><div class="l">What it costs you</div><div class="v">\${pgUsd(cost)}</div>
+        <div class="l">AI bill for \${mins(minutes / mult[m])} minute\${PG_PLURAL(minutes / mult[m])} of airtime</div></div>
+      <div class="stat"><div class="l">What you keep</div><div class="v" style="color:\${profit < 0 ? "#fb7185" : "#4ade80"}">\${pgUsd(profit)}</div>
+        <div class="l">\${pct >= 0 ? pct.toFixed(0) + "% of the price" : "no price typed yet"} · you asked for \${target}%</div></div>\`;
+
+    $("pgVerdict").innerHTML = profit < 0
+      ? \`<div class="err">At \${pgUsd(price)} you lose \${pgUsd(Math.abs(profit))} on every sale. You need more than \${pgUsd(cost)} to break even.</div>\`
+      : pct < target
+        ? \`<div class="warn">You keep \${pgUsd(profit)}, which is \${pct.toFixed(0)}% — under the \${target}% you asked for. \${pgUsd(suggested)} would reach it.</div>\`
+        : \`<div class="ok">You keep \${pgUsd(profit)} of the \${pgUsd(price)} the buyer pays — \${pct.toFixed(0)}%, at or above what you asked for.</div>\`;
+
+    $("pgMake").textContent = \`Add this package at \${pgUsd(price)}\`;
   }
 
   function pgBundles() {
@@ -1651,95 +1662,82 @@ export const ADMIN_HTML = `<!doctype html>
 
   function pgRenderLadder() {
     const m = $("pgLadderMod")?.value || "video";
-    const cc = pgCreditCost()[m], mult = pgMultipliers()[m], target = pgMargins().target;
+    const cc = pgCreditCost()[m], target = pgTarget();
     const rows = pgBundles().map((min) => {
       const cost = cc * min, price = pgAt(cost, target), profit = price - cost;
       return \`<tr>
         <td class="mono" style="text-align:right">\${mins(min)}</td>
-        <td class="mono" style="text-align:right">\${mins(min / mult)}</td>
-        <td class="mono" style="text-align:right">\${pgUsd(cost)}</td>
         <td class="mono" style="text-align:right">\${pgUsd(price)}</td>
-        <td class="mono" style="text-align:right;color:#4ade80">\${pgUsd(profit)}</td>
-        <td style="text-align:right"><button data-pg="make" data-mod="\${m}" data-min="\${min}" data-price="\${price.toFixed(2)}">Create package</button></td></tr>\`;
+        <td class="mono" style="text-align:right">\${pgUsd(cost)}</td>
+        <td class="mono" style="text-align:right;color:\${profit < 0 ? "#fb7185" : "#4ade80"}">\${pgUsd(profit)}</td>
+        <td style="text-align:right"><button data-pg="add" data-mod="\${m}" data-min="\${min}" data-price="\${price.toFixed(2)}">Add</button></td></tr>\`;
     });
     $("pgLadderTable").querySelector("tbody").innerHTML = rows.join("")
-      || '<tr><td colspan="6" class="muted">Type one or more minute bundles above, separated by commas.</td></tr>';
+      || '<tr><td colspan="5" class="muted">Type one or more minute amounts above, separated by commas.</td></tr>';
   }
 
   function pgRenderAll() {
     pgRenderUnits();
-    pgRenderPrices();
+    pgRenderQuick();
+    pgRenderResult();
     pgRenderLadder();
   }
 
   async function loadPricing() {
     const { data, error } = await sb.from("billing_config")
-      .select("lucy_video_per_sec_cost, voice_cloning_per_sec_cost, profit_margin_percent, min_guaranteed_margin_percent, last_verified_at")
+      .select("lucy_video_per_sec_cost, voice_cloning_per_sec_cost, profit_margin_percent, last_verified_at")
       .eq("id", 1).maybeSingle();
     if (error) {
-      msg("pgMsg", error.message + " — if the table is missing, apply the wallet/burn-rate migration first. The maths below still works on the published defaults.");
+      msg("pgMsg", error.message + " — if the table is missing, apply the wallet and burn-rate migration first. The steps below still work on the published defaults.");
     } else if (data) {
-      $("pgFalSec").value = N(data.lucy_video_per_sec_cost, PG_DEFAULT.falSec);
+      $("pgFalMin").value = +(N(data.lucy_video_per_sec_cost, PG_DEFAULT.falMin / 60) * 60).toFixed(4);
       $("pgVoiceMin").value = +(N(data.voice_cloning_per_sec_cost, PG_DEFAULT.voiceMin / 60) * 60).toFixed(4);
       $("pgMargin").value = N(data.profit_margin_percent, PG_DEFAULT.margin);
-      $("pgFloor").value = N(data.min_guaranteed_margin_percent, PG_DEFAULT.floor);
       $("pgVerified").textContent = data.last_verified_at || "—";
     }
-    if (!$("pgElCpm").value) $("pgElCpm").value = PG_DEFAULT.creditsPerMin;
+    if (!$("pgElCpm").value) $("pgElCpm").value = 1000;
     pgRenderAll();
   }
 
-  $("pgReload").onclick = async () => { msg("pgMsg", ""); await loadPricing(); msg("pgMsg", "Rates reloaded from billing_config.", "ok"); };
+  $("pgReload").onclick = async () => { msg("pgMsg", ""); await loadPricing(); msg("pgMsg", "Saved rates loaded.", "ok"); };
 
   $("pgSaveRates").onclick = async () => {
     msg("pgMsg", "");
-    const falSec = pgIn("pgFalSec", NaN), voiceMin = pgIn("pgVoiceMin", NaN), mg = pgMargins();
-    if (!(falSec > 0) || !(voiceMin > 0)) return msg("pgMsg", "Both provider rates have to be above zero.");
+    const falMin = pgIn("pgFalMin", NaN), voiceMin = pgIn("pgVoiceMin", NaN), target = pgTarget();
+    if (!(falMin > 0) || !(voiceMin > 0)) return msg("pgMsg", "Both rates have to be more than zero.");
     const row = {
-      lucy_video_per_sec_cost: falSec,
-      voice_cloning_per_sec_cost: +(voiceMin / 60).toFixed(5),
-      profit_margin_percent: Math.round(mg.target),
-      min_guaranteed_margin_percent: Math.round(mg.floor),
+      lucy_video_per_sec_cost: +(falMin / 60).toFixed(6),
+      voice_cloning_per_sec_cost: +(voiceMin / 60).toFixed(6),
+      profit_margin_percent: Math.round(target),
       last_verified_at: new Date().toISOString().slice(0, 10),
-      source_notes: \`fal.ai Lucy 2.5 realtime \${falSec}/sec; ElevenLabs speech to speech \${voiceMin}/min. Saved from the Price Generator tab.\`,
+      source_notes: \`fal.ai Lucy 2.5 realtime \${falMin}/min; ElevenLabs speech to speech \${voiceMin}/min. Saved from the Price Generator tab.\`,
     };
-    if (mg.floor > mg.target) return msg("pgMsg", "Your floor cannot sit above the target margin.");
     const { data, error } = await sb.from("billing_config").update(row).eq("id", 1).select("id");
     if (error) return msg("pgMsg", error.message);
     if (!data || !data.length) return msg("pgMsg", "There is no billing_config row (id = 1) to write to — apply the wallet and burn-rate migration, then save again.");
     $("pgVerified").textContent = row.last_verified_at;
-    msg("pgMsg", "Rates saved — every price on this tab now works off them.", "ok");
+    msg("pgMsg", "Saved — every price on this page now works off these rates.", "ok");
   };
 
   $("pgDerive").onclick = () => {
     msg("pgMsg", "");
-    const perMonth = pgIn("pgElUsd", 0), credits = pgIn("pgElCredits", 0), cpm = pgIn("pgElCpm", PG_DEFAULT.creditsPerMin);
+    const perMonth = pgIn("pgElUsd", 0), credits = pgIn("pgElCredits", 0), cpm = pgIn("pgElCpm", 1000);
     if (perMonth <= 0 || credits <= 0 || cpm <= 0) return msg("pgMsg", "Fill in the monthly price, the monthly credits and the credits per minute.");
-    const perCredit = perMonth / credits, perMin = perCredit * cpm;
+    const perMin = (perMonth / credits) * cpm;
     $("pgVoiceMin").value = perMin.toFixed(3);
-    msg("pgMsg", \`\${pgUsd(perMonth)} buys \${mins(credits)} ElevenLabs credits a month → \${pgUsd(perCredit, 5)} per credit, and \${mins(cpm)} credits a minute is \${pgUsd(perMin)} per minute of cloned-voice airtime.\`, "ok");
+    msg("pgMsg", \`\${pgUsd(perMonth)} a month buys \${mins(credits)} credits, and \${mins(cpm)} credits a minute comes to \${pgUsd(perMin)} per minute of voice. Filled in for you.\`, "ok");
     pgRenderAll();
   };
 
-  $("pgSuggest").onclick = () => {
-    const cc = pgCreditCost(), target = pgMargins().target, creditMin = Math.max(0, pgIn("pgMinutes", 0));
-    MODALITIES.forEach((m) => { $(("pgPrice_" + m)).value = pgAt(cc[m] * creditMin, target).toFixed(2); });
-    pgRenderPrices();
-    msg("pgPriceMsg", \`Filled all three at \${target}% margin for \${mins(creditMin)} minutes sold. Adjust any box you like — the profit line follows.\`, "ok");
-  };
-
-  document.addEventListener("click", async (e) => {
-    const b = e.target.closest("button[data-pg]");
-    if (!b || b.dataset.pg !== "make") return;
-    msg("pgLadderMsg", "");
-    const mod = b.dataset.mod;
-    const min = N(b.dataset.min, 0);
-    const cents = Math.max(0, Math.round(N(b.dataset.price, 0) * 100));
-    const id = (mod + "_" + mins(min) + "m").toLowerCase().replace(/\\./g, "p").replace(/[^a-z0-9_]/g, "");
-    const label = \`\${mins(min)} \${MOD_LABEL[mod]} minutes\`;
+  // One insert path for the builder button and the size list, so a package created
+  // from either place lands in the catalogue switched off and identical.
+  async function pgCreatePackage(mod, minutes, price) {
+    const cents = Math.max(0, Math.round(N(price, 0) * 100));
+    const id = (mod + "_" + mins(minutes) + "m").toLowerCase().replace(/\\./g, "p").replace(/[^a-z0-9_]/g, "");
+    const label = \`\${mins(minutes)} \${PG_SHOP_LABEL[mod]} minutes\`;
     const row = {
       id,
-      name: \`\${MOD_LABEL[mod]} · \${mins(min)} min\`,
+      name: \`\${PG_SHOP_LABEL[mod]} · \${mins(minutes)} min\`,
       price_cents: cents,
       currency: "usd",
       blurb: label,
@@ -1749,22 +1747,47 @@ export const ADMIN_HTML = `<!doctype html>
       features: mod === "audio" ? ["voice"] : mod === "video" ? ["video"] : ["video", "voice"],
       active: false,
     };
-    row[PG_MINCOL[mod]] = min;
+    row[PG_MINCOL[mod]] = minutes;
     let { error } = await sb.from("plans").insert(row);
-    let note = \`Created “\${row.name}” at \${pgUsd(cents / 100)} — switched off until you review it on the Plans tab.\`;
+    let note = \`Created “\${row.name}” at \${pgUsd(cents / 100)} — switched off until you turn it on in the Plans tab.\`;
     if (error && /duplicate key/i.test(error.message)) {
       const upd = { price_cents: cents, name: row.name, blurb: row.blurb, includes: row.includes, features: row.features };
-      upd[PG_MINCOL[mod]] = min;
+      upd[PG_MINCOL[mod]] = minutes;
       ({ error } = await sb.from("plans").update(upd).eq("id", id));
       note = \`Updated the existing “\${row.name}” to \${pgUsd(cents / 100)}.\`;
     }
-    if (error) return msg("pgLadderMsg", error.message);
-    msg("pgLadderMsg", note, "ok");
+    if (error) return { error: error.message };
     await loadPlans();
+    return { note };
+  }
+
+  $("pgMake").onclick = async () => {
+    msg("pgPriceMsg", "");
+    const m = pgMod(), minutes = Math.max(1, pgIn("pgMinutes", 0));
+    const own = String($("pgCustom")?.value ?? "").trim();
+    const price = own === "" ? pgAt(pgCreditCost()[m] * minutes, pgTarget()) : N(own, 0);
+    const r = await pgCreatePackage(m, minutes, price);
+    msg("pgPriceMsg", r.error || r.note, r.error ? "err" : "ok");
+  };
+
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-pg]");
+    if (!b) return;
+    if (b.dataset.pg === "quick") {
+      $("pgMinutes").value = b.dataset.min;
+      pgRenderQuick();
+      pgRenderResult();
+      return;
+    }
+    if (b.dataset.pg !== "add") return;
+    msg("pgLadderMsg", "");
+    const r = await pgCreatePackage(b.dataset.mod, N(b.dataset.min, 0), N(b.dataset.price, 0));
+    msg("pgLadderMsg", r.error || r.note, r.error ? "err" : "ok");
   });
 
-  ["pgFalSec", "pgVoiceMin", "pgMargin", "pgFloor", "pgMinutes", "pgPrice_video", "pgPrice_audio", "pgPrice_video_audio"]
-    .forEach((id) => { const el = $(id); if (el) el.addEventListener("input", () => { pgRenderUnits(); pgRenderPrices(); }); });
+  ["pgFalMin", "pgVoiceMin", "pgMargin", "pgMinutes", "pgCustom"]
+    .forEach((id) => { const el = $(id); if (el) el.addEventListener("input", pgRenderAll); });
+  document.querySelectorAll('input[name="pgMod"]').forEach((el) => el.addEventListener("change", () => { pgRenderResult(); pgRenderLadder(); }));
   ["pgLadderMod", "pgBundles"].forEach((id) => { const el = $(id); if (el) el.addEventListener("input", pgRenderLadder); });
 
   // ══ CONTACT ═════════════════════════════════════════════════════════════
