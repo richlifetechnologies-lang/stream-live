@@ -5,7 +5,7 @@ import { ArtBackdrop, Logo } from "../components/brand";
 import { useToast } from "../hooks/use-toast";
 import { gateway, useAccount, signIn, signUp, signOut } from "../lib/gateway";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
-import { LogIn, LogOut, UserPlus, KeyRound, Loader2, MonitorX, Hourglass } from "lucide-react";
+import { LogIn, LogOut, UserPlus, KeyRound, Loader2, MonitorX, Hourglass, CreditCard } from "lucide-react";
 
 const C = "hsl(187 100% 52%)";
 const BG = "hsl(222 47% 4%)";
@@ -204,6 +204,21 @@ export default function AccountPage() {
               <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Your minutes</span>
               <span style={{ display: "block", fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
                 Balances per bucket, live drain while you are on air, and asking for more
+              </span>
+            </span>
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace" }}>OPEN →</span>
+        </button>
+
+        {/* What minutes cost and who to pay */}
+        <button onClick={() => setLocation("/plans")}
+          style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", cursor: "pointer", textAlign: "left" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <CreditCard style={{ width: 16, height: 16, color: C }} />
+            <span>
+              <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Plans and prices</span>
+              <span style={{ display: "block", fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
+                Packages on sale, what each one includes and how to reach your administrator
               </span>
             </span>
           </span>

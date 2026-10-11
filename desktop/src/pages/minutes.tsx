@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout";
 import { countdown, drainOf, MOD_LABELS, type LiveLease } from "../lib/minutes";
 import { useTicker } from "../components/meter";
+import { ContactCard, PayCard } from "../components/contact";
 import { gateway, useAccount, useLease, requestTopup } from "../lib/gateway";
 import type { AccountSnapshot, Modality } from "@stream-live/client";
 import { Hourglass, Radio, RefreshCw, Send, ArrowLeftRight, CircleCheck, CircleOff } from "lucide-react";
@@ -274,10 +275,21 @@ export default function MinutesPage() {
               <Send style={{ width: 14, height: 14 }} /> {sending ? "Sending…" : "Send request"}
             </button>
             <p style={{ fontSize: 11, color: "hsl(222 25% 42%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.5 }}>
-              Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in this bucket once they approve it and never expire.
+              Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in this bucket once they approve it and never expire.{" "}
+              <button onClick={() => setLocation("/plans")}
+                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: C, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
+                See plans and prices
+              </button>
             </p>
           </form>
         </div>
+
+        {snap && (
+          <>
+            <PayCard pay={snap.pay} title="Pay your administrator — MoMo or Bitcoin only" />
+            <ContactCard contact={snap.contact} title="Send the payment reference" />
+          </>
+        )}
 
         {/* Requests + recent movements */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>

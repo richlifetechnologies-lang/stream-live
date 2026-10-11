@@ -107,6 +107,7 @@
       <button data-tab="sessions">Live sessions</button>
       <button data-tab="gateway">Gateway</button>
       <button data-tab="plans">Plans</button>
+      <button data-tab="contact">Contact</button>
       <button id="signOut" style="margin-left:auto">Sign out</button>
     </div>
 
@@ -172,6 +173,11 @@
         <div class="card">
           <h2 style="font-size:14px;margin:0 0 4px">Credit minutes into a bucket</h2>
           <p class="muted" style="margin:0 0 12px">The user paid you outside the software; you credit the bucket. Deducting is a negative grant (corrections, refunds reversed). Both write an append-only ledger row and go through <code>admin-api</code>. A reason is required.</p>
+          <div class="row" style="margin-bottom:14px;align-items:center">
+            <div style="flex:1 1 260px"><label style="margin-top:0">Or credit a whole package in one go</label><select id="gPackage"></select></div>
+            <div style="flex:0 0 auto"><button id="packageBtn" style="margin-top:20px">Credit this package</button></div>
+            <div class="muted" id="gPackageHint" style="flex:1 1 200px;margin-top:20px"></div>
+          </div>
           <div class="row">
             <div><label>Credit which bucket</label><select id="gModality"></select></div>
             <div><label>Minutes to add</label><input id="gMinutes" type="number" min="0" step="0.5" placeholder="60" /></div>
@@ -479,17 +485,32 @@
     <section id="tab-plans" class="hidden">
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Plans</h2>
+          <h2 style="font-size:14px;margin:0">Packages</h2>
           <button id="addPlan">+ New plan</button>
         </div>
-        <p class="muted" style="margin:6px 0 12px">A plan is only a label now: how many devices an account may bind and which capabilities it advertises. Minutes come from grants, never from the plan.</p>
-        <div style="overflow:auto">
-          <table id="plansTable">
-            <thead><tr><th>Id</th><th>Name</th><th>Devices</th><th>Features</th><th>Active</th><th></th></tr></thead>
-            <tbody></tbody>
-          </table>
-        </div>
+        <p class="muted" style="margin:6px 0 12px">This is the catalogue the user reads in the desktop app before paying you: name, USD price, the minutes attached to each of the three buckets, the one-line pitch and what the buyer gets. Setting a number here does not credit anyone — you still grant the minutes on the Accounts tab, and <b>Credit this package</b> does that in one click.</p>
+        <div id="plansList"></div>
         <div id="plansMsg"></div>
+      </div>
+    </section>
+
+    <!-- ══ TAB: CONTACT ════════════════════════════════════════════════════ -->
+    <section id="tab-contact" class="hidden">
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 6px">Payment and contact details shown to users</h2>
+        <p class="muted" style="margin:6px 0 12px">MoMo and Bitcoin are the only two methods the desktop app advertises, and WhatsApp and Telegram are the only two contact centres it links to. Everything here appears on the user's Plans screen and Minutes page with a copy button beside each value. Empty fields stay hidden.</p>
+        <label>Message to users</label>
+        <textarea id="ctMessage" placeholder="Pay by MoMo or BTC, then send me your sign-up email and the transaction reference on WhatsApp. I credit the minutes the same day."></textarea>
+        <div class="grid3">
+          <div><label>MoMo number</label><input id="ctMomo" placeholder="+233 20 000 0000" /></div>
+          <div><label>Bitcoin address</label><input id="ctBtc" placeholder="bc1q0000000000000000000000000000000000" /></div>
+        </div>
+        <div class="grid3" style="margin-top:10px">
+          <div><label>WhatsApp</label><input id="ctWhatsapp" placeholder="+233 20 000 0000" /></div>
+          <div><label>Telegram</label><input id="ctTelegram" placeholder="@yourhandle or +233200000000" /></div>
+        </div>
+        <div class="btns" style="margin-top:14px"><button id="ctSave" class="primary">Save payment and contact details</button></div>
+        <div id="ctMsg"></div>
       </div>
     </section>
   </div>
@@ -509,6 +530,7 @@
   const $ = (id) => document.getElementById(id);
   const N = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
   const FEATURES = ["video", "voice", "portrait_obs"];
+  const FEATURE_LABEL = { video: "Video calls", voice: "Voice / audio", portrait_obs: "Portrait OBS output" };
   const MODALITIES = ["video", "audio", "video_audio"];
   const MOD_LABEL = { video: "Video Call", audio: "Audio Call", video_audio: "Video + Audio" };
 
@@ -591,7 +613,7 @@
     $("authCard").classList.add("hidden");
     $("dash").classList.remove("hidden");
     await loadPlans();
-    await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadConfig(), loadAccounts()]);
+    await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadConfig(), loadContact(), loadAccounts()]);
     setBrFromNow();
   }
 
@@ -685,6 +707,11 @@
     }).join("");
 
     $("gModality").innerHTML = MODALITIES.map((m) => `<option value="${m}">${MOD_LABEL[m]}</option>`).join("");
+    $("gPackage").innerHTML = PLAN_ROWS.filter((p) => p.active).map((p) => {
+      const parts = MODALITIES.filter((m) => N(p[`${m}_minutes`]) > 0).map((m) => `${mins(N(p[`${m}_minutes`]))} ${MOD_LABEL[m]}`).join(" · ");
+      return `<option value="${esc(p.id)}">${esc(p.name)}${parts ? ` — ${parts}` : " — no minutes set yet"}</option>`;
+    }).join("") || '<option value="">no active plan</option>';
+    showPackageHint();
     $("gMinutes").value = ""; $("gReason").value = "";
     $("gUnlimited").checked = false; $("gClearUnlimited").checked = false;
 
@@ -812,6 +839,49 @@
       msg("grantMsg", `Deducted. New balance ${mins(res.balance)} min.`, "ok");
       await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
     } catch (err) { msg("grantMsg", err.message); }
+  };
+
+  // A package is only the three amounts typed on the Plans tab, so selling one
+  // is one click here instead of three separate grants.
+  function planMinutes(p) {
+    return Object.fromEntries(MODALITIES.map((m) => [m, Math.max(0, Math.round(N(p[`${m}_minutes`], 0)))]));
+  }
+
+  function showPackageHint() {
+    const sel = $("gPackage");
+    if (!sel.options.length) return ($("gPackageHint").textContent = "");
+    const p = PLAN_ROWS.find((x) => x.id === sel.value);
+    if (!p) return ($("gPackageHint").textContent = "");
+    const amounts = planMinutes(p);
+    const parts = MODALITIES.filter((m) => amounts[m] > 0).map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`);
+    $("gPackageHint").textContent = parts.length ? parts.join(" · ") : "no minutes attached — set them on the Plans tab";
+  }
+
+  $("gPackage").onchange = showPackageHint;
+
+  $("packageBtn").onclick = async () => {
+    if (!CUR) return msg("grantMsg", "Open an account first.");
+    const p = PLAN_ROWS.find((x) => x.id === $("gPackage").value);
+    if (!p) return msg("grantMsg", "Pick a package.");
+    const amounts = planMinutes(p);
+    const mods = MODALITIES.filter((m) => amounts[m] > 0);
+    if (!mods.length) return msg("grantMsg", `“${p.name}” has no minutes attached. Set them on the Plans tab.`);
+    const reason = $("gReason").value.trim() || `Package ${p.name} purchased`;
+    if (!confirm(`Credit ${CUR.email}\n\n${mods.map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`).join("\n")}\n\nReason: ${reason}\n\nThis writes one ledger row per bucket.`)) return;
+    $("packageBtn").disabled = true;
+    const done = [];
+    try {
+      for (const m of mods) {
+        const res = await api({ action: "grant", userId: CUR.user_id, modality: m, minutes: amounts[m], reason });
+        done.push(`${MOD_LABEL[m]} → ${mins(res.balance)} min`);
+      }
+      msg("grantMsg", `Credited “${p.name}”: ${done.join(", ")}.`, "ok");
+      await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
+    } catch (err) {
+      msg("grantMsg", err.message + (done.length ? ` — already credited: ${done.join(", ")}` : ""));
+    } finally {
+      $("packageBtn").disabled = false;
+    }
   };
 
   async function revokeDevice(userId, deviceId) {
@@ -1295,20 +1365,50 @@
   $("poolRefresh").onclick = loadPool;
 
   // ══ PLANS ═══════════════════════════════════════════════════════════════
+  // One card per package: this is the copy the desktop app shows the buyer, so
+  // price is entered in dollars and stored in cents (plans.price_cents, USD).
   async function loadPlans() {
-    const { data, error } = await sb.from("plans").select("id, name, max_devices, features, active").order("id");
+    const { data, error } = await sb.from("plans")
+      .select("id, name, price_cents, blurb, includes, max_devices, features, active, video_minutes, audio_minutes, video_audio_minutes")
+      .order("price_cents", { ascending: true });
     if (error) return console.error(error);
     PLAN_ROWS = data || [];
-    $("plansTable").querySelector("tbody").innerHTML = PLAN_ROWS.map((p) => {
-      const feats = p.features || [];
-      return `<tr data-id="${p.id}">
-        <td><code>${esc(p.id)}</code></td>
-        <td><input data-f="name" value="${esc(p.name ?? "")}" /></td>
-        <td><input data-f="devices" type="number" min="1" value="${N(p.max_devices, 1)}" style="max-width:80px" /></td>
-        <td>${FEATURES.map((f) => `<label class="feat"><input type="checkbox" data-f="feat_${f}" ${feats.includes(f) ? "checked" : ""} />${f}</label>`).join("")}</td>
-        <td><input type="checkbox" data-f="active" ${p.active ? "checked" : ""} /></td>
-        <td style="white-space:nowrap"><button data-p="save" data-id="${p.id}" class="primary">Save</button> <button data-p="del" data-id="${p.id}" class="danger">Delete</button></td></tr>`;
-    }).join("") || '<tr><td colspan="6" class="muted">No plans yet.</td></tr>';
+    $("plansList").innerHTML = PLAN_ROWS.map(planCard).join("")
+      || '<p class="muted">No plans yet — add one above.</p>';
+  }
+
+  function planCard(p) {
+    const feats = p.features || [];
+    return `<div class="plan" data-id="${esc(p.id)}" style="border:1px solid #1d2733;border-radius:10px;padding:12px;margin-bottom:12px;background:#0b0f14">
+      <div class="row">
+        <div style="flex:0 0 150px"><label style="margin-top:0">Plan id</label><input value="${esc(p.id)}" readonly /></div>
+        <div><label style="margin-top:0">Name users see</label><input data-f="name" value="${esc(p.name ?? "")}" /></div>
+        <div style="flex:0 0 140px"><label style="margin-top:0">Price (USD)</label><input data-f="price" type="number" min="0" step="0.01" value="${(N(p.price_cents) / 100).toFixed(2)}" /></div>
+        <div style="flex:0 0 110px"><label style="margin-top:0">Devices</label><input data-f="devices" type="number" min="1" value="${N(p.max_devices, 1)}" /></div>
+      </div>
+      <label>Minutes attached to this package — what the buyer sees, and what you credit when they pay</label>
+      <div class="row">
+        <div><label style="margin-top:0">Video Call</label><input data-f="min_video" type="number" min="0" step="1" value="${N(p.video_minutes, 0)}" /></div>
+        <div><label style="margin-top:0">Audio Call</label><input data-f="min_audio" type="number" min="0" step="1" value="${N(p.audio_minutes, 0)}" /></div>
+        <div><label style="margin-top:0">Video + Cloned Audio</label><input data-f="min_video_audio" type="number" min="0" step="1" value="${N(p.video_audio_minutes, 0)}" /></div>
+      </div>
+      <label>One-line pitch</label>
+      <input data-f="blurb" value="${esc(p.blurb ?? "")}" placeholder="For streamers who go live on camera" />
+      <div class="row" style="align-items:flex-start">
+        <div style="flex:1 1 340px">
+          <label>What the buyer gets — one line each</label>
+          <textarea data-f="includes" placeholder="300 Video Call minutes&#10;1 Audio Call bucket unlocked&#10;Two devices at a time">${esc((p.includes || []).join("\n"))}</textarea>
+        </div>
+        <div style="flex:0 0 200px">
+          <label>Capabilities</label>
+          ${FEATURES.map((f) => `<label class="feat" style="margin:0 0 6px;display:flex"><input type="checkbox" data-f="feat_${f}" ${feats.includes(f) ? "checked" : ""} />${FEATURE_LABEL[f] || f}</label>`).join("")}
+        </div>
+      </div>
+      <div class="row" style="align-items:center;margin-top:10px">
+        <label class="feat" style="margin:0"><input type="checkbox" data-f="active" ${p.active ? "checked" : ""} /> Sell this package</label>
+        <div class="btns" style="margin-left:auto"><button data-p="save" data-id="${esc(p.id)}" class="primary">Save</button><button data-p="del" data-id="${esc(p.id)}" class="danger">Delete</button></div>
+      </div>
+    </div>`;
   }
 
   $("addPlan").onclick = async () => {
@@ -1316,8 +1416,10 @@
     if (!id) return;
     const clean = id.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
     if (!clean) return msg("plansMsg", "Invalid id.");
-    const { error } = await sb.from("plans").insert({ id: clean, name: clean, max_devices: 2, features: ["video"], active: true });
-    msg("plansMsg", error ? error.message : "Plan created — edit and Save.", error ? "err" : "ok");
+    const { error } = await sb.from("plans").insert({
+      id: clean, name: clean, max_devices: 2, features: ["video"], active: true, price_cents: 0, includes: [],
+    });
+    msg("plansMsg", error ? error.message : "Plan created — set its price and Save.", error ? "err" : "ok");
     await loadPlans();
   };
 
@@ -1325,17 +1427,25 @@
     const b = e.target.closest("button[data-p]");
     if (!b) return;
     const id = b.dataset.id;
-    const tr = document.querySelector(`#plansTable tr[data-id="${id}"]`);
-    if (b.dataset.p === "save" && tr) {
-      const get = (f) => tr.querySelector(`[data-f="${f}"]`);
+    const card = document.querySelector(`#plansList .plan[data-id="${id}"]`);
+    if (b.dataset.p === "save" && card) {
+      const get = (f) => card.querySelector(`[data-f="${f}"]`);
+      const price = N(get("price").value, 0);
       const row = {
         name: get("name").value.trim() || id,
+        price_cents: Math.max(0, Math.round(price * 100)),
+        currency: "usd",
+        blurb: get("blurb").value.trim() || null,
+        includes: get("includes").value.split("\n").map((s) => s.trim()).filter(Boolean),
         max_devices: N(get("devices").value, 1),
+        video_minutes: Math.max(0, Math.round(N(get("min_video").value, 0))),
+        audio_minutes: Math.max(0, Math.round(N(get("min_audio").value, 0))),
+        video_audio_minutes: Math.max(0, Math.round(N(get("min_video_audio").value, 0))),
         features: FEATURES.filter((f) => get("feat_" + f)?.checked),
         active: get("active").checked,
       };
       const { error } = await sb.from("plans").update(row).eq("id", id);
-      msg("plansMsg", error ? error.message : "Saved “" + row.name + "”.", error ? "err" : "ok");
+      msg("plansMsg", error ? error.message : `Saved “${row.name}” at $${(row.price_cents / 100).toFixed(2)}.`, error ? "err" : "ok");
       await loadPlans();
     }
     if (b.dataset.p === "del") {
@@ -1345,6 +1455,35 @@
       await loadPlans();
     }
   });
+
+  // ══ CONTACT ═════════════════════════════════════════════════════════════
+  // app_config holds one row (id = 1); these are the only fields the panel
+  // writes outside the money path, and users read them through the snapshot.
+  async function loadContact() {
+    const { data, error } = await sb.from("app_config")
+      .select("contact_message, contact_whatsapp, contact_telegram, pay_momo, pay_btc").eq("id", 1).maybeSingle();
+    if (error) return msg("ctMsg", error.message);
+    if (!data) return msg("ctMsg", "No app_config row (id = 1) — run the credits migration.");
+    $("ctMessage").value = data.contact_message || "";
+    $("ctWhatsapp").value = data.contact_whatsapp || "";
+    $("ctTelegram").value = data.contact_telegram || "";
+    $("ctMomo").value = data.pay_momo || "";
+    $("ctBtc").value = data.pay_btc || "";
+  }
+
+  $("ctSave").onclick = async () => {
+    msg("ctMsg", "");
+    const row = {
+      contact_message: $("ctMessage").value.trim() || null,
+      contact_whatsapp: $("ctWhatsapp").value.trim() || null,
+      contact_telegram: $("ctTelegram").value.trim() || null,
+      pay_momo: $("ctMomo").value.trim() || null,
+      pay_btc: $("ctBtc").value.trim() || null,
+    };
+    const { error } = await sb.from("app_config").update(row).eq("id", 1);
+    if (error) return msg("ctMsg", error.message);
+    msg("ctMsg", "Saved — users see it on their next refresh.", "ok");
+  };
 
   // ── Auth ──────────────────────────────────────────────────────────────────
   $("signIn").onclick = async () => {

@@ -73,14 +73,40 @@ export type SnapshotSession = {
   real_minutes: number;
 };
 
+/** Where the user pays, typed by the administrator on the panel's Contact tab. */
+export type AdminPayment = { momo: string | null; btc: string | null };
+
+/** The administrator's contact centres — WhatsApp and Telegram, nothing else. */
+export type AdminContact = {
+  message: string | null;
+  whatsapp: string | null;
+  telegram: string | null;
+};
+
+/** One package as the buyer sees it. Price is always USD. */
+export type Plan = {
+  id: string;
+  name: string;
+  priceCents: number;
+  blurb: string | null;
+  includes: string[];
+  features: string[];
+  maxDevices: number;
+  /** Minutes attached to the package per modality — what the admin credits on purchase. */
+  minutes: Record<Modality, number>;
+};
+
 /** One round-trip to `sl_account_snapshot` — what the user dashboard shows. */
 export type AccountSnapshot = {
   status: string;
+  planId: string | null;
   modalities: Record<Modality, boolean>;
   maxConcurrentSessions: number;
   wallets: SnapshotWallet[];
   openSessions: SnapshotSession[];
-  app: { min_supported_version: string; latest_version: string | null; maintenance: boolean; maintenance_message: string | null } | null;
+  app: { min_supported_version: string; latest_version: string | null; maintenance: boolean; maintenance_message: string | null; contact?: AdminContact | null; pay?: AdminPayment | null } | null;
+  contact: AdminContact | null;
+  pay: AdminPayment | null;
 };
 
 /** Postgres returns the snapshot as loose JSON; this is the shape we read from it. */
@@ -88,6 +114,7 @@ type SnapshotJson = {
   ok?: boolean;
   error?: string;
   status?: string;
+  plan_id?: string;
   modalities?: Partial<Record<Modality, boolean>>;
   max_concurrent_sessions?: number;
   wallets?: SnapshotWallet[];
@@ -233,6 +260,7 @@ export class StreamLiveClient {
 
     return {
       status: j.status ?? "none",
+      planId: j.plan_id ?? null,
       modalities: {
         video: j.modalities?.video === true,
         audio: j.modalities?.audio === true,
@@ -242,7 +270,38 @@ export class StreamLiveClient {
       wallets,
       openSessions: j.open_sessions ?? [],
       app: j.app ?? null,
+      contact: j.app?.contact ?? null,
+      pay: j.app?.pay ?? null,
     };
+  }
+
+  /**
+   * The packages on sale, cheapest first. Prices and the "what's included" text
+   * are typed by the administrator; nothing here grants minutes — it is the
+   * catalogue the user reads before paying outside the app.
+   */
+  async plans(): Promise<Plan[]> {
+    await this.token();
+    const { data, error } = await this.sb
+      .from("plans")
+      .select("id, name, price_cents, blurb, includes, features, max_devices, video_minutes, audio_minutes, video_audio_minutes")
+      .eq("active", true)
+      .order("price_cents", { ascending: true });
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((p) => ({
+      id: String(p.id),
+      name: String(p.name ?? p.id),
+      priceCents: Number(p.price_cents ?? 0),
+      blurb: (p.blurb as string | null) ?? null,
+      includes: ((p.includes as string[] | null) ?? []).filter((x) => String(x).trim().length > 0),
+      features: (p.features as string[] | null) ?? [],
+      maxDevices: Number(p.max_devices ?? 1),
+      minutes: {
+        video: Number(p.video_minutes ?? 0),
+        audio: Number(p.audio_minutes ?? 0),
+        video_audio: Number(p.video_audio_minutes ?? 0),
+      },
+    }));
   }
 
   async ledger(limit = 50): Promise<Array<Record<string, unknown>>> {
@@ -478,6 +537,21 @@ function toBase64(bytes: Uint8Array): string {
     h = Math.imul(h, 16777619);
   }
   return "dev_" + (h >>> 0).toString(16).padStart(8, "0");
+}
+
+/** feature_flag values worded for the buyer instead of the enum label. */
+export const FEATURE_LABELS: Record<string, string> = {
+  video: "AI video calls",
+  voice: "AI voice cloning and calls",
+  portrait_obs: "Portrait 9:16 OBS output",
+};
+
+/** Package prices are stored in cents and are always USD. */
+export function usd(cents: number): string {
+  return "$" + (cents / 100).toLocaleString("en-US", {
+    minimumFractionDigits: Number.isInteger(cents / 100) ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
 }
 
 export const REASON_MESSAGES: Record<string, string> = {
