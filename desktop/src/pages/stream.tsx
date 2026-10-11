@@ -1063,11 +1063,7 @@ export default function StreamPage() {
     sessionGenRef.current++;
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     isStartingRef.current = false;
-    // Close the lease so the unused prepaid chunk is refunded and the heartbeat stops.
-    await gateway.endCall().catch(() => {});
     endLease();
-    sessionIdRef.current = null;
-    void refreshBalances();
     videoSessionRef.current?.close(); videoSessionRef.current = null;
     clonerRef.current?.stop(); clonerRef.current = null;
     if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
@@ -1080,6 +1076,12 @@ export default function StreamPage() {
     setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
     setAudioActive(false); setSyncDelay(0.8); setVuLevel(0);
     setVcActive(false); setVcVu(0); setVcAnalyser(null);
+    // Refund the prepaid chunk only after the call is locally dead. Waiting for
+    // that round-trip first left Stop unresponsive — and an unreached one is
+    // refunded by the lease expiring server-side anyway.
+    sessionIdRef.current = null;
+    await gateway.endCall().catch(() => {});
+    void refreshBalances();
   }, []);
 
   // Route changes (e.g. opening Settings mid-stream) unmount this page. Without
@@ -1195,9 +1197,7 @@ export default function StreamPage() {
       setIsStreaming(true);
 
     } catch (err) {
-      // Give back any prepaid chunk before unwinding the UI.
-      await gateway.endCall().catch(() => {});
-      sessionIdRef.current = null;
+      // teardownStream gives back any prepaid chunk, so no separate refund call.
       void teardownStream();
       if (err instanceof GatewayError) {
         const msg = REASON_MESSAGES[err.reason] ?? err.message;
