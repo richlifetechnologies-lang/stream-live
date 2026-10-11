@@ -207,12 +207,6 @@ export async function reapSessions(userId?: string): Promise<number> {
   return Number(data.data ?? 0);
 }
 
-/** Snapshot used by the user dashboard and the admin panel. Never exposes keys. */
-export async function accountSnapshot(userId: string): Promise<Record<string, never>> {
-  const db = adminClient();
-  return unwrap(await db.rpc("sl_account_snapshot", { p_user: userId }));
-}
-
 /** Invalidate every session a user has, so a stolen/shared login dies everywhere. */
 export async function signOutEverywhere(userId: string): Promise<number> {
   const db = adminClient();
