@@ -14,6 +14,23 @@ import { adminClient } from "./db.ts";
 
 export type Provider = "fal" | "elevenlabs";
 
+/**
+ * Clean up a pasted key the way the working desktop app does.
+ *
+ * A fal credential is the pair `<key id>:<secret>`; fal answers 401 "No user found
+ * for Key ID and Secret" when either half is missing or the paste was cut short.
+ * Pasting from a dashboard that shows `Key fal_sk_…`, or from a field that wraps,
+ * leaves a stray prefix or an embedded newline behind — both authenticate as a
+ * garbage secret rather than an obvious typo, so strip them here.
+ */
+export function normalizeSecret(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^(?:key|bearer)\s+/i, "")
+    .replace(/\s+/g, "")
+    .replace(/:{2,}/g, ":");
+}
+
 export type KeyCandidate = {
   keyId: string;
   label: string;
@@ -48,14 +65,14 @@ export async function pickKeys(userId: string, provider: Provider): Promise<KeyC
   const rows: KeyCandidate[] = ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     keyId: String(r.key_id),
     label: String(r.label ?? "key"),
-    secret: String(r.secret ?? ""),
+    secret: normalizeSecret(String(r.secret ?? "")),
     priority: Number(r.priority ?? 100),
     fromEnv: false,
   }));
 
   const envSecret = provider === "fal" ? Deno.env.get("FAL_KEY") : Deno.env.get("ELEVENLABS_KEY");
   if (envSecret) {
-    rows.push({ keyId: "env", label: "environment secret", secret: envSecret, priority: 9999, fromEnv: true });
+    rows.push({ keyId: "env", label: "environment secret", secret: normalizeSecret(envSecret), priority: 9999, fromEnv: true });
   }
   return rows.filter((r) => r.secret.length > 0);
 }

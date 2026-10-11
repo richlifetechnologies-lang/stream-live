@@ -4,7 +4,7 @@
 // starts with, so a green light here means the whole handshake will work.
 // ElevenLabs: read the account's subscription quota. Both are metadata endpoints;
 // neither queues an inference request.
-import type { Provider } from "./keys.ts";
+import { normalizeSecret, type Provider } from "./keys.ts";
 
 export type VerifyResult = { ok: boolean; status: number | null; detail: string };
 
@@ -22,10 +22,25 @@ function num(v: unknown): number {
 }
 
 export async function verifyKey(provider: Provider, secret: string): Promise<VerifyResult> {
-  const key = secret.trim();
+  const key = normalizeSecret(secret);
   if (!key) return { ok: false, status: null, detail: "Nothing to test yet — paste the key first." };
 
   if (provider === "fal") {
+    // fal authenticates on the dashboard pair `<key id>:<key secret>`, so the shape
+    // of what we are about to send is itself the diagnosis. Report lengths only —
+    // never the key.
+    const [id, ...rest] = key.split(":");
+    const shape = rest.length === 0
+      ? `${key.length} characters with no ':' — a fal credential is the dashboard pair "<key id>:<key secret>"`
+      : `id ${id.length} chars + secret ${rest.join(":").length} chars`;
+    if (rest.length === 0) {
+      return {
+        ok: false,
+        status: null,
+        detail: `fal.ai needs both halves of the key. Copied: ${shape}. Put it back as one line, id:secret.`,
+      };
+    }
+
     const res = await call("https://rest.fal.ai/tokens/", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Key ${key}` },
@@ -33,13 +48,16 @@ export async function verifyKey(provider: Provider, secret: string): Promise<Ver
     });
     if (typeof res === "string") return { ok: false, status: null, detail: res };
     if (!res.ok) {
-      const body = (await res.text().catch(() => "")).slice(0, 160);
+      const body = (await res.text().catch(() => "")).slice(0, 200);
+      let why = body;
+      try {
+        const j = JSON.parse(body);
+        why = typeof j?.detail === "string" ? j.detail : body;
+      } catch { /* not JSON — show it raw */ }
       return {
         ok: false,
         status: res.status,
-        detail: res.status === 401 || res.status === 403
-          ? "fal.ai refused this key. Check it was copied in full and is an API key, not a dashboard login."
-          : `fal.ai answered ${res.status}. ${body}`,
+        detail: `fal.ai answered ${res.status}${why ? `: ${why}` : ""}. Sent ${shape}.`,
       };
     }
     return { ok: true, status: 200, detail: "Accepted — fal.ai minted a call token for lucy-2-5." };
@@ -49,12 +67,11 @@ export async function verifyKey(provider: Provider, secret: string): Promise<Ver
   if (typeof sub === "string") return { ok: false, status: null, detail: sub };
   if (!sub.ok) {
     if (sub.status !== 404) {
+      const body = (await sub.text().catch(() => "")).slice(0, 200);
       return {
         ok: false,
         status: sub.status,
-        detail: sub.status === 401 || sub.status === 403
-          ? "ElevenLabs refused this key. It is the string under Profile → API Key, and it never starts with 'sk_'."
-          : `ElevenLabs answered ${sub.status}.`,
+        detail: `ElevenLabs answered ${sub.status}${body ? `: ${body}` : ""}. Sent ${key.length} characters.`,
       };
     }
     // Older / scoped-down keys can't read the subscription; the voice list still
