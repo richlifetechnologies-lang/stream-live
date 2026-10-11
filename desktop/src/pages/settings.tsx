@@ -1,4 +1,5 @@
 import { AppLayout } from "../components/layout";
+import { MacSetupCard } from "../components/mac-setup";
 import { useLocation, Link } from "wouter";
 import { User, Wallet, LogOut, Trash2, ArrowRight } from "lucide-react";
 import { clearCredentials } from "../lib/credentials";
@@ -81,6 +82,9 @@ export default function SettingsPage() {
             Stream Live is account-gated — the service keys are managed by your administrator and never entered here.
           </p>
         </div>
+
+        {/* ── Mac output path ──────────────────────────────────────────────── */}
+        <MacSetupCard />
 
         {/* ── Danger zone ──────────────────────────────────────────────────── */}
         <div style={{ background: "hsl(0 60% 7%)", border: "1px solid hsl(0 85% 40% / 0.25)", borderRadius: 14, padding: 20 }}>

@@ -1,0 +1,97 @@
+name: Build macOS app
+
+# Stream Live ships unsigned DMGs, so macOS runners only need Node — no
+# Apple Developer certificate. Trigger a run from the Actions tab, or push a
+# v* tag to attach the DMGs to that release automatically.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to attach the DMGs to (e.g. v1.0.3). Leave empty for workflow artifacts only.'
+        required: false
+        default: ''
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  macos:
+    name: DMG — Apple Silicon + Intel
+    runs-on: macos-14
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # On a tag push the tag *is* the release; on a manual run it only exists if
+      # release_tag was filled in.
+      RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+      HAS_RELEASE: ${{ github.event_name != 'workflow_dispatch' || inputs.release_tag != '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      # A build without the anon key refuses to sign in, so the runner has to supply
+      # it. The key is a public client credential that already lives in the committed
+      # admin-panel copy — reading it from there keeps a second copy out of the repo
+      # and out of the log (nothing below echoes it).
+      - name: Point the build at the gateway
+        run: |
+          KEY=$(grep -o 'SUPABASE_ANON_KEY = "[^"]*"' ../admin-panel/index.html | head -1 | cut -d'"' -f2)
+          if [ ${#KEY} -lt 20 ]; then
+            echo "::error::no gateway anon key found in admin-panel/index.html"
+            exit 1
+          fi
+          echo "VITE_SUPABASE_ANON_KEY=$KEY" >> "$GITHUB_ENV"
+          echo "VITE_SUPABASE_URL=https://onhanfathvfkkliayvrn.supabase.co" >> "$GITHUB_ENV"
+          echo "read gateway config (${#KEY} chars)"
+
+      # The in-app updater compares the release tag against the running app's
+      # version, so a tag that disagrees with package.json produces a build that
+      # can never update itself. Fail fast instead.
+      - name: Check the app version matches the release tag
+        if: env.HAS_RELEASE == 'true'
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          EXPECTED=${RELEASE_TAG#v}
+          if [ "$VERSION" != "$EXPECTED" ]; then
+            echo "::error::desktop/package.json is $VERSION but the release tag is $EXPECTED"
+            exit 1
+          fi
+          echo "Building $VERSION for release $RELEASE_TAG"
+
+      - name: Build web + electron
+        run: npm run build
+
+      - name: Package DMGs (arm64 + x64, unsigned)
+        run: npx electron-builder --mac --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stream-live-macos-${{ github.run_number }}
+          path: |
+            desktop/release/*.dmg
+            desktop/release/*.dmg.blockmap
+            desktop/release/latest-mac.yml
+          retention-days: 30
+
+      - name: Add the DMGs to the release
+        if: env.HAS_RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --title "Stream Live $RELEASE_TAG" --generate-notes
+          gh release upload "$RELEASE_TAG" release/StreamLive-*.dmg release/StreamLive-*.dmg.blockmap release/latest-mac.yml --clobber
+          gh release view "$RELEASE_TAG"

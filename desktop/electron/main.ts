@@ -205,9 +205,37 @@ ipcMain.on("download-update", () => {
 });
 
 // ─── IPC: quit and run the downloaded installer ───────────────────────────────
-ipcMain.on("quit-and-install", () => {
+// Windows: launch the NSIS installer and let it replace the app.
+// macOS: a DMG cannot overwrite a running app on its own, and an unsigned app
+// has to be approved by the user anyway — so mount the DMG and show the drag
+// steps instead of silently opening a Finder window.
+ipcMain.on("quit-and-install", async () => {
   if (!pendingInstallerPath) return;
-  shell.openPath(pendingInstallerPath).then(() => {
+  const installer = pendingInstallerPath;
+
+  if (process.platform === "darwin") {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        title: "Install the update",
+        message: `Stream Live ${latestVersion ?? "new"} is downloaded`,
+        detail:
+          "A Finder window will open with the new version.\n\n" +
+          "1. Drag “Stream Live” onto the Applications folder shortcut next to it.\n" +
+          "2. Quit this window when it asks.\n" +
+          "3. Open Stream Live from Applications. macOS will block it once — approve it in\n" +
+          "   System Settings → Privacy & Security → “Open Anyway”.\n\n" +
+          "Eject the disk image afterwards if you like.",
+        buttons: ["Show me the DMG"],
+        defaultId: 0,
+      });
+    }
+    await shell.openPath(installer);
+    app.quit();
+    return;
+  }
+
+  shell.openPath(installer).then(() => {
     app.quit();
   }).catch(() => {
     app.quit();
@@ -332,14 +360,19 @@ function showMacFirstLaunchNotice() {
     dialog.showMessageBox(mainWindow, {
       type: "info",
       title: "Welcome to Stream Live",
-      message: "One-time Mac setup complete",
+      message: "Approve Stream Live in System Settings",
       detail:
-        "If macOS blocked this app when you first opened it, here's how to fix it:\n\n" +
-        "1. Close Stream Live\n" +
-        "2. Right-click the app icon (or DMG) → Open\n" +
-        "3. Click Open in the security dialog\n\n" +
-        "You only need to do this once. After that it launches normally.\n\n" +
-        "This happens because Stream Live isn't signed with a paid Apple Developer certificate.",
+        "macOS blocks apps that aren't signed with a paid Apple Developer certificate, " +
+        "so the very first launch is refused. That is expected — it only needs approving once.\n\n" +
+        "1. Double-click Stream Live so macOS records the attempt.\n" +
+        "2. Open System Settings → Privacy & Security.\n" +
+        "3. Scroll to the Security section and click “Open Anyway” beside " +
+        "“Stream Live was blocked”.\n" +
+        "4. Enter your Mac password, then open Stream Live again.\n\n" +
+        "If “Open Anyway” never appears, quit this app and run:\n" +
+        "    xattr -dr com.apple.quarantine \"/Applications/Stream Live.app\"\n" +
+        "in Terminal, then launch it again.\n\n" +
+        "Still on this screen? Stream Settings → Mac Setup lists the same steps.",
       buttons: ["Got it"],
       defaultId: 0,
     });

@@ -112,6 +112,23 @@ Versioning starts at **1.0.0**. Releases are published to
 `.blockmap` and `latest.yml`; the in-app updater reads that repo's latest release,
 so a build older than `app_config.min_supported_version` shows the update button.
 
+### macOS (Apple Silicon M1–M4 and Intel)
+
+`.github/workflows/build-mac.yml` builds `StreamLive-<version>-arm64.dmg` and
+`StreamLive-<version>-x64.dmg` on a GitHub macOS runner and attaches them to the
+release for the pushed tag. There is no Apple Developer certificate, so the DMGs are
+**unsigned**: the runner never signs or notarizes, and the first launch is blocked by
+Gatekeeper until the user approves it in **System Settings → Privacy & Security →
+Open Anyway**. The app tells them this on first launch, and the same steps live
+in-app under **Settings → Mac Setup**.
+
+On a Mac the two bundled Windows drivers cannot exist — macOS only allows a system
+webcam behind an Apple-approved extension, and VB-Cable is DirectShow/Windows-only.
+Video reaches calling apps through **OBS Virtual Camera** and the cloned voice
+through **BlackHole 2ch**; both are free, user-installed, and the app drives them
+from the same Broadcast toggles as on Windows (`src/lib/platform.ts` picks the right
+device names per OS).
+
 ## Deploying / going live
 
 Follow [`DEPLOY.md`](DEPLOY.md) — it covers the migration, the five functions,

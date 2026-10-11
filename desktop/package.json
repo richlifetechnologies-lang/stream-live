@@ -1,6 +1,6 @@
 {
   "name": "stream-live",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Stream Live desktop app — real-time AI webcam transformation powered by fal.ai Lucy 2.5. Account-gated: all AI keys are served by the STREAM LIVE gateway, the user never enters one.",
   "main": "dist-electron/main.js",
   "author": "Rich Life Technologies",
@@ -67,29 +67,6 @@
     "asarUnpack": [
       "node_modules/koffi/**/*"
     ],
-    "extraFiles": [
-      {
-        "from": "drivers",
-        "to": "drivers",
-        "filter": [
-          "*.exe",
-          "*.nsh",
-          "*.md",
-          "*.ps1",
-          "**/*.dll",
-          "**/*.exe",
-          "**/*.ps1",
-          "**/*.md"
-        ]
-      },
-      {
-        "from": "drivers/vbcable",
-        "to": "drivers/vbcable",
-        "filter": [
-          "**/*"
-        ]
-      }
-    ],
     "extraMetadata": {
       "main": "dist-electron/main.js"
     },
@@ -103,7 +80,30 @@
         }
       ],
       "icon": "public/icon.ico",
-      "artifactName": "StreamLive-Setup-${version}.exe"
+      "artifactName": "StreamLive-Setup-${version}.exe",
+      "extraFiles": [
+        {
+          "from": "drivers",
+          "to": "drivers",
+          "filter": [
+            "*.exe",
+            "*.nsh",
+            "*.md",
+            "*.ps1",
+            "**/*.dll",
+            "**/*.exe",
+            "**/*.ps1",
+            "**/*.md"
+          ]
+        },
+        {
+          "from": "drivers/vbcable",
+          "to": "drivers/vbcable",
+          "filter": [
+            "**/*"
+          ]
+        }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -136,7 +136,15 @@
       ],
       "icon": "public/icon.png",
       "category": "public.app-category.video",
-      "artifactName": "StreamLive-${version}-${arch}.dmg"
+      "artifactName": "StreamLive-${version}-${arch}.dmg",
+      "minimumSystemVersion": "11.0",
+      "identity": null,
+      "notarize": false,
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSCameraUsageDescription": "Stream Live needs your camera so the AI can transform your video live. The frames are only used while you are on air.",
+        "NSMicrophoneUsageDescription": "Stream Live needs your microphone to capture your voice and clone it in real time."
+      }
     },
     "linux": {
       "target": "AppImage",

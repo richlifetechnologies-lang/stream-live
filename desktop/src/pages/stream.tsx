@@ -7,6 +7,7 @@ import {
 } from "../lib/credentials";
 import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease } from "../lib/gateway";
 import { MinuteMeter } from "../components/meter";
+import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, REASON_MESSAGES, type TabName } from "@stream-live/client";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
@@ -108,7 +109,7 @@ function isVirtualCamLabel(label: string) {
   return /(obs virtual camera|stream studio camera|richx[\s_-]*cam|virtual camera|vcam)/i.test(label);
 }
 function isVirtualMicLabel(label: string) {
-  return /(vb-cable|vb-audio|stream studio (microphone|speaker)|virtual (audio|cable|mic))/i.test(label);
+  return /(vb-cable|vb-audio|blackhole|stream live (microphone|speaker)|stream studio (microphone|speaker)|virtual (audio|cable|mic))/i.test(label);
 }
 
 // ─── Audio sync pipeline ──────────────────────────────────────────────────────
@@ -907,16 +908,17 @@ export default function StreamPage() {
     };
     const outsOf = (devs: MediaDeviceInfo[]) => devs.filter(d => d.kind === "audiooutput");
     const byLabel = (outs: MediaDeviceInfo[]) =>
-      outs.find(d => /(cable[- ]input|stream studio speaker|speakers \(vb-audio)/i.test(d.label)) ||
-      outs.find(d => /(cable|vb-?audio|vb-?cable|stream studio)/i.test(d.label));
-    // Chromium keeps the cable's OUTPUT label "(hidden)", so label matching alone
-    // can never find it. But the cable's INPUT endpoint ("CABLE Output (VB-Audio
-    // Virtual Cable)") DOES get a real label once mic permission is granted, and
-    // both ends of the virtual cable share one groupId. So we find the cable by
-    // its input, then jump across to the matching (hidden) output. Label-free.
+      outs.find(d => CABLE_OUTPUT_RE.test(d.label)) ||
+      outs.find(d => CABLE_ANY_RE.test(d.label));
+    // On Windows Chromium keeps the cable's OUTPUT label "(hidden)", so label
+    // matching alone can never find it. But the cable's INPUT endpoint ("CABLE
+    // Output (VB-Audio Virtual Cable)") DOES get a real label once mic permission
+    // is granted, and both ends share one groupId. So we find the cable by its
+    // input, then jump across to the matching (hidden) output. Label-free.
+    // (On macOS BlackHole is labelled normally, so the pass above already hits.)
     const byGroup = (devs: MediaDeviceInfo[]) => {
       const cableIn = devs.find(d => d.kind === "audioinput" && d.groupId &&
-        /(cable|vb-?audio|vb-?cable|stream studio)/i.test(d.label));
+        CABLE_ANY_RE.test(d.label));
       if (!cableIn) return undefined;
       return outsOf(devs).find(d => d.groupId === cableIn.groupId);
     };
@@ -940,14 +942,14 @@ export default function StreamPage() {
       if (!hit) {
         const cands = outsOf(devs).filter(d => !d.label);
         if (cands.length) {
-          const cableIns = devs.filter(d => d.kind === "audioinput" && /(cable|vb-?audio|vb-?cable|stream studio)/i.test(d.label));
+          const cableIns = devs.filter(d => d.kind === "audioinput" && CABLE_ANY_RE.test(d.label));
           const targetIns = cableIns.length ? cableIns : devs.filter(d => d.kind === "audioinput" && !d.label);
           const verified = await _loopbackPick(cands, targetIns);
           if (verified) hit = verified;
           else if (cands.length === 1 && targetIns.length === 0) hit = cands[0];
         }
       }
-      return hit ? { id: hit.deviceId, label: hit.label || "VB-Audio Virtual Cable (auto-detected)" } : null;
+      return hit ? { id: hit.deviceId, label: hit.label || `${CABLE_NAME} (auto-detected)` } : null;
     } catch { return null; }
   }, [ensureMediaPermission]);
 
@@ -991,7 +993,9 @@ export default function StreamPage() {
     } catch { diag = " Could not enumerate devices."; }
     toast({
       title: "Virtual microphone not detected",
-      description: `The VB-Audio cable output device isn't visible.${diag} Pick it manually from the “Audio out” dropdown in the Broadcast panel (choose the unlabeled / VB-Cable entry), or set “Speakers (VB-Audio Virtual Cable)” as your Windows default playback device.`,
+      description: IS_MAC
+        ? `${CABLE_NAME} isn't visible to Stream Live.${diag} Install it from existential.audio/blackhole, log out and back in, then pick it in the “Audio out” dropdown. Steps: Settings → Mac Setup.`
+        : `The VB-Audio cable output device isn't visible.${diag} Pick it manually from the “Audio out” dropdown in the Broadcast panel (choose the unlabeled / VB-Cable entry), or set “Speakers (VB-Audio Virtual Cable)” as your Windows default playback device.`,
       variant: "destructive",
     });
     setAudioRouteOn(false); return;
@@ -1391,7 +1395,7 @@ export default function StreamPage() {
                     <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "monospace" }}>● OBS WINDOW OPEN</span>
                     <button onClick={() => setObsInstructions(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16 }}>×</button>
                   </div>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS". For AI audio add Sources → + → Audio Input Capture → "CABLE Output (VB-Audio Virtual Cable)".</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS". For AI audio add Sources → + → Audio Input Capture → "{IS_MAC ? CABLE_NAME : "CABLE Output (VB-Audio Virtual Cable)"}".{IS_MAC ? " Then click Start Virtual Camera in OBS and pick “OBS Virtual Camera” in your call app." : ""}</p>
                 </div>
               )}
             </div>
@@ -1709,7 +1713,23 @@ export default function StreamPage() {
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {showCamera && (
+          {showCamera && (IS_MAC ? (
+            <div style={rowSt}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: "hsl(222 40% 10%)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Camera style={{ width: 14, height: 14, color: "hsl(222 25% 45%)" }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Camera</p>
+                <p style={{ fontSize: 10, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+                  On a Mac, AI video leaves through OBS Virtual Camera.
+                </p>
+              </div>
+              <button onClick={() => setLocation("/settings")}
+                style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, background: "hsl(187 100% 52% / 0.12)", border: "1px solid hsl(187 100% 52% / 0.35)", color: C, fontWeight: 700, fontSize: 10, fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", cursor: "pointer" }}>
+                MAC SETUP
+              </button>
+            </div>
+          ) : (
             <div style={rowSt}>
               <div style={{ width: 28, height: 28, borderRadius: 8, background: vcamEnabled ? "hsl(187 100% 52% / 0.15)" : "hsl(222 40% 10%)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <Camera style={{ width: 14, height: 14, color: vcamEnabled ? C : "hsl(222 25% 45%)" }} />
@@ -1722,7 +1742,7 @@ export default function StreamPage() {
               </div>
               {toggleBtn(vcamEnabled, toggleVCam, false, "Toggle Stream Live Camera")}
             </div>
-          )}
+          ))}
 
           <div style={rowSt}>
             <div style={{ width: 28, height: 28, borderRadius: 8, background: audioRouteOn ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 10%)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -1742,11 +1762,11 @@ export default function StreamPage() {
             <select
               value={manualSinkId}
               onChange={e => chooseManualSink(e.target.value)}
-              title="Which Windows output the AI audio is sent to. Pick the VB-Cable entry if auto-detect fails."
+              title={`Which output the AI audio is sent to. Pick the ${CABLE_NAME} entry if auto-detect fails.`}
               style={{ flex: 1, minWidth: 0, background: "hsl(222 40% 8%)", color: "hsl(190 80% 90%)", border: "1px solid hsl(222 40% 16%)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontFamily: "'Rajdhani',sans-serif" }}>
-              <option value="">Auto-detect (VB-Cable)</option>
+              <option value="">Auto-detect ({IS_MAC ? "BlackHole" : "VB-Cable"})</option>
               {audioOutputs.map((d, i) => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Output ${i + 1} (unlabeled — likely VB-Cable)`}</option>
+                <option key={d.deviceId} value={d.deviceId}>{d.label || `Output ${i + 1} (unlabeled — likely ${IS_MAC ? "BlackHole" : "VB-Cable"})`}</option>
               ))}
             </select>
           </div>
@@ -1754,11 +1774,22 @@ export default function StreamPage() {
 
         <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 10, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)", fontSize: 10, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.55 }}>
           <p style={{ fontWeight: 700, color: "hsl(190 80% 90%)", marginBottom: 4 }}>What to pick inside OBS / Zoom / Teams</p>
-          <p>• VIDEO → <span style={{ color: C }}>Stream Live Camera</span> = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.</p>
-          <p>• AUDIO (AI voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Live Microphone</span> — same device, two possible names.</p>
-          <p>• AUDIO (your own voice) → your Realtek / USB mic. Add it only if you want yourself heard as well.</p>
-          <p>• On “Video + Audio” and “Audio Call”, with voice cloning on the cable carries the <span style={{ color: VC }}>cloned voice</span>; your raw voice is muted on the outgoing side. “Video Call” always sends your real voice.</p>
-          <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Video Capture Device → “Stream Live Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.</p>
+          {IS_MAC ? (
+            <>
+              <p>• VIDEO → <span style={{ color: C }}>OBS Virtual Camera</span>, once OBS is capturing the “Stream Live OBS” window and Start Virtual Camera is on.</p>
+              <p>• AUDIO (AI voice) → <span style={{ color: VC }}>{CABLE_NAME}</span> as the microphone. Your real mic is a separate entry — pick it only if you want yourself heard too.</p>
+              <p>• A Mac cannot host a system webcam without an Apple-approved extension, so video always goes through OBS here. Turn on “Stream Live Microphone” above and BlackHole carries the <span style={{ color: VC }}>cloned voice</span>.</p>
+              <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Window Capture → “Stream Live OBS”; then Sources → + → Audio Input Capture → “{CABLE_NAME}”. If you hear echo, mute OBS “Desktop Audio”. Full steps: Settings → Mac Setup.</p>
+            </>
+          ) : (
+            <>
+              <p>• VIDEO → <span style={{ color: C }}>Stream Live Camera</span> = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.</p>
+              <p>• AUDIO (AI voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Live Microphone</span> — same device, two possible names.</p>
+              <p>• AUDIO (your own voice) → your Realtek / USB mic. Add it only if you want yourself heard as well.</p>
+              <p>• On “Video + Audio” and “Audio Call”, with voice cloning on the cable carries the <span style={{ color: VC }}>cloned voice</span>; your raw voice is muted on the outgoing side. “Video Call” always sends your real voice.</p>
+              <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Video Capture Device → “Stream Live Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.</p>
+            </>
+          )}
         </div>
       </div>
     );

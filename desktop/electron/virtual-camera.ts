@@ -67,6 +67,11 @@ const S: FeederState = {
 
 function loadKoffi(): boolean {
   if (S.supported) return true;
+  if (process.platform !== "win32") {
+    S.supported = false;
+    S.error = "The bundled Stream Live Camera is a Windows driver. On a Mac, send video out through OBS Virtual Camera.";
+    return false;
+  }
   try {
     // Lazy require so a packaging/native failure never breaks app startup.
     // eslint-disable-next-line @typescript-eslint/no-var-requires

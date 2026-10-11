@@ -1,6 +1,6 @@
 {
   "name": "stream-live",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "STREAM LIVE — Stream Live desktop app plus its account gateway: Supabase auth, three non-expiring per-modality minute wallets, admin-managed key pool, manual credits, lease metering and the admin panel.",
   "private": false,
   "type": "module",
