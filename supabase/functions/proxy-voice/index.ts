@@ -7,7 +7,7 @@
 //     for a voice modality, i.e. the minutes are already being metered by start-session
 //     and lease. Pass { sessionId }.
 //   * voice library work (/v1/voices, /v1/voices/add) is setup, not a call: allowed
-//     for an active account whose audio or video+audio bucket is enabled and non-zero.
+//     for an active account with audio or video+audio switched on, minutes or not.
 //
 // The target path is restricted to an allow-list so this cannot become an open proxy.
 import { corsHeaders, preflight, json, fail } from "../_shared/cors.ts";
@@ -80,12 +80,16 @@ Deno.serve(async (req: Request) => {
         return fail("session does not include voice", 403, { reason: "modality_disabled" });
       }
     } else {
-      // Voice library: still needs an account that may use voice at all.
+      // Voice library: setup, not a call, so it must not require a funded bucket —
+      // a user has to be able to prepare a voice before the first minute is spent.
+      // What it does require is an account the administrator has let use voice at
+      // all, so switching audio off for an account also closes its library.
       const audio = await readAccount(user.id, "audio");
       const combined = await readAccount(user.id, "video_audio");
-      const usable = [audio, combined].find((a) => a.ok);
+      const allowed = (a: Awaited<ReturnType<typeof readAccount>>) => a.ok || a.reason === "out_of_minutes";
+      const usable = [audio, combined].find(allowed);
       if (!usable) {
-        return fail(String(audio.reason ?? "denied"), 403, {
+        return fail(String(audio.message ?? audio.reason ?? "denied"), 403, {
           reason: audio.reason,
           balances: audio.balances,
         });

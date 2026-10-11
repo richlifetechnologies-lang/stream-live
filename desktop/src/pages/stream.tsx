@@ -394,13 +394,19 @@ function Waveform({ analyser, color = C, height = 80 }: { analyser: AnalyserNode
 
 // ─── Voice upload helper ──────────────────────────────────────────────────────
 // Voice-library work needs no lease, so it goes through the gateway with no sessionId.
+/** The gateway answers refusals with { error, reason }; the reason is the part the user can act on. */
+async function gatewayMessage(res: Response, fallback: string): Promise<string> {
+  const j = await res.json().catch(() => null) as { error?: string; reason?: string } | null;
+  return (j?.reason && REASON_MESSAGES[j.reason]) || j?.error || `${fallback} (${res.status})`;
+}
+
 async function uploadVoice(name: string, file: File): Promise<SavedVoice> {
   const form = new FormData();
   form.append("name", name);
   form.append("files", file);
   form.append("description", `Uploaded via ${APP}`);
   const res = await gateway.voice("/v1/voices/add", form);
-  if (!res.ok) throw new Error(`Voice upload failed (${res.status})`);
+  if (!res.ok) throw new Error(await gatewayMessage(res, "Voice upload failed"));
   const data = await res.json() as { voice_id: string };
   return { id: data.voice_id, name, createdAt: Date.now() };
 }
