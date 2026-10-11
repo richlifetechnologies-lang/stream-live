@@ -1481,6 +1481,12 @@ export default function StreamPage() {
     </div>
   );
 
+  // These panels are rendered by call ({StreamBtn()}) instead of as JSX elements.
+  // Defined inside the render body, each one gets a brand new component identity
+  // every render, so React destroys and rebuilds their DOM ~30x/s while streaming
+  // (VU + delay + lease updates re-render this page). A button torn down between
+  // mousedown and mouseup never fires onClick -- that is why Stop needed several
+  // clicks. They hold no hooks, so inlining them is safe and keeps DOM identity.
   // ─── Stream button ─────────────────────────────────────────────────────────
   const canStart = !credsMissing && (needsVideo ? cameraReady : true);
   const StreamBtn = () => (
@@ -1966,7 +1972,7 @@ export default function StreamPage() {
               {/* AI Output video — portrait or landscape */}
               {renderVideoOutput(true)}
               {/* Orientation toggle — always outside the video, always clean */}
-              <OrientationToggle />
+              {OrientationToggle()}
               <DeviceSelectors showCamera={true} />
               {renderVirtualDevices(true)}
             </div>
@@ -1993,8 +1999,8 @@ export default function StreamPage() {
                   onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
                 {customPrompt && <button onClick={() => handleCustomPromptChange("")} style={{ marginTop: 6, fontSize: 11, color: "hsl(222 25% 50%)", background: "none", border: "none", cursor: "pointer", fontFamily: "'Rajdhani',sans-serif" }}>↺ Reset</button>}
               </div>
-              <AudioSyncPanel />
-              <VoicePanel />
+              {AudioSyncPanel()}
+              {VoicePanel()}
               {/* Reference image */}
               <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>Reference Image</p>
@@ -2077,7 +2083,7 @@ export default function StreamPage() {
             </div>
             {/* Right */}
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <VoicePanel />
+              {VoicePanel()}
             </div>
           </div>
         )}
@@ -2090,7 +2096,7 @@ export default function StreamPage() {
             {/* Left */}
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {renderVideoOutput(true)}
-              <OrientationToggle />
+              {OrientationToggle()}
               <DeviceSelectors showCamera={true} />
               {renderVirtualDevices(true)}
             </div>
@@ -2114,7 +2120,7 @@ export default function StreamPage() {
                   onFocus={e => { e.target.style.borderColor = "hsl(187 100% 52% / 0.5)"; }}
                   onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
               </div>
-              <AudioSyncPanel />
+              {AudioSyncPanel()}
               <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>Reference Image</p>
                 {refImagePreview ? (
@@ -2140,7 +2146,7 @@ export default function StreamPage() {
       </div>
 
       {/* Always-visible Start/Stop action bar (fixed, shown on every tab) */}
-      <StreamBtn />
+      {StreamBtn()}
 
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}`}</style>
     </AppLayout>
