@@ -158,6 +158,19 @@ function toBuffer(x: any): Buffer | null {
   return null;
 }
 
+// The filter publishes a positive-height DIB and reads the buffer with a
+// forward row march (no negative-stride support, no vertical mirror mode), so
+// its consumers are handed the last source row first. Canvas readback is
+// top-down, hence this reversal — without it OBS and calling apps show the
+// frame upside down.
+function writeRowsBottomUp(head: Buffer, pixels: Buffer, width: number, height: number): void {
+  const rowBytes = width * 4;
+  for (let y = 0; y < height; y++) {
+    const from = y * rowBytes;
+    pixels.copy(head, HEADER_SIZE + (height - 1 - y) * rowBytes, from, from + rowBytes);
+  }
+}
+
 function sendFrame(pixels: Buffer, width: number, height: number): boolean {
   if (!S.active) return false;
   if (!ensureReady()) return false;
@@ -181,12 +194,12 @@ function sendFrame(pixels: Buffer, width: number, height: number): boolean {
     head.writeUInt32LE(maxSize, 0);
     head.writeInt32LE(width, 4);
     head.writeInt32LE(height, 8);
-    head.writeInt32LE(width, 12);            // stride in pixels (tightly packed)
+    head.writeInt32LE(width, 12);            // row pitch in pixels; must stay positive
     head.writeInt32LE(FORMAT_UINT8, 16);
     head.writeInt32LE(RESIZEMODE_LINEAR, 20);
     head.writeInt32LE(MIRRORMODE_HORIZONTAL, 24);
     head.writeInt32LE(FRAME_TIMEOUT_MS, 28);
-    pixels.copy(head, HEADER_SIZE, 0, dataSize);
+    writeRowsBottomUp(head, pixels, width, height);
 
     // Serialize against the filter's read.
     const wait = f.WaitForSingleObject(S.hMutex, INFINITE_UNUSED);

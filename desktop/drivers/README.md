@@ -16,6 +16,15 @@ WhatsApp, …) through two virtual devices — **no OBS required**:
   UnityCapture protocol (`UnityCapture_Data` + mutex/event handshake). The filter
   scales the frame (`resizemode=LINEAR`) to whatever resolution the calling app
   negotiated, so it works at 480p–4K.
+- **Frame orientation (do not change casually).** The filter hands its consumers
+  a positive-height DIB, which means **row 0 of the buffer is the bottom of the
+  image**, and it reads rows with a forward march only — a negative `stride` is
+  never interpreted (it is a `size_t` row advance in the filter, so it wraps),
+  and the protocol has no vertical mirror mode (`mirrormode` is 0 = off,
+  1 = horizontal only). The canvas readback Stream Live sends is top-down, so
+  `electron/virtual-camera.ts` reverses the rows before writing them. Skip that
+  step and OBS/Zoom show the AI video upside down. `mirrormode=1` is kept so
+  what a call app sees matches the mirrored self-view inside Stream Live.
 - **Microphone:** VB-Cable creates a virtual audio cable. Toggling "Stream Live
   Microphone" routes the AI audio to the cable input via `setSinkId`; the calling
   app records from the cable output.
