@@ -54,6 +54,9 @@ Deno.serve(async (req: Request) => {
           user.id,
           { unlimited: body.unlimited === true || body.unlimited === false ? body.unlimited : null },
         );
+        // The RPC refuses a repeat of the same grant within a few seconds; say so
+        // rather than reporting a success that changed nothing.
+        if (res.ok !== true) return fail(String(res.error ?? "grant refused"), 409, { deduped: res.deduped === true });
         return json({ ok: true, ...res });
       }
 

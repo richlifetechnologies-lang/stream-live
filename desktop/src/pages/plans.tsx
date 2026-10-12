@@ -4,6 +4,7 @@ import { AppLayout } from "../components/layout";
 import { ContactCard, PayCard, hasContact, hasPayment } from "../components/contact";
 import { gateway, useAccount } from "../lib/gateway";
 import { MOD_LABELS } from "../lib/minutes";
+import { toUserMessage } from "../lib/end-reason";
 import { FEATURE_LABELS, usd, type AccountSnapshot, type Modality, type Plan } from "@stream-live/client";
 import { Check, Clock, Monitor, RefreshCw, Sparkles, Tag } from "lucide-react";
 
@@ -32,7 +33,7 @@ export default function PlansPage() {
       const [p, s] = await Promise.all([gateway.plans(), gateway.snapshot()]);
       setPlans(p); setSnap(s); setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toUserMessage(e, "We couldn't load the plans. Try again in a moment."));
     } finally {
       setLoaded(true);
     }

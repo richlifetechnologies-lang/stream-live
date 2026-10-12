@@ -8,7 +8,7 @@ Transform your live webcam feed into any of 9 AI styles in real-time — perfect
 
 👉 **[Download latest Windows installer →](../../releases/latest)**
 
-No Python, no Docker, no GPU required. Download, install, enter your API key, and stream.
+No Python, no Docker, no GPU required. Download, install, sign in, and stream.
 
 ## Features
 
@@ -20,14 +20,17 @@ No Python, no Docker, no GPU required. Download, install, enter your API key, an
 - **Reference image** — guide the AI with a face reference image
 - **Custom prompt** — describe the transformation you want
 - **Multi-camera** — select from any connected webcam
-- **Your own API key** — stored locally on your device, never sent anywhere except Decart
+- **Minutes-based access** — sign in with your account; the gateway hands out the AI access and meters your usage. You never handle an API key.
 
 ## Setup
 
-1. Get a Decart API key from [app.decart.ai](https://app.decart.ai)
-2. Download and install Stream Live
-3. Enter your API key on first launch
+1. Download and install Stream Live
+2. Sign in with the account your administrator created for you
+3. Check your minutes on the Minutes page (ask your administrator to top up when low)
 4. Enable your camera → click **Stream Now**
+
+You don't need your own AI service key. Access and billing are handled through
+your account and the minutes your administrator grants you.
 
 ## Using with OBS
 
@@ -50,8 +53,8 @@ npm run dist:win     # build Windows installer → release/
 
 - Windows 10/11 x64
 - Webcam
-- Internet connection (for Decart API)
-- [Decart API key](https://app.decart.ai)
+- Internet connection (for the AI gateway)
+- An account from your administrator (sign in — no API key needed)
 
 ## Tech stack
 

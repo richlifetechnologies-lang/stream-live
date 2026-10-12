@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { AppLayout } from "../components/layout";
 import { RefreshCw, History, ArrowLeftRight, Inbox } from "lucide-react";
 import { gateway, useAccount } from "../lib/gateway";
+import { toUserMessage } from "../lib/end-reason";
 
 const C = "hsl(187 100% 52%)";
 
@@ -90,7 +91,7 @@ export default function UsagePage() {
       setCalls((data ?? []) as unknown as CallRow[]);
       setLedger((await gateway.ledger(100)) as unknown as LedgerRow[]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toUserMessage(e, "We couldn't load your call history. Try again in a moment."));
     } finally {
       setLoading(false);
     }

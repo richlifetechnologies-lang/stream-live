@@ -13,8 +13,11 @@
 import { corsHeaders, preflight, json, fail } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { adminClient } from "../_shared/db.ts";
-import { readAccount } from "../_shared/credits.ts";
+import { readAccount, reapSessions } from "../_shared/credits.ts";
 import { runWithKeys } from "../_shared/keys.ts";
+
+/** Deno's clock vs Postgres' now(): refuse a lease only past a small skew window. */
+const LEASE_SKEW_MS = 10_000;
 
 const ELEVEN_BASE = "https://api.elevenlabs.io";
 
@@ -74,10 +77,17 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
       if (!session || session.user_id !== user.id) return fail("session not found", 404);
       if (session.ended_at || session.settled) {
-        return fail("session has ended", 403, { reason: "out_of_minutes" });
+        return fail("session has ended", 403, { reason: "session_ended" });
       }
       if (session.modality !== "audio" && session.modality !== "video_audio") {
         return fail("session does not include voice", 403, { reason: "modality_disabled" });
+      }
+      // The heartbeat is what keeps a call paid for. If it stopped landing — closed
+      // app, lost network, a wallet that ran dry — the lease is past its TTL and
+      // every voice call from here on would be billed to our keys and not to them.
+      if (session.lease_expires_at && Date.parse(session.lease_expires_at) + LEASE_SKEW_MS < Date.now()) {
+        await reapSessions(user.id).catch(() => null);
+        return fail("the call stopped checking in and was closed", 403, { reason: "lease_expired" });
       }
     } else {
       // Voice library: setup, not a call, so it must not require a funded bucket —
@@ -115,7 +125,9 @@ Deno.serve(async (req: Request) => {
     });
 
     if (!proxied.ok) {
-      return fail(proxied.error ?? "elevenlabs request failed", 502, { reason: "upstream_key" });
+      // The upstream's own wording (and any key detail in it) is already in
+      // key_usage_log for the admin panel; the caller gets a plain reason.
+      return fail("our voice service did not answer", 502, { reason: "upstream_key" });
     }
     const upstream = proxied.value as Response;
 

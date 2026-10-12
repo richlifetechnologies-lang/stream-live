@@ -8,7 +8,8 @@ import {
 import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease } from "../lib/gateway";
 import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
-import { GatewayError, REASON_MESSAGES, type TabName } from "@stream-live/client";
+import { GatewayError, type TabName } from "@stream-live/client";
+import { endReasonMessage, toUserMessage } from "../lib/end-reason";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
@@ -106,7 +107,10 @@ function formatTime(s: number) {
 // input hardware. Filter them out of the picker so the app defaults to a real
 // webcam/mic instead of a blank feed.
 function isVirtualCamLabel(label: string) {
-  return /(obs virtual camera|stream studio camera|richx[\s_-]*cam|virtual camera|vcam)/i.test(label);
+  // "Stream Live Camera" is our own virtual camera (UnityCapture) — picking it as
+  // input feeds our AI output back into itself, so it must be excluded alongside
+  // the legacy "Stream Studio Camera" name and other virtual cams.
+  return /(obs virtual camera|stream live camera|stream studio camera|richx[\s_-]*cam|virtual camera|vcam)/i.test(label);
 }
 function isVirtualMicLabel(label: string) {
   return /(vb-cable|vb-audio|blackhole|stream live (microphone|speaker)|stream studio (microphone|speaker)|virtual (audio|cable|mic))/i.test(label);
@@ -311,7 +315,7 @@ class VoiceCloningEngine {
       form.append("model_id", "eleven_multilingual_sts_v2");
       form.append("voice_settings", JSON.stringify({ stability: 0.5, similarity_boost: 0.8, style: 0.0, use_speaker_boost: true }));
       const res = await this.call(`/v1/speech-to-speech/${this.voiceId}/stream`, form);
-      if (!res.ok) { this.onError?.(`Voice engine error ${res.status}`); return; }
+      if (!res.ok) { console.warn(`[voice] engine returned HTTP ${res.status}`); this.onError?.(endReasonMessage("upstream_key")); return; }
       const buf = await res.arrayBuffer();
       if (!this.running || !this.audioCtx) return;
       const decoded = await this.audioCtx.decodeAudioData(buf);
@@ -323,7 +327,7 @@ class VoiceCloningEngine {
       let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
       this.onVu?.(Math.min(100, Math.sqrt(sum / data.length) * 300));
     } catch (e) {
-      if (this.running) this.onError?.(e instanceof Error ? e.message : "Voice processing error");
+      if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
     }
   }
 
@@ -398,7 +402,8 @@ function Waveform({ analyser, color = C, height = 80 }: { analyser: AnalyserNode
 /** The gateway answers refusals with { error, reason }; the reason is the part the user can act on. */
 async function gatewayMessage(res: Response, fallback: string): Promise<string> {
   const j = await res.json().catch(() => null) as { error?: string; reason?: string } | null;
-  return (j?.reason && REASON_MESSAGES[j.reason]) || j?.error || `${fallback} (${res.status})`;
+  if (j?.reason) return endReasonMessage(j.reason);
+  return toUserMessage(j?.error ?? "", fallback);
 }
 
 async function uploadVoice(name: string, file: File): Promise<SavedVoice> {
@@ -421,6 +426,7 @@ interface VideoSession { close(): void; send(d: Record<string, unknown>): void; 
 type VcamResult = { supported: boolean; active: boolean; ready: boolean; error: string | null };
 interface ElectronAPI {
   getDeviceId?: () => Promise<string>;
+  checkForUpdate?: () => void;
   vcamStart?: () => Promise<VcamResult>;
   vcamStop?: () => Promise<VcamResult>;
   vcamStatus?: () => Promise<VcamResult & { cameraName: string }>;
@@ -430,7 +436,7 @@ function getElectronAPI(): ElectronAPI | undefined {
   return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
 }
 
-async function _startVideoSession(token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void, onDisconnect: () => void, prompt: string, refB64: string | null): Promise<VideoSession> {
+async function _startVideoSession(token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void, onConnectionState: (state: RTCPeerConnectionState) => void, onDisconnect: () => void, prompt: string, refB64: string | null): Promise<VideoSession> {
   const ws = new WebSocket(`${_RELAY_WS}?fal_jwt_token=${encodeURIComponent(token)}&max_buffering=8`);
   ws.binaryType = "arraybuffer";
   const send = (o: Record<string, unknown>) => { if (ws.readyState === WebSocket.OPEN) ws.send(encode(o)); };
@@ -467,7 +473,7 @@ async function _startVideoSession(token: string, localStream: MediaStream, onRem
         localStream.getTracks().forEach(t => pc!.addTrack(t, localStream));
         pc.ontrack = ev => { onRemote(ev.streams[0] ?? new MediaStream([ev.track])); };
         pc.onicecandidate = ev => { if (ev.candidate) send({ type: "candidate", candidate: ev.candidate.toJSON() }); };
-        pc.onconnectionstatechange = () => { if (pc?.connectionState === "failed" || pc?.connectionState === "disconnected") onDisconnect(); };
+        pc.onconnectionstatechange = () => { const st = pc?.connectionState; if (st) onConnectionState(st); };
         const offer = await pc.createOffer(); await pc.setLocalDescription(offer);
         send({ type: "offer", sdp: pc.localDescription!.sdp, ...pp });
       } else if (type === "answer" && typeof msg.sdp === "string" && pc && !hasAnswer) {
@@ -575,7 +581,7 @@ export default function StreamPage() {
   }, []);
 
   // ── Stream state ───────────────────────────────────────────────────────────
-  const [connStatus, setConnStatus]   = useState<"idle"|"connecting"|"connected">("idle");
+  const [connStatus, setConnStatus]   = useState<"idle"|"connecting"|"connected"|"reconnecting">("idle");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStarting, setIsStarting]  = useState(false);
   const [connStep, setConnStep]       = useState<"auth"|"engine"|null>(null);
@@ -676,6 +682,9 @@ export default function StreamPage() {
   // Monotonic session generation. A socket that dies late (a previous attempt's
   // ghost) must not tear down the session the user is watching now.
   const sessionGenRef = useRef(0);
+  // Grace timer for a WebRTC "failed" state: the connection can recover on its
+  // own (Wi-Fi roams), so we wait a beat before tearing the call down.
+  const iceGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const syncPipeRef     = useRef<AudioSyncPipeline|null>(null);
   const clonerRef       = useRef<VoiceCloningEngine|null>(null);
   const timerRef        = useRef<ReturnType<typeof setInterval>|null>(null);
@@ -1061,6 +1070,7 @@ export default function StreamPage() {
   // ─── Teardown ──────────────────────────────────────────────────────────────
   const teardownStream = useCallback(async () => {
     sessionGenRef.current++;
+    if (iceGraceRef.current) { clearTimeout(iceGraceRef.current); iceGraceRef.current = null; }
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     isStartingRef.current = false;
     endLease();
@@ -1148,9 +1158,31 @@ export default function StreamPage() {
             _notifyPopup(popoutRef.current); _notifyPopup(obsWindowRef.current); _notifyPopup(obsPortraitWindowRef.current);
             setConnStatus("connected");
           },
+          state => {
+            if (sessionGenRef.current !== gen) return;
+            if (state === "connected") {
+              if (iceGraceRef.current) { clearTimeout(iceGraceRef.current); iceGraceRef.current = null; }
+              setConnStatus("connected");
+              return;
+            }
+            // "disconnected" / "failed" / "closed": the transport can recover on
+            // Wi-Fi, so wait a short grace window before declaring the call dead —
+            // but never leave it running, or minutes keep burning on a dead stream.
+            // Other states (new / connecting) are normal startup and ignored here.
+            if (state !== "disconnected" && state !== "failed" && state !== "closed") return;
+            if (iceGraceRef.current) return;
+            setConnStatus("reconnecting");
+            iceGraceRef.current = setTimeout(() => {
+              iceGraceRef.current = null;
+              if (sessionGenRef.current !== gen) return;
+              void teardownStream();
+              toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive" });
+            }, 6000);
+          },
           () => {
             if (sessionGenRef.current !== gen) return;
-            teardownStream(); toast({ title: "Stream disconnected", description: "Connection lost. Try again.", variant: "destructive" });
+            void teardownStream();
+            toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive" });
           },
           prompt, refImageB64,
         );
@@ -1169,7 +1201,7 @@ export default function StreamPage() {
         cloner.voiceId = vcVoiceId;
         cloner.setVideoDelay(syncPipeRef.current?.detectedDelay ?? 0.3);
         cloner.onVu    = v => setVcVu(v);
-        cloner.onError = msg => toast({ title: "Voice engine error", description: msg, variant: "destructive" });
+        cloner.onError = msg => toast({ title: "Voice engine problem", description: toUserMessage(msg, "The voice service had trouble. Try again."), variant: "destructive" });
         await cloner.start(micStreamForCloner ?? micOnlyStreamRef.current!);
         clonerRef.current = cloner;
         setVcAnalyser(cloner.getAnalyser());
@@ -1188,7 +1220,9 @@ export default function StreamPage() {
         void refreshBalances();
         if (state.ended) {
           void teardownStream();
-          toast({ title: "Out of minutes", description: "Your minutes ran out — ask your administrator to top up.", variant: "destructive" });
+          const oom = state.reason === "out_of_minutes";
+          toast({ title: oom ? "Out of minutes" : "Call ended", description: endReasonMessage(state.reason), variant: "destructive" });
+          if (oom) setLocation("/minutes");
         }
       }, 45_000);
 
@@ -1200,15 +1234,19 @@ export default function StreamPage() {
       // teardownStream gives back any prepaid chunk, so no separate refund call.
       void teardownStream();
       if (err instanceof GatewayError) {
-        const msg = REASON_MESSAGES[err.reason] ?? err.message;
+        const msg = endReasonMessage(err.reason);
         if (err.reason === "out_of_minutes") {
-          toast({ title: "Out of minutes", description: `${msg} Ask your administrator for more from your minutes dashboard.`, variant: "destructive" });
+          toast({ title: "Out of minutes", description: msg, variant: "destructive" });
           setLocation("/minutes");
         } else {
+          // A refused old build is the one case where we can fix it ourselves:
+          // ask the updater for the banner instead of leaving him stuck on a
+          // message with nowhere to go.
+          if (err.reason === "update_required") getElectronAPI()?.checkForUpdate?.();
           toast({ title: "Cannot start", description: msg, variant: "destructive" });
         }
       } else {
-        toast({ title: "Stream Failed", description: err instanceof Error ? err.message : "Could not start the call.", variant: "destructive" });
+        toast({ title: "Cannot start", description: toUserMessage(err, "Could not start the call. Please try again."), variant: "destructive" });
       }
     } finally { isStartingRef.current = false; setIsStarting(false); }
   }, [isStreaming, credsMissing, cameraReady, activeTab, selectedStyle, customPrompt, refImageB64,
@@ -1260,7 +1298,7 @@ export default function StreamPage() {
       setUploadVoiceName("");
       toast({ title: "Voice uploaded!", description: `"${voice.name}" is ready to use.` });
     } catch (err) {
-      toast({ title: "Upload failed", description: err instanceof Error ? err.message : "Could not upload voice.", variant: "destructive" });
+      toast({ title: "Upload failed", description: toUserMessage(err, "Could not upload the voice. Try again."), variant: "destructive" });
     } finally { setUploadingVoice(false); }
   }, [account.signedIn, uploadVoiceName, toast]);
 
@@ -1378,6 +1416,13 @@ export default function StreamPage() {
             <p style={{ fontSize: 13, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "center", padding: "0 20px" }}>
               {isPortrait ? "Portrait mode active" : "Enable camera and click Start"}
             </p>
+          </div>
+        )}
+
+        {/* Transient reconnect indicator — the call is still alive, giving WebRTC a chance to recover */}
+        {connStatus === "reconnecting" && (
+          <div style={{ position: "absolute", top: 12, left: 12, zIndex: 15, display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 999, background: "rgba(0,0,0,0.72)", border: "1px solid rgba(0,210,211,0.5)", color: "#fff", fontSize: 12, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
+            <Loader2 style={{ width: 14, height: 14, color: C, animation: "spin 1s linear infinite" }} /> Reconnecting…
           </div>
         )}
 

@@ -99,6 +99,28 @@ export async function reportKeyUse(
 }
 
 /**
+ * A dead key answers 401/402/429 over and over while the pool burns through every
+ * call it could have served. Postgres remembers the failures, so skip a key that
+ * has clearly had a bad ten minutes — but never lock the pool out completely.
+ */
+const COOLDOWN_FAILS = 3;
+const COOLDOWN_WINDOW_MS = 10 * 60_000;
+
+async function recentFailures(keyIds: string[]): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {};
+  if (keyIds.length === 0) return counts;
+  const db = adminClient();
+  const { data } = await db
+    .from("key_usage_log")
+    .select("key_id")
+    .in("key_id", keyIds)
+    .eq("outcome", "fail")
+    .gt("created_at", new Date(Date.now() - COOLDOWN_WINDOW_MS).toISOString());
+  for (const row of data ?? []) counts[row.key_id as string] = (counts[row.key_id as string] ?? 0) + 1;
+  return counts;
+}
+
+/**
  * Try each candidate until one succeeds. `attempt` must not throw for an upstream
  * rejection — return { ok: false, status, detail } so the pool can fail over.
  */
@@ -116,8 +138,16 @@ export async function runWithKeys<T>(
     };
   }
 
+  const fails = await recentFailures(keys.filter((k) => !k.fromEnv).map((k) => k.keyId));
+  const healthy = keys.filter((k) => k.fromEnv || (fails[k.keyId] ?? 0) < COOLDOWN_FAILS);
+  // Every key is cooling down: try the quietest one anyway rather than refuse the
+  // account outright — a single-key pool must not lock itself out for good.
+  const order = healthy.length > 0
+    ? healthy
+    : [...keys].sort((a, b) => (fails[a.keyId] ?? 0) - (fails[b.keyId] ?? 0));
+
   let lastError = "no key succeeded";
-  for (const key of keys) {
+  for (const key of order) {
     let res: Attempt<T>;
     try {
       res = await attempt(key);

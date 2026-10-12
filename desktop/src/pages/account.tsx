@@ -5,6 +5,7 @@ import { ArtBackdrop, Logo } from "../components/brand";
 import { useToast } from "../hooks/use-toast";
 import { gateway, useAccount, signIn, signUp, signOut } from "../lib/gateway";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
+import { toUserMessage } from "../lib/end-reason";
 import { LogIn, LogOut, UserPlus, KeyRound, Loader2, MonitorX, Hourglass, CreditCard } from "lucide-react";
 
 const C = "hsl(187 100% 52%)";
@@ -66,7 +67,7 @@ export default function AccountPage() {
         toast({ title: "Signed in" });
       }
     } catch (err) {
-      toast({ title: authMode === "signup" ? "Could not create account" : "Sign-in failed", description: err instanceof Error ? err.message : "Try again.", variant: "destructive" });
+      toast({ title: authMode === "signup" ? "Could not create account" : "Sign-in failed", description: toUserMessage(err, authMode === "signup" ? "We couldn't create the account. Try again." : "Check your email and password, then try again."), variant: "destructive" });
     } finally { setBusy(false); }
   };
 
@@ -76,7 +77,7 @@ export default function AccountPage() {
       await loadDevices();
       toast({ title: "Device removed" });
     } catch (err) {
-      toast({ title: "Could not remove device", description: err instanceof Error ? err.message : "Try again.", variant: "destructive" });
+      toast({ title: "Could not remove device", description: toUserMessage(err, "We couldn't remove that device. Try again."), variant: "destructive" });
     }
   };
 
@@ -90,7 +91,7 @@ export default function AccountPage() {
       setNewPassword("");
       toast({ title: "Password updated" });
     } catch (err) {
-      toast({ title: "Could not update password", description: err instanceof Error ? err.message : "Try again.", variant: "destructive" });
+      toast({ title: "Could not update password", description: toUserMessage(err, "We couldn't update your password. Try again."), variant: "destructive" });
     } finally { setChangingPw(false); }
   };
 

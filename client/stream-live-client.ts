@@ -149,6 +149,7 @@ export class StreamLiveClient {
   private sb: SupabaseClient;
   private cfg: GatewayConfig;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
+  private pingFailures = 0;
   private sessionId: string | null = null;
 
   constructor(cfg: GatewayConfig) {
@@ -410,10 +411,33 @@ export class StreamLiveClient {
   beginHeartbeat(onState: (state: LeaseState) => void, intervalMs?: number): void {
     this.stopHeartbeat();
     const ms = intervalMs ?? 45_000;
-    this.heartbeat = setInterval(
-      () => void this.ping().then((state) => { if (state) onState(state); }).catch(() => null),
-      ms,
-    );
+    this.pingFailures = 0;
+    this.heartbeat = setInterval(() => {
+      void this.ping()
+        .then((state) => {
+          this.pingFailures = 0;
+          if (state) onState(state);
+        })
+        .catch(() => {
+          // A heartbeat that never lands means the lease is dying: the gateway
+          // closes the session, refunds the unused chunk, and refuses further AI
+          // calls. Two misses is enough to know that — reporting it lets the app
+          // end the call cleanly instead of streaming against a closed lease
+          // until the upstream cuts it off.
+          this.pingFailures++;
+          if (this.pingFailures < 2) return;
+          this.stopHeartbeat();
+          onState({
+            ended: true,
+            reason: "lease_expired",
+            balance: null,
+            unlimited: false,
+            leaseExpiresAt: null,
+            billedMinutes: null,
+            lowBalance: false,
+          });
+        });
+    }, ms);
   }
 
   private stopHeartbeat(): void {

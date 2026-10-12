@@ -22,6 +22,30 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("update-downloaded", () => callback());
   },
 
+  // Why an update check or a download did not work — { kind, message }
+  onUpdateStatus: (
+    callback: (info: { kind: "check-failed" | "download-failed" | "ok"; message?: string }) => void
+  ) => {
+    ipcRenderer.on("update-status", (_event, info) => callback(info));
+  },
+
+  // Main asks before installing: reply true only while a session is live, so an
+  // update never drops a call.
+  onCheckCallLive: (callback: (reply: (live: boolean) => void) => void) => {
+    ipcRenderer.on("check-call-live", () => {
+      try {
+        callback((live: boolean) => ipcRenderer.send("call-live-reply", live === true));
+      } catch {
+        ipcRenderer.send("call-live-reply", false);
+      }
+    });
+  },
+
+  // Ask GitHub for an update now (used when the gateway refuses an old build)
+  checkForUpdate: () => {
+    ipcRenderer.send("check-for-update");
+  },
+
   // Trigger the download
   downloadUpdate: () => {
     ipcRenderer.send("download-update");

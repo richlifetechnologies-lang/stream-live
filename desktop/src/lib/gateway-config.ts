@@ -18,7 +18,10 @@ export const GATEWAY_CONFIG: GatewayConfig = {
 };
 
 // A build made without the env vars below cannot reach the gateway at all; saying
-// so beats the "invalid API key" the GoTrue call would otherwise return.
+// so beats the "invalid API key" the GoTrue call would otherwise return. Status
+// itself is surfaced by App's status banner as soon as the window loads — long
+// before sign-in — because a mis-built installer otherwise looks healthy.
 export const GATEWAY_CONFIGURED =
   GATEWAY_CONFIG.supabaseAnonKey !== PLACEHOLDER_ANON_KEY &&
-  !GATEWAY_CONFIG.supabaseAnonKey.startsWith("YOUR-");
+  !GATEWAY_CONFIG.supabaseAnonKey.startsWith("YOUR-") &&
+  GATEWAY_CONFIG.supabaseUrl.startsWith("https://");

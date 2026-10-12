@@ -5,6 +5,7 @@ import { countdown, drainOf, MOD_LABELS, type LiveLease } from "../lib/minutes";
 import { useTicker } from "../components/meter";
 import { ContactCard, PayCard } from "../components/contact";
 import { gateway, useAccount, useLease, requestTopup } from "../lib/gateway";
+import { toUserMessage } from "../lib/end-reason";
 import type { AccountSnapshot, Modality } from "@stream-live/client";
 import { Hourglass, Radio, RefreshCw, Send, ArrowLeftRight, CircleCheck, CircleOff } from "lucide-react";
 
@@ -69,7 +70,7 @@ export default function MinutesPage() {
       const [s, l, r] = await Promise.all([gateway.snapshot(), gateway.ledger(12), gateway.myRequests()]);
       setSnap(s); setLedger(l); setRequests(r); setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(toUserMessage(e, "We couldn't load your minutes. Try again in a moment."));
     } finally {
       setLoaded(true);
     }
@@ -99,7 +100,7 @@ export default function MinutesPage() {
       setReqReference(""); setReqNote(""); setError(null);
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the request.");
+      setError(toUserMessage(err, "Could not send the request. Try again."));
     } finally { setSending(false); }
   };
 

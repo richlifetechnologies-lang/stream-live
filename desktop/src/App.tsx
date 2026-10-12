@@ -11,11 +11,15 @@ import PopoutPage from "./pages/popout";
 import ObsoutPage from "./pages/obsout";
 import ObsoutPortraitPage from "./pages/obsoutp";
 import Toaster from "./components/toaster";
+import StatusBanner from "./components/status-banner";
 import { ArtBackdrop } from "./components/brand";
-import { useAccount, restore } from "./lib/gateway";
+import { useAccount, restore, getState } from "./lib/gateway";
 
 const C = "hsl(187 100% 52%)";
+const ERR = "hsl(0 80% 62%)";
 const BG = "hsl(222 47% 4%)";
+
+type UpdateStatus = { kind: "check-failed" | "download-failed" | "ok"; message?: string };
 
 declare global {
   interface Window {
@@ -25,31 +29,51 @@ declare global {
       onUpdateAvailable: (cb: (info: { version: string }) => void) => void;
       onDownloadProgress: (cb: (info: { percent: number; transferred: number; total: number }) => void) => void;
       onUpdateDownloaded: (cb: () => void) => void;
+      onUpdateStatus?: (cb: (info: UpdateStatus) => void) => void;
+      onCheckCallLive?: (cb: (reply: (live: boolean) => void) => void) => void;
       downloadUpdate: () => void;
       quitAndInstall: () => void;
     };
   }
 }
 
-type UpdateState = "available" | "downloading" | "downloaded";
+// The installer must not quit an on-air session. The peer stream is the ground
+// truth; the metered lease is the backstop for a call still negotiating.
+function isCallLive(): boolean {
+  if (window.__slRemoteStream?.active) return true;
+  return getState().live !== null;
+}
+
+type UpdateState = "available" | "downloading" | "downloaded" | "failed";
 
 function UpdateBanner() {
   const [version, setVersion] = useState<string | null>(null);
   const [state, setState] = useState<UpdateState>("available");
   const [percent, setPercent] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
   useEffect(() => {
     window.electronAPI?.onUpdateAvailable((info) => {
       setVersion(info.version);
+      setState("available");
+      setError(null);
+      setDismissed(false);
     });
     window.electronAPI?.onDownloadProgress((info) => {
       setState("downloading");
+      setError(null);
       setPercent(info.percent);
     });
     window.electronAPI?.onUpdateDownloaded(() => {
       setState("downloaded");
+      setError(null);
       setPercent(100);
+    });
+    window.electronAPI?.onUpdateStatus?.((info) => {
+      if (info.kind !== "download-failed") return;
+      setState("failed");
+      setError(info.message ?? "the download could not be completed");
     });
   }, []);
 
@@ -57,6 +81,8 @@ function UpdateBanner() {
 
   const handleDownload = () => {
     setState("downloading");
+    setPercent(0);
+    setError(null);
     window.electronAPI?.downloadUpdate();
   };
 
@@ -76,12 +102,17 @@ function UpdateBanner() {
       <div style={{ display: "flex", alignItems: "center", gap: 10, flex: 1, minWidth: 0 }}>
         <div style={{
           width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-          background: "hsl(187 100% 52% / 0.15)", border: `1px solid ${C}44`,
+          background: state === "failed" ? "hsl(0 80% 62% / 0.15)" : "hsl(187 100% 52% / 0.15)",
+          border: `1px solid ${state === "failed" ? ERR : C}44`,
           display: "flex", alignItems: "center", justifyContent: "center",
         }}>
           {state === "downloaded" ? (
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
               <path d="M2 7l4 4 6-6" stroke={C} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+          ) : state === "failed" ? (
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+              <path d="M7 2v6M7 11h.01" stroke={ERR} strokeWidth="1.8" strokeLinecap="round"/>
             </svg>
           ) : (
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
@@ -130,6 +161,16 @@ function UpdateBanner() {
               </span>
             </>
           )}
+          {state === "failed" && (
+            <>
+              <span style={{ fontSize: 12, fontWeight: 700, color: ERR, fontFamily: "'Orbitron', monospace", letterSpacing: "0.06em" }}>
+                Download failed
+              </span>
+              <span style={{ fontSize: 12, color: "hsl(222 25% 65%)", fontFamily: "'Rajdhani', sans-serif", marginLeft: 8 }}>
+                {error}
+              </span>
+            </>
+          )}
         </div>
       </div>
 
@@ -158,6 +199,17 @@ function UpdateBanner() {
           }}>
             Downloading…
           </div>
+        )}
+        {state === "failed" && (
+          <button onClick={handleDownload} style={{
+            padding: "6px 16px", borderRadius: 7,
+            background: ERR, border: "none", cursor: "pointer",
+            color: "hsl(222 47% 4%)", fontSize: 11, fontWeight: 700,
+            fontFamily: "'Orbitron', monospace", letterSpacing: "0.06em",
+            boxShadow: `0 0 16px hsl(0 80% 62% / 0.3)`,
+          }}>
+            Retry
+          </button>
         )}
         {state === "downloaded" && (
           <button onClick={handleInstall} style={{
@@ -234,10 +286,16 @@ function StreamGate() {
 export default function App() {
   useEffect(() => { void restore(); }, []);
 
+  // The updater asks before it quits, so installing can't drop a live call.
+  useEffect(() => {
+    window.electronAPI?.onCheckCallLive?.((reply) => reply(isCallLive()));
+  }, []);
+
   return (
     <Router hook={useHashLocation}>
       <Toaster />
       <UpdateBanner />
+      <StatusBanner />
       <Switch>
         <Route path="/popout">
           <PopoutPage />

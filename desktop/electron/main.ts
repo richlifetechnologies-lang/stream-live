@@ -14,6 +14,11 @@ let mainWindow: BrowserWindow | null = null;
 const GITHUB_OWNER = "richlifetechnologies-lang";
 const GITHUB_REPO  = "stream-live";
 
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;   // scheduled re-check cadence
+const FOCUS_CHECK_MIN_GAP_MS   = 15 * 60 * 1000;      // focus-triggered checks are throttled
+const RATE_LIMIT_BACKOFF_MS    = 60 * 60 * 1000;      // ceiling for an unauthenticated GitHub backoff
+const UPDATER_LOG_MAX_BYTES    = 256 * 1024;
+
 // ─── Asset pattern for the current platform + architecture ─────────────────
 function getAssetPattern(): RegExp {
   if (process.platform === "win32") return /StreamLive-Setup-.*\.exe$/i;
@@ -24,24 +29,67 @@ function getAssetPattern(): RegExp {
   return /StreamLive-.*\.AppImage$/i;
 }
 
+function platformArtifactLabel(): string {
+  if (process.platform === "win32") return "Windows";
+  if (process.platform === "darwin") return `macOS (${process.arch})`;
+  return "Linux";
+}
+
+// Append-only updater log. A silent failure is what made "I don't get the banner"
+// unanswerable, so every early exit writes a line here. Values are reasons only —
+// never a token or key.
+function logUpdate(message: string): void {
+  try {
+    const file = path.join(app.getPath("userData"), "updater.log");
+    try {
+      if (fs.statSync(file).size > UPDATER_LOG_MAX_BYTES) {
+        const lines = fs.readFileSync(file, "utf8").split("\n");
+        fs.writeFileSync(file, lines.slice(Math.ceil(lines.length / 2)).join("\n"));
+      }
+    } catch { /* first write creates it */ }
+    fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
+  } catch { /* logging must never break the updater */ }
+}
+
+type UpdateStatusKind = "check-failed" | "download-failed" | "ok";
+
+function reportStatus(win: BrowserWindow | null, kind: UpdateStatusKind, message?: string): void {
+  if (kind === "ok") logUpdate("check ok");
+  else logUpdate(`${kind}: ${message ?? "unknown"}`);
+  if (win && !win.isDestroyed()) win.webContents.send("update-status", { kind, message });
+}
+
+function reasonOf(err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  return msg.replace(/https?:\/\/\S+/g, "endpoint").slice(0, 160);
+}
+
 // ─── Generic HTTPS GET with redirect following ────────────────────────────────
-function httpsGet(url: string, headers: Record<string, string> = {}): Promise<Buffer> {
+type RawResponse = { status: number; headers: http.IncomingHttpHeaders; body: Buffer };
+
+function httpsGetFull(url: string, headers: Record<string, string> = {}, redirectsLeft = 5): Promise<RawResponse> {
   return new Promise((resolve, reject) => {
     const lib = url.startsWith("https") ? https : http;
     const req = (lib as typeof https).get(
       url,
       { headers: { "User-Agent": `stream-live/${app.getVersion()}`, ...headers } },
       (res) => {
-        if ((res.statusCode === 301 || res.statusCode === 302) && res.headers.location) {
-          resolve(httpsGet(res.headers.location, headers));
+        if ([301, 302, 307, 308].includes(res.statusCode ?? 0) && res.headers.location && redirectsLeft > 0) {
+          res.resume();
+          resolve(httpsGetFull(new URL(res.headers.location, url).toString(), headers, redirectsLeft - 1));
           return;
         }
         const chunks: Buffer[] = [];
         res.on("data", (chunk: Buffer) => chunks.push(chunk));
-        res.on("end", () => resolve(Buffer.concat(chunks)));
+        res.on("end", () => resolve({
+          status: res.statusCode ?? 0,
+          headers: res.headers,
+          body: Buffer.concat(chunks),
+        }));
         res.on("error", reject);
       }
     );
+    req.setTimeout(20_000, () => req.destroy(new Error("the request timed out")));
     req.on("error", reject);
   });
 }
@@ -115,8 +163,11 @@ function downloadFile(
 }
 
 // ─── Version comparison (semver-lite: major.minor.patch) ─────────────────────
+// A tag like v1.5.0-rc1 must still compare as 1.5.0 — parsing it whole yields NaN,
+// every comparison goes false and the banner silently never appears.
 function isNewer(remote: string, local: string): boolean {
-  const parse = (v: string) => v.replace(/^v/, "").split(".").map(Number);
+  const parse = (v: string) =>
+    v.replace(/^v/, "").split(/[+\-]/)[0].split(".").map((n) => Number(n) || 0);
   const [rMaj, rMin, rPat] = parse(remote);
   const [lMaj, lMin, lPat] = parse(local);
   if (rMaj !== lMaj) return rMaj > lMaj;
@@ -128,40 +179,189 @@ function isNewer(remote: string, local: string): boolean {
 let pendingInstallerPath: string | null = null;
 let latestDownloadUrl:    string | null = null;
 let latestVersion:        string | null = null;
+let notifiedVersion:      string | null = null;
+let checkInFlight         = false;
+let downloadInFlight      = false;
+let lastCheckAt           = 0;
+let rateLimitedUntil      = 0;
+let updateCheckTimer: NodeJS.Timeout | null = null;
 
-async function checkForUpdate(win: BrowserWindow) {
+type Verification = {
+  algo: "sha512" | "sha256";
+  encoding: "base64" | "hex";
+  expected: string;
+  source: string;
+  size?: number;
+};
+let pendingVerification: Verification | null = null;
+
+function updaterYmlName(): string {
+  if (process.platform === "win32") return "latest.yml";
+  if (process.platform === "darwin") return "latest-mac.yml";
+  return "latest-linux.yml";
+}
+
+// electron-builder's yml is a flat key/value document, so it is read line-wise
+// instead of pulling in a YAML parser.
+function parseUpdaterYml(text: string): { sha512?: string; path?: string; size?: number } {
+  const field = (key: string): string | undefined => {
+    const m = new RegExp(`^${key}:\\s*(.+?)\\s*$`, "m").exec(text);
+    return m ? m[1].replace(/^["']|["']$/g, "") : undefined;
+  };
+  const size = field("size");
+  return { sha512: field("sha512"), path: field("path"), size: size ? Number(size) : undefined };
+}
+
+function hashFile(file: string, algo: "sha512" | "sha256", encoding: "base64" | "hex"): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash(algo);
+    const stream = fs.createReadStream(file);
+    stream.on("error", reject);
+    stream.on("data", (chunk) => hash.update(chunk as Buffer));
+    stream.on("end", () => resolve(hash.digest(encoding)));
+  });
+}
+
+// The sha512 in latest.yml is BASE64, not hex — hashing hex and comparing would
+// never match, so the digest encoding is carried alongside the expected value.
+async function resolveVerification(
+  tag: string,
+  asset: { name: string; digest?: string }
+): Promise<Verification | null> {
+  const yml = updaterYmlName();
   try {
-    const buf = await httpsGet(
+    const res = await httpsGetFull(
+      `https://github.com/${GITHUB_OWNER}/${GITHUB_REPO}/releases/download/${tag}/${yml}`
+    );
+    if (res.status >= 200 && res.status <= 299) {
+      const parsed = parseUpdaterYml(res.body.toString("utf8"));
+      if (parsed.sha512) {
+        if (parsed.path && parsed.path !== asset.name) {
+          logUpdate(`${yml} lists ${parsed.path} but the release asset is ${asset.name} — not trusting that checksum`);
+        } else {
+          logUpdate(`checksum for ${asset.name} from ${yml} (sha512/base64)`);
+          return { algo: "sha512", encoding: "base64", expected: parsed.sha512, source: yml, size: parsed.size };
+        }
+      } else {
+        logUpdate(`${yml} has no sha512 field`);
+      }
+    } else {
+      logUpdate(`${yml} fetch returned ${res.status}`);
+    }
+  } catch (err) {
+    logUpdate(`${yml} unavailable: ${reasonOf(err)}`);
+  }
+
+  const digest = /^(sha256|sha512):([0-9a-f]+)$/i.exec((asset.digest ?? "").trim());
+  if (digest) {
+    const algo = digest[1].toLowerCase() as "sha256" | "sha512";
+    logUpdate(`checksum for ${asset.name} from the GitHub asset digest (${algo})`);
+    return { algo, encoding: "hex", expected: digest[2].toLowerCase(), source: "asset digest" };
+  }
+  logUpdate(`no checksum available for ${asset.name} — the artifact would be installed unverified`);
+  return null;
+}
+
+async function checkForUpdate(win: BrowserWindow, opts: { force?: boolean } = {}) {
+  if (isDev || win.isDestroyed()) return;
+  if (checkInFlight) { logUpdate("check skipped — a check is already running"); return; }
+
+  const now = Date.now();
+  // Unauthenticated GitHub API is 60 req/hour/IP: while backed off every path
+  // through here skips, so a scheduled check can't keep burning the window on 403s.
+  if (now < rateLimitedUntil) { logUpdate("check skipped — backing off after a GitHub rate limit"); return; }
+  if (!opts.force && now - lastCheckAt < FOCUS_CHECK_MIN_GAP_MS) return;
+
+  checkInFlight = true;
+  lastCheckAt = now;
+
+  try {
+    const res = await httpsGetFull(
       `https://api.github.com/repos/${GITHUB_OWNER}/${GITHUB_REPO}/releases/latest`,
       { Accept: "application/vnd.github+json" }
     );
-    const release = JSON.parse(buf.toString("utf8")) as {
-      tag_name: string;
-      assets: Array<{ name: string; browser_download_url: string }>;
+
+    const remaining = res.headers["x-ratelimit-remaining"];
+    const backoffMs = (headers: http.IncomingHttpHeaders): number => {
+      const reset = Number(headers["x-ratelimit-reset"] ?? 0) * 1000;
+      return Math.max(reset > now ? Math.min(reset - now, RATE_LIMIT_BACKOFF_MS) : RATE_LIMIT_BACKOFF_MS, 60_000);
     };
 
-    const remoteVer = release.tag_name.replace(/^v/, "");
-    const localVer  = app.getVersion();
+    if (res.status === 403 || res.status === 429 || (remaining === "0" && res.status >= 400)) {
+      rateLimitedUntil = now + backoffMs(res.headers);
+      reportStatus(win, "check-failed", "GitHub is limiting update checks from this network — it will retry automatically");
+      return;
+    }
+    // A healthy reply can still be the last of the hourly budget; honour it so the
+    // next scheduled check waits instead of tripping the limit.
+    if (remaining === "0") rateLimitedUntil = now + backoffMs(res.headers);
 
-    if (!isNewer(remoteVer, localVer)) return;
+    if (res.status === 404) {
+      reportStatus(win, "check-failed", "no Stream Live release has been published yet");
+      return;
+    }
+    if (res.status < 200 || res.status > 299) {
+      reportStatus(win, "check-failed", `GitHub answered ${res.status}`);
+      return;
+    }
+
+    let release: {
+      tag_name: string;
+      assets: Array<{ name: string; browser_download_url: string; digest?: string }>;
+    };
+    try {
+      release = JSON.parse(res.body.toString("utf8"));
+    } catch {
+      reportStatus(win, "check-failed", "GitHub returned an unreadable reply");
+      return;
+    }
+
+    const remoteVer = String(release.tag_name ?? "").replace(/^v/, "");
+    const localVer  = app.getVersion();
+    if (!remoteVer) {
+      reportStatus(win, "check-failed", "GitHub returned a release with no version");
+      return;
+    }
+
+    logUpdate(`checked v${remoteVer} against installed v${localVer}`);
+    if (!isNewer(remoteVer, localVer)) { reportStatus(win, "ok"); return; }
 
     const pattern = getAssetPattern();
     const asset   = release.assets.find((a) => pattern.test(a.name));
-    if (!asset) return;
+    if (!asset) {
+      reportStatus(win, "check-failed", `v${remoteVer} has no ${platformArtifactLabel()} installer`);
+      logUpdate(`assets on v${remoteVer}: ${release.assets.map((a) => a.name).join(", ") || "none"}`);
+      return;
+    }
 
     latestVersion     = remoteVer;
     latestDownloadUrl = asset.browser_download_url;
 
+    // One offer per version: re-sending it on every later focus check would knock a
+    // finished download back to "available" in the banner.
+    if (notifiedVersion === remoteVer) return;
+    pendingVerification = await resolveVerification(String(release.tag_name), asset);
+    notifiedVersion = remoteVer;
+
+    if (win.isDestroyed()) return;
     win.webContents.send("update-available", { version: remoteVer });
-  } catch {
-    // Best-effort — silently ignore
+  } catch (err) {
+    reportStatus(win, "check-failed", reasonOf(err));
+  } finally {
+    checkInFlight = false;
   }
 }
 
 async function startInAppDownload(win: BrowserWindow, overrideUrl?: string) {
+  if (win.isDestroyed()) return;
   const downloadUrl = overrideUrl ?? latestDownloadUrl;
-  if (!downloadUrl) return;
+  if (!downloadUrl) {
+    reportStatus(win, "download-failed", "no installer URL is known yet — try checking for updates again");
+    return;
+  }
+  if (downloadInFlight) { logUpdate("download skipped — a download is already running"); return; }
 
+  downloadInFlight = true;
   try {
     // Infer a filename from the URL
     const filename    = decodeURIComponent(path.basename(new URL(downloadUrl).pathname));
@@ -177,11 +377,68 @@ async function startInAppDownload(win: BrowserWindow, overrideUrl?: string) {
       }
     );
 
+    const v = pendingVerification;
+    if (!v) {
+      logUpdate(`installing ${filename} unverified — no checksum was published for it`);
+    } else {
+      const expectedSize = v.size ?? 0;
+      if (expectedSize > 0 && fs.statSync(destPath).size !== expectedSize) {
+        fs.rmSync(destPath, { force: true });
+        pendingInstallerPath = null;
+        reportStatus(win, "download-failed", `${filename} came down the wrong size — retry the download`);
+        return;
+      }
+      const actual = await hashFile(destPath, v.algo, v.encoding);
+      if (actual.toLowerCase() !== v.expected.toLowerCase()) {
+        // A corrupted or swapped artifact — never hand this to the OS to run.
+        logUpdate(`checksum mismatch for ${filename} (${v.source}): expected ${v.expected.slice(0, 12)}… got ${actual.slice(0, 12)}…`);
+        fs.rmSync(destPath, { force: true });
+        pendingInstallerPath = null;
+        reportStatus(win, "download-failed", "the downloaded update failed its integrity check — retry the download");
+        return;
+      }
+      logUpdate(`checksum verified for ${filename} (${v.source})`);
+    }
+
     pendingInstallerPath = destPath;
     if (!win.isDestroyed()) win.webContents.send("update-downloaded");
-  } catch {
-    // Silently ignore download errors
+  } catch (err) {
+    pendingInstallerPath = null;
+    reportStatus(win, "download-failed", reasonOf(err));
+  } finally {
+    downloadInFlight = false;
   }
+}
+
+// Launch after 5 s, then every 6 h, and again whenever the window regains focus —
+// an app left open for days was the main reason people never saw the banner.
+function scheduleUpdateChecks(win: BrowserWindow) {
+  if (isDev) return;
+  setTimeout(() => { if (mainWindow && !mainWindow.isDestroyed()) void checkForUpdate(mainWindow, { force: true }); }, 5000);
+  if (!updateCheckTimer) {
+    updateCheckTimer = setInterval(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) void checkForUpdate(mainWindow, { force: true });
+    }, UPDATE_CHECK_INTERVAL_MS);
+  }
+  win.on("focus", () => { if (!win.isDestroyed()) void checkForUpdate(win); });
+}
+
+// ─── Is a session live right now? ────────────────────────────────────────────
+// The renderer owns the WebRTC state, so main asks it. A dead or wedged renderer
+// must not block an update forever: no answer inside 1 s counts as not live.
+function askRendererCallLive(win: BrowserWindow): Promise<boolean> {
+  return new Promise((resolve) => {
+    const onReply = (_event: Electron.IpcMainEvent, live: unknown) => {
+      clearTimeout(timer);
+      resolve(live === true);
+    };
+    const timer = setTimeout(() => {
+      ipcMain.removeListener("call-live-reply", onReply);
+      resolve(false);
+    }, 1000);
+    ipcMain.once("call-live-reply", onReply);
+    win.webContents.send("check-call-live");
+  });
 }
 
 // ─── IPC: stable per-machine device id ───────────────────────────────────────
@@ -204,6 +461,12 @@ ipcMain.on("download-update", () => {
   if (mainWindow) startInAppDownload(mainWindow);
 });
 
+// A refused old build (412 update_required) asks for the banner right away
+// instead of waiting for the next scheduled check.
+ipcMain.on("check-for-update", () => {
+  if (mainWindow && !mainWindow.isDestroyed()) void checkForUpdate(mainWindow, { force: true });
+});
+
 // ─── IPC: quit and run the downloaded installer ───────────────────────────────
 // Windows: launch the NSIS installer and let it replace the app.
 // macOS: a DMG cannot overwrite a running app on its own, and an unsigned app
@@ -212,6 +475,22 @@ ipcMain.on("download-update", () => {
 ipcMain.on("quit-and-install", async () => {
   if (!pendingInstallerPath) return;
   const installer = pendingInstallerPath;
+
+  if (mainWindow && !mainWindow.isDestroyed() && await askRendererCallLive(mainWindow)) {
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: "warning",
+      title: "You are live on a call",
+      message: "Installing now would drop the call",
+      detail:
+        "Stream Live is in the middle of a session.\n\n" +
+        "Finish or leave the call first, then press Install & Restart again — " +
+        "the update is already downloaded and will wait for you.",
+      buttons: ["Not now", "Install anyway"],
+      defaultId: 0,
+      cancelId: 0,
+    });
+    if (response !== 1) return;
+  }
 
   if (process.platform === "darwin") {
     if (mainWindow && !mainWindow.isDestroyed()) {
@@ -254,14 +533,34 @@ ipcMain.on("open-external", (_event, url: string) => {
     getAssetPattern().test(decodeURIComponent(url));
 
   if (isOurInstaller && mainWindow) {
-    // Inform the renderer that an in-app update is starting
-    latestDownloadUrl = url;
-    mainWindow.webContents.send("update-available", { version: latestVersion ?? "latest" });
-    startInAppDownload(mainWindow, url);
+    void handleLegacyInstallerUrl(mainWindow, url);
   } else {
     shell.openExternal(url).catch(() => {});
   }
 });
+
+// v1.4.0's renderer asked the OS to open the installer download page; the legacy
+// flow bypasses checkForUpdate, so the checksum is resolved from the tag in the URL.
+async function handleLegacyInstallerUrl(win: BrowserWindow, url: string) {
+  latestDownloadUrl = url;
+  let tag = "";
+  let filename = "";
+  try {
+    const segments = new URL(url).pathname.split("/").filter(Boolean);
+    const downloadAt = segments.indexOf("download");
+    if (downloadAt >= 0) tag = segments[downloadAt + 1] ?? "";
+    filename = decodeURIComponent(segments[segments.length - 1] ?? "");
+  } catch {
+    logUpdate(`could not parse the installer URL from the update link`);
+  }
+
+  const versionFromName = /^(?:StreamLive-Setup-|StreamLive-)([0-9][0-9a-zA-Z.\-]*)/.exec(filename);
+  latestVersion = tag ? tag.replace(/^v/, "") : versionFromName?.[1] ?? "latest";
+  win.webContents.send("update-available", { version: latestVersion });
+
+  pendingVerification = tag ? await resolveVerification(tag, { name: filename }) : null;
+  await startInAppDownload(win, url);
+}
 
 // ─── Virtual camera frame feeder (UnityCapture shared-memory protocol) ────────
 // Registers vcam-start / vcam-stop / vcam-status / vcam-frame IPC. Fully guarded:
@@ -339,11 +638,9 @@ function createWindow() {
     }
   });
 
-  // Kick off update check 5 s after the window is ready
+  // Update checks: at launch, then on a schedule and on every window focus.
   mainWindow.webContents.once("did-finish-load", () => {
-    if (!isDev && mainWindow) {
-      setTimeout(() => checkForUpdate(mainWindow!), 5000);
-    }
+    if (!isDev && mainWindow) scheduleUpdateChecks(mainWindow);
   });
 }
 
@@ -388,6 +685,7 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => {
+  if (updateCheckTimer) { clearInterval(updateCheckTimer); updateCheckTimer = null; }
   shutdownVirtualCamera();
   if (process.platform !== "darwin") app.quit();
 });

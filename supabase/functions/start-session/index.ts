@@ -29,10 +29,11 @@ const STATUS_BY_REASON: Record<string, number> = {
   status_past_due: 403,
   status_expired: 403,
   concurrent_limit: 409,
+  lines_busy: 429,
   maintenance: 503,
 };
 
-async function mintFalToken(userId: string, appId: string, ttlSeconds: number) {
+async function mintFalToken(userId: string, appId: string, ttlSeconds: number, billMinutes: number) {
   const expiration = Math.max(DEFAULT_TOKEN_TTL_SECONDS, ttlSeconds);
   return runWithKeys<{ token: string; raw: string }>(userId, "fal", async (key) => {
     const res = await fetch("https://rest.fal.ai/tokens/", {
@@ -52,7 +53,10 @@ async function mintFalToken(userId: string, appId: string, ttlSeconds: number) {
       else if (parsed?.token) token = String(parsed.token);
       else token = raw.replace(/^"|"$/g, "");
     } catch { /* plain-text token */ }
-    return { ok: true, value: { token, raw } };
+    // The daily per-key cap only binds if the key is told what it just signed up
+    // to burn, so book the prepaid chunk against it. Long calls re-charge through
+    // the lease, which has no key attached yet — this is a floor, not an exact bill.
+    return { ok: true, value: { token, raw }, minutes: billMinutes };
   });
 }
 
@@ -106,11 +110,13 @@ Deno.serve(async (req: Request) => {
     // Audio Call is voice-only: no video key, nothing else to mint.
     let token: string | null = null;
     if (modality !== "audio") {
-      const minted = await mintFalToken(user.id, appId, lease.ttlSeconds);
+      const minted = await mintFalToken(user.id, appId, lease.ttlSeconds, lease.chunkMinutes);
       if (!minted.ok) {
         // Give the prepaid chunk straight back — the call never happened.
         await updateLease(lease.sessionId, "end").catch(() => null);
-        return fail(minted.error ?? "fal token mint failed", 502, { reason: "upstream_key" });
+        // fal's own error text (and any key detail inside it) is recorded in
+        // key_usage_log; the user gets the reason, not the raw upstream body.
+        return fail("our video service is not answering right now", 502, { reason: "upstream_key" });
       }
       token = minted.value?.token ?? null;
     }

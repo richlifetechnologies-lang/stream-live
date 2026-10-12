@@ -20,6 +20,7 @@
   camera simply disabled.
 */
 import { IpcMain } from "electron";
+import { execFile } from "child_process";
 
 const NAMES = {
   MUTEX: "UnityCapture_Mutx",
@@ -99,6 +100,36 @@ function loadKoffi(): boolean {
     S.error = `koffi unavailable: ${e?.message ?? String(e)}`;
     return false;
   }
+}
+
+// koffi loading only proves we can talk to a filter that may not exist. The
+// installer registers "Stream Live Camera" under the DirectShow video-input
+// category; if it isn't there, advertising the camera hands OBS a black frame.
+const FILTER_INSTANCE_KEY =
+  "HKLM\\SOFTWARE\\Classes\\CLSID\\{860BB310-5D01-11d0-BD3B-00A0C911CE86}\\Instance";
+let registeredCache: { at: number; value: boolean } | null = null;
+
+function filterRegistered(): Promise<boolean> {
+  if (registeredCache && Date.now() - registeredCache.at < 30_000) return Promise.resolve(registeredCache.value);
+  return new Promise((resolve) => {
+    const settle = (value: boolean) => {
+      registeredCache = { at: Date.now(), value };
+      resolve(value);
+    };
+    execFile(
+      "reg.exe",
+      ["query", FILTER_INSTANCE_KEY, "/s", "/f", "Stream Live Camera", "/d"],
+      { windowsHide: true, timeout: 4000 },
+      (err, stdout) => {
+        const out = String(stdout ?? "");
+        if (!err && out.trim()) return settle(true);
+        if (/unable to find the specified registry key/i.test(out)) return settle(false);
+        // No answer at all (reg.exe blocked, timed out): never disable a camera
+        // that might be working fine.
+        settle(true);
+      },
+    );
+  });
 }
 
 function closeHandles() {
@@ -217,9 +248,16 @@ function sendFrame(pixels: Buffer, width: number, height: number): boolean {
 }
 
 export function initVirtualCameraIpc(ipcMain: IpcMain) {
-  ipcMain.handle("vcam-start", () => {
+  ipcMain.handle("vcam-start", async () => {
     const ok = loadKoffi();
     if (!ok) return { supported: false, active: false, ready: false, error: S.error };
+    if (!(await filterRegistered())) {
+      S.error =
+        'The "Stream Live Camera" driver is not registered on this machine, so nothing could read the video. ' +
+        "Run drivers\\Install-VirtualDevices.ps1 from the Stream Live folder (right-click, Run with PowerShell), then restart Stream Live.";
+      return { supported: false, active: false, ready: false, error: S.error };
+    }
+    S.error = null;
     S.active = true;
     ensureWantEvent();
     return { supported: true, active: true, ready: S.ready, error: S.error };

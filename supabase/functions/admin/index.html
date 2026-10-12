@@ -105,7 +105,7 @@
       <button data-tab="sessions">Live sessions</button>
       <button data-tab="gateway">Gateway</button>
       <button data-tab="plans">Plans</button>
-      <button data-tab="price">Price Generator</button>
+      <button data-tab="price">Prices</button>
       <button data-tab="contact">Contact</button>
       <button id="signOut" style="margin-left:auto">Sign out</button>
     </div>
@@ -445,7 +445,13 @@
           </div>
           <div>
             <label>Lease TTL seconds (heartbeat deadline)</label>
-            <input id="cfgTtl" type="number" min="15" step="5" />
+            <input id="cfgTtl" type="number" min="100" step="5" />
+            <div class="muted" style="margin-top:6px">The desktop checks in every 45 seconds, so keep this at 100 or higher — anything below two check-ins and calls get cut off.</div>
+          </div>
+          <div>
+            <label>Video calls allowed at once, across all accounts</label>
+            <input id="cfgVideoCeiling" type="number" min="0" step="1" />
+            <div class="muted" style="margin-top:6px">0 or blank = no limit. fal counts concurrency per billing <b>workspace</b>, not per key: if your workspace allows 2, put 2 here. The third caller is then told "lines are busy" instead of burning a lease and failing.</div>
           </div>
         </div>
         <div class="grid2" style="margin-top:12px">
@@ -1402,14 +1408,23 @@
   });
 
   // ══ GATEWAY ═════════════════════════════════════════════════════════════
+  // The video ceiling column ships with the 20261012 lease-guard migration. The
+  // panel can be redeployed before that SQL runs, so probe for it instead of
+  // sending a column that does not exist and failing the whole save.
+  let hasVideoCeiling = false;
+
   async function loadConfig() {
     const { data, error } = await sb.from("app_config").select("*").eq("id", 1).maybeSingle();
     if (error) return msg("cfgMsg", error.message);
     if (!data) return msg("cfgMsg", "No app_config row (id = 1) — run the credits migration.");
+    const probe = await sb.from("app_config").select("max_concurrent_video_sessions").eq("id", 1).maybeSingle();
+    hasVideoCeiling = !probe.error;
+    $("cfgVideoCeiling").disabled = !hasVideoCeiling;
     $("cfgMin").value = data.min_supported_version || "";
     $("cfgLatest").value = data.latest_version || "";
     $("cfgChunk").value = N(data.lease_chunk_minutes, 5);
     $("cfgTtl").value = N(data.lease_ttl_seconds, 120);
+    $("cfgVideoCeiling").value = probe.data?.max_concurrent_video_sessions ?? 0;
     $("cfgSignup").checked = data.signup_enabled !== false;
     $("cfgMaint").checked = data.maintenance === true;
     $("cfgMaintMsg").value = data.maintenance_message || "";
@@ -1424,11 +1439,15 @@
       min_supported_version: min,
       latest_version: $("cfgLatest").value.trim() || null,
       lease_chunk_minutes: N($("cfgChunk").value, 5),
-      lease_ttl_seconds: Math.max(15, N($("cfgTtl").value, 120)),
+      lease_ttl_seconds: Math.max(100, N($("cfgTtl").value, 120)),
       signup_enabled: $("cfgSignup").checked,
       maintenance: $("cfgMaint").checked,
       maintenance_message: $("cfgMaintMsg").value.trim() || null,
     };
+    if (hasVideoCeiling) {
+      const ceiling = N($("cfgVideoCeiling").value, 0);
+      row.max_concurrent_video_sessions = ceiling > 0 ? Math.floor(ceiling) : null;
+    }
     const { error } = await sb.from("app_config").update(row).eq("id", 1);
     if (error) return msg("cfgMsg", error.message);
     msg("cfgMsg", "Gateway config saved — applies to the next call.", "ok");
@@ -1708,7 +1727,7 @@
       voice_cloning_per_sec_cost: +(voiceMin / 60).toFixed(6),
       profit_margin_percent: Math.round(target),
       last_verified_at: new Date().toISOString().slice(0, 10),
-      source_notes: `fal.ai Lucy 2.5 realtime ${falMin}/min; ElevenLabs speech to speech ${voiceMin}/min. Saved from the Price Generator tab.`,
+      source_notes: `fal.ai Lucy 2.5 realtime ${falMin}/min; ElevenLabs speech to speech ${voiceMin}/min. Saved from the Prices tab.`,
     };
     const { data, error } = await sb.from("billing_config").update(row).eq("id", 1).select("id");
     if (error) return msg("pgMsg", error.message);
