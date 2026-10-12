@@ -16,8 +16,7 @@ alter table public.app_config
   add column if not exists max_concurrent_video_sessions integer;
 
 comment on column public.app_config.max_concurrent_video_sessions is
-  'How many video / video+voice leases may be live across ALL accounts at once. '
-  || 'fal caps concurrency per billing workspace, so this is the workspace ceiling. null = uncapped.';
+  'How many video or video+voice leases may be live across ALL accounts at once. fal caps concurrency per billing workspace, so this is the workspace ceiling. null = uncapped.';
 
 -- ── 2. burn rate: never silently bill the priciest modality at 1.0 ────────────
 create or replace function public.current_burn_rate(p_modality modality_flag)
@@ -222,7 +221,7 @@ begin
     and created_at > now() - interval '15 seconds';
   if v_repeat > 0 then
     return jsonb_build_object('ok', false, 'deduped', true,
-      'error', 'the same grant was recorded a few seconds ago — nothing was changed');
+      'error', 'the same grant was recorded a few seconds ago - nothing was changed');
   end if;
 
   insert into public.credit_balances (user_id, modality, balance)
@@ -293,7 +292,7 @@ begin
     perform cron.schedule(
       'stream_live_reap_leases',
       '*/5 * * * *',
-      $cron$select public.sl_reap_sessions(null);$cron$
+      'select public.sl_reap_sessions(null)'
     );
     raise notice 'lease reaper scheduled every 5 minutes';
   else
