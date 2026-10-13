@@ -554,6 +554,77 @@ async function _loopbackPick(cands: MediaDeviceInfo[], inputs: MediaDeviceInfo[]
   return winner;
 }
 
+// ─── Second video pipeline (trial accounts) ─────────────────────────────────
+// Same job as _startVideoSession, but the peer connection and its signalling live
+// inside the pipeline's own SDK. Everything the rest of this page needs — a remote
+// MediaStream, an RTCPeerConnectionState-shaped callback, close(), send() — is
+// rebuilt here from the SDK's events, so the pump that feeds the virtual camera,
+// the prompt updates and the teardown code never learn there is more than one
+// engine. The one rule: nothing here may put a provider name on the screen.
+async function _startTrialVideoSession(
+  token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void,
+  onConnectionState: (state: RTCPeerConnectionState) => void, onDisconnect: () => void,
+  prompt: string, refB64: string | null,
+): Promise<VideoSession> {
+  const sdk = await import("@decartai/sdk");
+  // "connecting" and "generating" are both a live picture; only the two broken
+  // states may start the app's grace window, so anything unknown maps to idle.
+  const stateOf = (s: string): RTCPeerConnectionState =>
+    s === "connected" || s === "generating" ? "connected"
+      : s === "disconnected" || s === "reconnecting" ? "disconnected"
+        : "connecting";
+
+  const client = sdk.createDecartClient({ apiKeyProvider: async () => token });
+  // connect() cannot be cancelled, and giving up on it is the expensive case: the
+  // pipeline still opens on the far side and keeps running with no handle anywhere
+  // in this app, so it consumes trial credits until the process quits. `givenUp`
+  // hands the late arrival to whoever closes it.
+  type Opened = { client: import("@decartai/sdk").RealTimeClient } | { err: unknown };
+  let givenUp = false;
+  const opened = await new Promise<Opened>((resolve) => {
+    const to = setTimeout(() => { givenUp = true; resolve({ err: `${APP}: connection timed out` }); }, 30_000);
+    client.realtime.connect(localStream, {
+      model: sdk.models.realtime("lucy-2.5"),
+      initialState: {
+        // enhance stays off: the style prompt is written to be taken literally,
+        // and a server-side rewrite would make the two pipelines behave apart.
+        prompt: { text: prompt, enhance: false },
+        ...(refB64 ? { image: `data:image/jpeg;base64,${refB64}` } : {}),
+      },
+      onRemoteStream: (stream: MediaStream) => onRemote(stream),
+      onConnectionChange: (state: string) => onConnectionState(stateOf(state)),
+    }).then(
+      (c) => {
+        clearTimeout(to);
+        if (givenUp) { try { c.disconnect(); } catch { /**/ } resolve({ err: `${APP}: connection timed out` }); return; }
+        resolve({ client: c });
+      },
+      (e) => { clearTimeout(to); resolve({ err: e }); },
+    );
+  });
+  if ("err" in opened) {
+    // The SDK's own wording names the service and its hostnames. That belongs in
+    // the console, never on the screen, so everything becomes our prefixed
+    // sentence — which toUserMessage recognises and replaces with a plain one.
+    console.warn("[video] could not start the call:", opened.err);
+    throw new Error(`${APP}: could not start the call`);
+  }
+  const rc = opened.client;
+
+  rc.on("sessionEnded", () => onDisconnect());
+  rc.on("error", () => onDisconnect());
+
+  return {
+    close: () => { try { rc.disconnect(); } catch { /**/ } },
+    send: (d) => {
+      const p = d.prompt;
+      const img = d.reference_image_url;
+      if (typeof p === "string") void rc.setPrompt(p).catch(() => { /**/ });
+      if (typeof img === "string") void rc.setImage(img).catch(() => { /**/ });
+    },
+  };
+}
+
 function _updatePrompt(session: VideoSession, prompt: string, refB64?: string | null) {
   try { session.send({ prompt, ...(refB64 ? { reference_image_url: `data:image/jpeg;base64,${refB64}` } : {}) }); } catch { /**/ }
 }
@@ -707,6 +778,19 @@ export default function StreamPage() {
 
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
   const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
+
+  // A new account holds one thing: the free video minute. Dropping it on the
+  // video+audio tab would open the app on a bucket the customer has never had and
+  // cannot fill from a trial, so when video is the only funded bucket, the tab
+  // follows the wallet. Once per sign-in — after that the choice is theirs.
+  const trialTabRouted = useRef(false);
+  useEffect(() => {
+    if (trialTabRouted.current || account.loading || !account.signedIn || account.wallets.length === 0) return;
+    trialTabRouted.current = true;
+    if (hasMinutes(account, "video") && !hasMinutes(account, "audio") && !hasMinutes(account, "video_audio")) {
+      setActiveTab("video-only");
+    }
+  }, [account]);
 
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
@@ -1144,11 +1228,14 @@ export default function StreamPage() {
 
       // ── Start video session ────────────────────────────────────────────
       // The Audio Call tab has no video token (ticket.token === null): it is
-      // voice-only and must never open the fal session.
+      // voice-only and must never open a video session. Which of the two pipelines
+      // opens is the gateway's call, made from the account's wallet; this page only
+      // obeys it, and never says it out loud.
       if (needsVideo) {
         if (!ticket.token) throw new Error(`${APP}: gateway returned no video token`);
         const gen = ++sessionGenRef.current;
-        const session = await _startVideoSession(
+        const open = ticket.engine === "decart" ? _startTrialVideoSession : _startVideoSession;
+        const session = await open(
           ticket.token, sendStream,
           remote => {
             if (sessionGenRef.current !== gen) return;

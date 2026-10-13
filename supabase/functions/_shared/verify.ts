@@ -63,6 +63,26 @@ export async function verifyKey(provider: Provider, secret: string): Promise<Ver
     return { ok: true, status: 200, detail: "Accepted — fal.ai minted a call token for lucy-2-5." };
   }
 
+  if (provider === "decart") {
+    // Minting a client token is the cheapest proof that this key authenticates and
+    // that the model the app dials is reachable: a real session starts the same way.
+    // It costs nothing and queues no inference.
+    const res = await call("https://api.decart.ai/v1/client/tokens", {
+      method: "POST",
+      headers: { "X-API-KEY": key, "content-type": "application/json" },
+      body: JSON.stringify({ expiresIn: 60, allowedModels: ["lucy-2.5"] }),
+    });
+    if (typeof res === "string") return { ok: false, status: null, detail: res };
+    const body = (await res.text().catch(() => "")).slice(0, 200);
+    if (!res.ok) {
+      return { ok: false, status: res.status, detail: `Decart answered ${res.status}${body ? `: ${body}` : ""}. Sent ${key.length} characters.` };
+    }
+    let token = "";
+    try { token = String(JSON.parse(body)?.apiKey ?? ""); } catch { /**/ }
+    if (!token) return { ok: false, status: res.status, detail: `Decart accepted the key but returned no client token (${body || "empty body"}).` };
+    return { ok: true, status: 200, detail: "Accepted — Decart minted a client token for lucy-2.5." };
+  }
+
   const sub = await call("https://api.elevenlabs.io/v1/user/subscription", { headers: { "xi-api-key": key } });
   if (typeof sub === "string") return { ok: false, status: null, detail: sub };
   if (!sub.ok) {

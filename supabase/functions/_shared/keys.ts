@@ -12,7 +12,13 @@
 // keys are failing and when the pool had to fail over.
 import { adminClient } from "./db.ts";
 
-export type Provider = "fal" | "elevenlabs";
+export type Provider = "fal" | "elevenlabs" | "decart";
+
+const ENV_SECRET: Record<Provider, string> = {
+  fal: "FAL_KEY",
+  elevenlabs: "ELEVENLABS_KEY",
+  decart: "DECART_KEY",
+};
 
 /**
  * Clean up a pasted key the way the working desktop app does.
@@ -70,7 +76,7 @@ export async function pickKeys(userId: string, provider: Provider): Promise<KeyC
     fromEnv: false,
   }));
 
-  const envSecret = provider === "fal" ? Deno.env.get("FAL_KEY") : Deno.env.get("ELEVENLABS_KEY");
+  const envSecret = Deno.env.get(ENV_SECRET[provider]);
   if (envSecret) {
     rows.push({ keyId: "env", label: "environment secret", secret: normalizeSecret(envSecret), priority: 9999, fromEnv: true });
   }
@@ -133,7 +139,7 @@ export async function runWithKeys<T>(
   if (keys.length === 0) {
     return {
       ok: false,
-      error: `no ${provider} key is available (link one in the admin panel or set ${provider === "fal" ? "FAL_KEY" : "ELEVENLABS_KEY"})`,
+      error: `no ${provider} key is available (link one in the admin panel or set ${ENV_SECRET[provider]})`,
       tried: 0,
     };
   }

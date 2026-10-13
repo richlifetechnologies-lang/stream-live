@@ -132,9 +132,17 @@ export default function AccountPage() {
               </h1>
               <p style={{ color: "hsl(222 25% 58%)", fontSize: 12.5, lineHeight: 1.5, fontFamily: "'Rajdhani', sans-serif", margin: 0 }}>
                 {authMode === "signup"
-                  ? "No email verification, no trial and nothing to buy. Your administrator tops up the minutes you call with."
+                  ? "No email verification and nothing to buy up front. Your administrator tops up the minutes you call with."
                   : "Sign in with the account you created — your minutes, devices and requests are waiting."}
               </p>
+              <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 12, background: "hsl(187 100% 52% / 0.08)", border: "1px solid hsl(187 100% 52% / 0.3)" }}>
+                <p style={{ margin: 0, fontSize: 15.5, fontWeight: 700, lineHeight: 1.4, fontFamily: "'Rajdhani', sans-serif", color: "hsl(190 85% 95%)" }}>
+                  Every new account gets 1 minute of free video streaming to test the software.
+                </p>
+                <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.45, fontFamily: "'Rajdhani', sans-serif", color: "hsl(187 55% 80%)" }}>
+                  That free minute shows a watermark on the AI video. Get minutes in your account — by buying them or by having them credited — and the watermark is gone.
+                </p>
+              </div>
             </div>
 
             <div style={{ display: "flex", gap: 4, padding: 4, borderRadius: 12, background: "hsl(222 55% 5% / 0.8)", border: "1px solid hsl(222 40% 14%)" }}>

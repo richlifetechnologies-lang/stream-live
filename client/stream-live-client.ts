@@ -35,8 +35,13 @@ export type Wallet = {
 
 export type CallTicket = {
   sessionId: string;
-  /** fal.ai JWT — null on the Audio Call tab, which needs no video pipeline. */
+  /** Video token for this lease — null on the Audio Call tab, which needs no video pipeline. */
   token: string | null;
+  /**
+   * Which video pipeline the gateway put this lease on. Internal plumbing only:
+   * it must never reach the screen, a toast or a log line a user can read.
+   */
+  engine: "fal" | "decart";
   modality: Modality;
   leaseExpiresAt: string | null;
   balance: number | null;
@@ -380,7 +385,8 @@ export class StreamLiveClient {
 
   // ── Calls ──────────────────────────────────────────────────────────────────
   /**
-   * Open a metered lease and, for the video modalities, get a short-lived fal JWT.
+   * Open a metered lease and, for the video modalities, get the short-lived token
+   * for whichever video pipeline this account runs on.
    * Throws GatewayError with reason out_of_minutes / concurrent_limit / device_* /
    * modality_disabled / update_required / maintenance.
    */
@@ -395,6 +401,7 @@ export class StreamLiveClient {
     return {
       sessionId: res.sessionId,
       token: res.token ?? null,
+      engine: res.engine === "decart" ? "decart" : "fal",
       modality: res.modality,
       leaseExpiresAt: res.leaseExpiresAt,
       balance: res.balance ?? null,

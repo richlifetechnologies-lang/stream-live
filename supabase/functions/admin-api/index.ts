@@ -9,6 +9,7 @@
 //   resolve       { requestId, approve, note?, minutes? }
 //   reap          { userId? }                 -- close expired leases
 //   signout       { userId }                 -- kill every refresh token
+//   set_engine    { userId, engine: 'fal'|'decart'|null } -- pin/unpin the service
 //   test_key      { provider, key? , keyId? } -- prove a key works, no inference billed
 // Resp: { ok:true, ...result } or { error, status }
 import { preflight, json, fail } from "../_shared/cors.ts";
@@ -89,13 +90,44 @@ Deno.serve(async (req: Request) => {
         return json({ ok: true, sessions, closed });
       }
 
+      // body.engine: "fal" | "decart" | null | "auto" — the last two clear the pin
+      // and put the account back under the normal rule.
+      case "set_engine": {
+        const target = String(body.userId ?? "");
+        if (!target) return fail("userId is required");
+        const wanted = body.engine === "decart" || body.engine === "fal"
+          ? body.engine
+          : body.engine === null || body.engine === "auto" || body.engine === "" ? null : undefined;
+        if (wanted === undefined) return fail("engine must be fal, decart, or null for automatic");
+        // The one-way door is the database's rule, not this function's, so the
+        // refusal wording an admin sees is exactly what the RPC decided.
+        const { data, error } = await adminClient().rpc("sl_set_engine_override", {
+          p_user: target, p_engine: wanted, p_actor: user.id,
+        });
+        if (error) return fail(error.message, 500);
+        const out = (data ?? {}) as { ok?: boolean; error?: string; engine_override?: string | null; effective?: string };
+        if (out.ok !== true) return fail(String(out.error ?? "refused"), 409);
+        return json({ ok: true, engine_override: out.engine_override ?? null, effective: out.effective ?? "automatic" });
+      }
+
+      case "trial_supply": {
+        // The gateway's own arithmetic on the Decart pool, run by the gateway's
+        // role — the panel must not re-derive it from the budget columns and be
+        // subtly wrong about how much free video is left.
+        const { data, error } = await adminClient().rpc("sl_trial_supply");
+        if (error) return fail(error.message, 500);
+        return json({ ok: true, ...(data ?? {}) });
+      }
+
       case "test_key": {
-        const provider = body.provider === "elevenlabs" ? "elevenlabs" : body.provider === "fal" ? "fal" : null;
-        if (!provider) return fail("provider must be fal or elevenlabs");
+        const provider = body.provider === "elevenlabs" ? "elevenlabs"
+          : body.provider === "fal" ? "fal"
+            : body.provider === "decart" ? "decart" : null;
+        if (!provider) return fail("provider must be fal, elevenlabs or decart");
         const keyId = typeof body.keyId === "string" && body.keyId ? body.keyId : null;
         let secret = typeof body.key === "string" ? body.key : "";
         if (!secret.trim() && keyId) {
-          const column = provider === "fal" ? "fal_key" : "elevenlabs_key";
+          const column = provider === "fal" ? "fal_key" : provider === "decart" ? "decart_key" : "elevenlabs_key";
           const { data } = await adminClient().from("gateway_keys").select(column).eq("id", keyId).maybeSingle();
           secret = String((data as Record<string, string | null> | null)?.[column] ?? "");
         }

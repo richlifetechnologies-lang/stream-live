@@ -608,10 +608,12 @@ function createWindow() {
         ...details.responseHeaders,
         "Content-Security-Policy": [
           // connect-src is an explicit allow-list: the Supabase gateway (https + wss),
-          // the fal relay hosts, the GitHub updater, and blob/data. rest.fal.ai is gone
-          // — the gateway mints the JWT now, so the renderer must never reach a key endpoint.
+          // the two video relay hosts, the GitHub updater, and blob/data. rest.fal.ai is
+          // gone — the gateway mints the token now, so the renderer must never reach a
+          // key endpoint. Both video hosts stay on the list because either pipeline can
+          // serve a call, and a page that cannot open its signalling socket just hangs.
           // localhost stays for the dev server and the app's own local API server.
-          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.fal.ai wss://*.fal.ai https://wma.fal.run https://fal.run wss://fal.run https://*.fal.run wss://*.fal.run https://fonts.googleapis.com https://fonts.gstatic.com; media-src *; connect-src 'self' http://localhost:* ws://localhost:* https://onhanfathvfkkliayvrn.supabase.co wss://onhanfathvfkkliayvrn.supabase.co https://*.fal.run wss://*.fal.run https://fal.run wss://fal.run https://api.github.com https://objects.githubusercontent.com data: blob:;",
+          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.fal.ai wss://*.fal.ai https://wma.fal.run https://fal.run wss://fal.run https://*.fal.run wss://*.fal.run https://*.decart.ai wss://*.decart.ai https://fonts.googleapis.com https://fonts.gstatic.com; media-src *; connect-src 'self' http://localhost:* ws://localhost:* https://onhanfathvfkkliayvrn.supabase.co wss://onhanfathvfkkliayvrn.supabase.co https://*.fal.run wss://*.fal.run https://fal.run wss://fal.run https://api.decart.ai wss://api3.decart.ai https://api.github.com https://objects.githubusercontent.com data: blob:;",
         ],
       },
     });

@@ -98,11 +98,15 @@ export function bucketFor(state: AccountState, modality: Modality): Wallet | und
   return state.wallets.find(w => w.modality === modality);
 }
 
-// A call is refused when its bucket holds under one minute; an unlimited bucket always passes.
+// A call is refused when its bucket cannot fund a lease; an unlimited bucket always passes.
+// Video is the one bucket a free trial can leave partly spent, and the gateway lets a
+// trial start on any amount above zero — so the button here must not be stricter than
+// the wallet check behind it, or the leftover of a trial minute looks dead on screen.
 export function hasMinutes(state: AccountState, modality: Modality): boolean {
   const w = bucketFor(state, modality);
   if (!w) return false;
-  return w.unlimited || w.balance >= 1;
+  if (w.unlimited) return true;
+  return modality === "video" ? w.balance > 0 : w.balance >= 1;
 }
 
 export async function refreshBalances(): Promise<void> {

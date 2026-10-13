@@ -23,6 +23,7 @@ export type Lease = {
   balance: number | null;
   unlimited: boolean;
   ttlSeconds: number;
+  engine: "fal" | "decart";
 };
 
 type Rpc = { data: unknown; error: { message: string } | null };
@@ -131,6 +132,7 @@ export async function startLease(
       balance: data.balance === null || data.balance === undefined ? null : Number(data.balance),
       unlimited: data.unlimited === true,
       ttlSeconds: Number(data.lease_ttl_seconds ?? 120),
+      engine: data.engine === "decart" ? "decart" : "fal",
     },
   };
 }

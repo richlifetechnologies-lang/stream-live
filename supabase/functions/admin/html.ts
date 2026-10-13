@@ -103,6 +103,9 @@ export const ADMIN_HTML = `<!doctype html>
       <button data-tab="accounts" class="on">Accounts</button>
       <button data-tab="topups">Top-ups</button>
       <button data-tab="keys">Key pool</button>
+      <button data-tab="decart">DeCart keys</button>
+      <button data-tab="engines">Engines</button>
+      <button data-tab="split">Trial vs Paid</button>
       <button data-tab="burn">Burn rates</button>
       <button data-tab="sessions">Live sessions</button>
       <button data-tab="gateway">Gateway</button>
@@ -154,6 +157,16 @@ export const ADMIN_HTML = `<!doctype html>
             </div>
           </div>
           <div class="btns" style="margin-top:12px"><button id="detSaveSwitches" class="primary">Save what it may use</button></div>
+
+          <div class="card" style="margin-top:14px;background:#0b0f14">
+            <h3 style="font-size:13px;margin:0 0 4px">Video service for this account</h3>
+            <p class="muted" style="margin:0 0 10px">By default only an account that was actually <b>granted a free minute</b> runs on the <b>free-trial pool</b> — accounts that joined before the trial existed, and admin accounts, run on the <b>paid service</b>. The moment an account is credited or buys minutes it moves to the paid service permanently. You can pin an account to either one here; nothing the customer does can reveal or change this.</p>
+            <div class="row" style="align-items:center">
+              <div style="flex:0 0 220px"><label style="margin-top:0">Pin to</label><select id="detEngine"><option value="">Automatic (the normal rule)</option><option value="fal">Paid service</option><option value="decart">Free-trial pool</option></select></div>
+              <div style="flex:0 0 auto"><button id="detSaveEngine">Save video service</button></div>
+              <div class="muted" id="detEngineNow" style="flex:1 1 240px"></div>
+            </div>
+          </div>
 
           <div style="overflow:auto;margin-top:16px">
             <table id="bucketTable">
@@ -220,13 +233,14 @@ export const ADMIN_HTML = `<!doctype html>
         <div class="row" style="justify-content:space-between;align-items:center">
           <h2 style="font-size:14px;margin:0">All accounts</h2>
           <div style="flex:1 1 260px"><input id="acctSearch" placeholder="Search by email…" /></div>
+          <div style="flex:0 0 150px"><label style="margin-top:0">Served by</label><select id="acctEngine"><option value="">all accounts</option><option value="trial">the trial pool</option><option value="paid">the paid service</option><option value="pinned">pinned by you</option></select></div>
           <button id="acctSearchBtn">Search</button>
           <button id="acctRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:8px 0 12px">Minutes sit in three separate buckets — video, audio and video + audio — and never expire. An account can be full in one bucket and empty in another. Only <span class="pill active">active</span> accounts can place calls.</p>
+        <p class="muted" style="margin:8px 0 12px">Minutes sit in three separate buckets — video, audio and video + audio — and never expire. An account can be full in one bucket and empty in another. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
         <div style="overflow:auto">
           <table id="acctTable">
-            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video</th><th>Audio</th><th>Video + Audio</th><th>Lifetime</th><th></th></tr></thead>
+            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video service</th><th>Video</th><th>Audio</th><th>Video + Audio</th><th>Lifetime</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -266,7 +280,7 @@ export const ADMIN_HTML = `<!doctype html>
 
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px">Add a key pair</h2>
-        <p class="muted" style="margin:0 0 14px">Paste each provider's key and press <b>Verify</b> — that asks the provider itself, right now, without billing a single second of inference. When both turn green, save.</p>
+        <p class="muted" style="margin:0 0 14px">Paste each provider's key and press <b>Verify</b> — that asks the provider itself, right now, without billing a single second of inference. When every box you filled turns green, save. <b>DeCart trial keys have their own tab</b>; a row stored here can still carry one, and its tail shows in the table below so nothing is hidden.</p>
         <input type="hidden" id="kId" />
         <div class="grid2">
           <div class="prov">
@@ -325,7 +339,7 @@ export const ADMIN_HTML = `<!doctype html>
         <p class="muted" style="margin:6px 0 12px">Only the last four characters ever reach this page. <b>Verify</b> re-checks the stored copy against the provider; <span class="pill ok">live</span> means no failure was recorded against it in the last 24 hours.</p>
         <div style="overflow:auto">
           <table id="keysTable">
-            <thead><tr><th>Label</th><th>Video · fal.ai</th><th>Voice · ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
+            <thead><tr><th>Label</th><th>Video · fal.ai</th><th id="thTrialKey">Trial · DeCart</th><th id="thTrialLeft">Trial left</th><th>Voice · ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -339,7 +353,7 @@ export const ADMIN_HTML = `<!doctype html>
         <p class="muted" style="margin:6px 0 12px">Assign one key per provider to one account (e.g. a customer who bought their own ElevenLabs voice). Assigned keys are tried first for that account; everything else still fails over to the pool.</p>
         <div class="row">
           <div><label>User email</label><input id="asEmail" type="email" placeholder="customer@domain.com" /></div>
-          <div><label>Provider</label><select id="asProvider"><option value="fal">fal (video)</option><option value="elevenlabs">elevenlabs (voice)</option></select></div>
+          <div><label>Provider</label><select id="asProvider"><option value="fal">fal (paid video)</option><option value="decart">decart (trial video)</option><option value="elevenlabs">elevenlabs (voice)</option></select></div>
           <div><label>Key</label><select id="asKey"></select></div>
           <div style="flex:0 0 auto"><button id="addAssignment">Assign</button></div>
         </div>
@@ -361,6 +375,171 @@ export const ADMIN_HTML = `<!doctype html>
         <div style="overflow:auto">
           <table id="usageTable">
             <thead><tr><th>When</th><th>Key</th><th>Provider</th><th>User</th><th>Outcome</th><th>Status</th><th>Detail</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ══ TAB: DECART KEYS ══════════════════════════════════════════════════ -->
+    <section id="tab-decart" class="hidden">
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 6px">DeCart keys — the free-trial supply</h2>
+        <p class="muted" style="margin:0 0 10px">Add as many as you like. Every brand new account's free 1 minute of video is served from this list, and <b>only</b> from this list, so trial traffic never puts a cent of charge on your fal.ai account.</p>
+        <p class="muted" style="margin:0 0 10px">The gateway works down this table in <b>priority</b> order: a key that is disabled, that has already spent its trial-minute budget, or that hit its daily cap is skipped and the next one is tried inside the same call. Only when <b>no</b> key here can serve does a trial account get "lines are busy" — the trial is refused, never billed to fal.</p>
+        <p class="muted" style="margin:0"><b>Rough sizing:</b> 1 DeCart key ≈ 1,000 credits ≈ 8 minutes of video ≈ 8 free trials. Type that 8 into the budget when you link a fresh key and the panel will tell you when it runs dry.</p>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Trial capacity right now</h2>
+          <button id="engineRefresh">Refresh</button>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">The gateway's own count, not arithmetic done on this page. A minute a customer stopped streaming early goes back into the key it came from, so this figure tracks what DeCart actually owes you.</p>
+        <div class="grid4" id="supplyCards"></div>
+        <div id="supplyMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px">Add a DeCart key</h2>
+        <p class="muted" style="margin:0 0 14px">Get it from <b>decart.ai → dashboard → API keys</b>. Press <b>Verify</b> first: that asks DeCart for a short call token — a handshake, not a generation, so it costs no credits. Save it only when the box turns green.</p>
+        <input type="hidden" id="tkId" />
+        <div class="prov" style="max-width:640px">
+          <div class="phead">
+            <span class="pdot" id="tkDot"></span>
+            <b>Trial video</b><span class="pmeta">DeCart · Lucy 2.5</span>
+            <span class="chip" id="tkChip">not tested</span>
+          </div>
+          <label>DeCart API key</label>
+          <div class="secret">
+            <input id="tkKey" type="password" autocomplete="off" spellcheck="false" placeholder="blank = keep the stored key" />
+            <button type="button" data-show="tkKey">show</button>
+            <button type="button" id="tkVerify" class="primary">Verify</button>
+          </div>
+          <div class="presult" id="tkResult"></div>
+        </div>
+        <div class="row" style="margin-top:14px">
+          <div><label>Label</label><input id="tkLabel" placeholder="e.g. Trial key 3" /></div>
+          <div><label>Trial minute budget</label><input id="tkBudget" type="number" min="0" step="1" placeholder="blank = uncapped" /></div>
+          <div><label>Priority (lower tried first)</label><input id="tkPriority" type="number" min="0" step="1" value="100" /></div>
+          <div style="flex:0 0 auto;display:flex;align-items:center">
+            <label class="feat" style="margin:0"><input type="checkbox" id="tkEnabled" checked /> enabled</label>
+          </div>
+        </div>
+        <p class="muted" style="margin:8px 0 0">The <b>trial minute budget</b> is how many free minutes this key may still serve before the gateway moves on to the next one. Blank means never skip it for running low — fine for a key with a big credit balance, risky for an empty one.</p>
+        <div class="btns" style="margin-top:12px">
+          <button id="tkSave" class="primary">Save DeCart key</button>
+          <button id="tkClear">Clear form</button>
+        </div>
+        <div id="tkMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 6px">DeCart keys in the pool</h2>
+        <p class="muted" style="margin:0 0 12px">Only the last four characters ever reach this page. <span class="pill ok">live</span> means no failure was recorded against that key in the last 24 hours.</p>
+        <div style="overflow:auto">
+          <table id="decartTable">
+            <thead><tr><th>Label</th><th>DeCart key</th><th>Budget</th><th>Used</th><th>Minutes left</th><th>Priority</th><th>Enabled</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <p class="muted" style="margin-top:10px">A trial that ends early hands its unused minutes back to the exact key they came from, so <b>Minutes left</b> only ever goes down when someone really streamed them.</p>
+      </div>
+    </section>
+
+    <!-- ══ TAB: ENGINES ════════════════════════════════════════════════════ -->
+    <section id="tab-engines" class="hidden">
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 6px">Which video service answers a call</h2>
+        <p class="muted" style="margin:0 0 12px">Two suppliers, one product. The customer sees the same Start button either way and never learns which one served them.</p>
+        <div class="grid2">
+          <div class="prov">
+            <div class="phead"><b>Trial pool</b><span class="pmeta">DeCart · Lucy 2.5</span></div>
+            <p class="phint" style="margin-top:0">Serves <b>every brand new account</b> and nothing else: the free 1 minute of video, <b>video only</b>, once per account, for as long as that account has never been credited or bought a minute. A trial minute burns at 1x, so the minute you promise is the minute they stream.</p>
+          </div>
+          <div class="prov">
+            <div class="phead"><b>Paid service</b><span class="pmeta">fal.ai · LUCY 2.5 realtime</span></div>
+            <p class="phint" style="margin-top:0">Serves <b>anyone who has ever had minutes credited or bought</b>, plus every voice call. That switch is permanent in both directions of bookkeeping: an account that paid once is never moved back to the trial pool, even if its balance later reaches zero.</p>
+          </div>
+        </div>
+        <p class="muted" style="margin:12px 0 0">When the trial pool has no key left, a trial account is told the lines are busy and <b>nothing is billed to fal.ai</b>. That refusal is the protection on your fal balance — turning on the fallback below removes it.</p>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Where the trial supply comes from</h2>
+        </div>
+        <p class="muted" style="margin:6px 0 0">DeCart keys, their budgets and the live capacity count all live on the <b>DeCart keys</b> tab. Nothing here needs to know how many keys you have.</p>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px">Free trial switches</h2>
+        <p class="muted" style="margin:0 0 12px">Same config row the gateway reads on every call start. Nothing here is visible to a customer.</p>
+        <div class="grid2">
+          <div>
+            <label>Trial minutes granted at sign-up</label>
+            <input id="engTrialMinutes" type="number" min="0" step="0.5" />
+            <div class="muted" style="margin-top:6px">Video bucket only. A new account gets this the moment it is created, so the Minutes page already reads the trial before they press Start. Existing accounts are not topped up.</div>
+          </div>
+          <div>
+            <label>Trial calls allowed at once, across all accounts</label>
+            <input id="engTrialCeiling" type="number" min="0" step="1" />
+            <div class="muted" style="margin-top:6px">0 or blank = no limit. The third caller is told "lines are busy" instead of burning a lease and failing.</div>
+          </div>
+        </div>
+        <div class="grid2" style="margin-top:12px">
+          <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
+            <label class="feat" style="margin:0"><input type="checkbox" id="engTrialEnabled" /> Free trial is live</label>
+            <div class="muted" style="margin-top:6px">Off = nobody is ever granted a trial minute, every account behaves exactly as it did before, and no DeCart key is used. Switch it on when the pool is linked and verified.</div>
+          </div>
+          <div style="border:1px solid #6b2233;border-radius:10px;padding:10px">
+            <label class="feat" style="margin:0"><input type="checkbox" id="engFalFallback" /> Fall back to the paid service when the trial pool is empty</label>
+            <div class="muted" style="margin-top:6px"><b>Costs you money.</b> Every free trial then bills fal.ai at the paid rate. Leave this off unless you have decided to pay for that.</div>
+          </div>
+        </div>
+        <div class="btns" style="margin-top:14px"><button id="engSave" class="primary">Save trial settings</button></div>
+        <div id="engMsg"></div>
+      </div>
+    </section>
+
+    <!-- ══ TAB: TRIAL VS PAID ═══════════════════════════════════════════════ -->
+    <section id="tab-split" class="hidden">
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 6px">Every account, split by the video service that serves it</h2>
+        <p class="muted" style="margin:0 0 10px">Left is the <b>trial pool</b> (DeCart): accounts that have only ever had their free minute. Right is the <b>paid service</b> (fal.ai): anyone who has been credited or bought a real amount of minutes, plus anything you pin there.</p>
+        <p class="muted" style="margin:0">Crossing to the paid side is <b>permanent</b> — crediting one real minute moves an account across for good, even if its balance later falls to zero, so an account never drifts back onto the trial keys. This list is the same decision the gateway makes when a call starts; it is computed here, not stored, so it cannot go stale.</p>
+        <p class="muted" style="margin:8px 0 0"><b>Served by</b> is a switch you can throw. <b>Automatic</b> lets the normal rule decide; <b>Paid service</b> or <b>Trial pool</b> pins that one account. A pin holds until you put the account back on Automatic — with one exception: pinning an already-credited account to the trial pool has no effect, because real minutes always mean the paid service.</p>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Right now</h2>
+          <div class="row" style="gap:8px;align-items:flex-end">
+            <div style="flex:0 0 260px"><label style="margin:0">Filter by email</label><input id="esSearch" placeholder="substring, e.g. @gmail" /></div>
+            <button id="esRefresh" style="flex:0 0 auto">Refresh</button>
+          </div>
+        </div>
+        <div class="grid4" id="esStats" style="margin-top:12px"></div>
+        <div id="esMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px"><span class="pill past_due">Trial pool</span> <span id="esTrialCount">0</span> accounts · served by DeCart</h2>
+        <p class="muted" style="margin:0 0 12px">These cost you nothing on fal.ai. Their free minute is already in the video bucket; when it is gone they stay here until somebody credits them.</p>
+        <div style="overflow:auto">
+          <table id="esTrialTable">
+            <thead><tr><th>Account</th><th>Joined</th><th>Plan</th><th>Status</th><th>Video minutes left</th><th>Minutes spent</th><th>Served by</th><th>Why it is here</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px"><span class="pill yes">Paid service</span> <span id="esPaidCount">0</span> accounts · served by fal.ai</h2>
+        <p class="muted" style="margin:0 0 12px">Every call these accounts make bills your fal.ai workspace. Voice-only and combined calls are always served here, whatever bucket they came from.</p>
+        <div style="overflow:auto">
+          <table id="esPaidTable">
+            <thead><tr><th>Account</th><th>Joined</th><th>Plan</th><th>Status</th><th>Video minutes left</th><th>Minutes spent</th><th>Served by</th><th>Why it is here</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -418,7 +597,7 @@ export const ADMIN_HTML = `<!doctype html>
         <p class="muted" style="margin:6px 0 12px">A call pre-debits one chunk of wallet minutes and has to heartbeat before its lease expires. Force-ending one settles what was actually used and refunds the rest, so nothing is double-billed. This is how you stop a runaway meter.</p>
         <div style="overflow:auto">
           <table id="sessTable">
-            <thead><tr><th>User</th><th>Tab</th><th>Bucket</th><th>Device</th><th>Started</th><th>Lease window</th><th style="text-align:right">Real min</th><th style="text-align:right">Billed min</th><th style="text-align:right">Prepaid</th><th></th></tr></thead>
+            <thead><tr><th>User</th><th>Video service</th><th>Tab</th><th>Bucket</th><th>Device</th><th>Started</th><th>Lease window</th><th style="text-align:right">Real min</th><th style="text-align:right">Billed min</th><th style="text-align:right">Prepaid</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -635,6 +814,18 @@ export const ADMIN_HTML = `<!doctype html>
   const FEATURE_LABEL = { video: "Video calls", voice: "Voice / audio", portrait_obs: "Portrait OBS output" };
   const MODALITIES = ["video", "audio", "video_audio"];
   const MOD_LABEL = { video: "Video Call", audio: "Audio Call", video_audio: "Video + Audio" };
+  // What each supplier is called in this panel. The customer-facing apps never
+  // use these words: a user sees one Start button and no service name.
+  const ENGINE_LABEL = { fal: "Paid service", decart: "Trial pool" };
+  const ENGINE_PILL = { fal: "yes", decart: "past_due" };
+  // Same decision the gateway makes: credited minutes mean the paid service for
+  // good; otherwise the pin wins and the default is the trial pool.
+  // Mirrors the gateway's decision exactly, so this page can never show an engine
+  // that a call start would not pick: credited minutes mean the paid service for
+  // good; otherwise an explicit pin wins; and the default is the trial pool ONLY
+  // for an account that was actually granted a free trial and is not an admin.
+  const engineOf = (isPaid, override, granted, admin) =>
+    isPaid ? "fal" : (override || (granted && !admin ? "decart" : "fal"));
 
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const mask = (v) => (v ? "••••" + String(v).slice(-4) : "—");
@@ -650,6 +841,12 @@ export const ADMIN_HTML = `<!doctype html>
   let KEY_ROWS = [];
   let ACCT_ROWS = [];
   let EMAIL_OF = {};
+  let ADMIN_OF = {};
+  let PAID_OF = {};
+  let SPLIT_ROWS = [];
+  let hasEngineCols = false;
+  let hasTrialCols = false;
+  let hasTrialCfg = false;
   let CUR = null;
 
   function msg(el, text, cls = "err") { $(el).innerHTML = text ? \`<div class="\${cls}">\${esc(text)}</div>\` : ""; }
@@ -725,26 +922,51 @@ export const ADMIN_HTML = `<!doctype html>
   async function emailsOf(ids) {
     const uniq = [...new Set(ids.filter(Boolean))];
     if (!uniq.length) return;
-    const { data } = await sb.from("profiles").select("id, email").in("id", uniq);
-    (data || []).forEach((p) => { EMAIL_OF[p.id] = p.email; });
+    const { data } = await sb.from("profiles").select("id, email, is_admin").in("id", uniq);
+    (data || []).forEach((p) => { EMAIL_OF[p.id] = p.email; ADMIN_OF[p.id] = !!p.is_admin; });
+  }
+
+  // One account, asked directly — the list may not have reached it.
+  async function adminOf(userId) {
+    if (userId in ADMIN_OF) return ADMIN_OF[userId];
+    const { data } = await sb.from("profiles").select("is_admin").eq("id", userId).maybeSingle();
+    ADMIN_OF[userId] = !!data?.is_admin;
+    return ADMIN_OF[userId];
   }
 
   async function loadAccounts() {
     const q = ($("acctSearch").value || "").trim();
-    let build = sb.from("profiles").select("id, email, created_at").order("created_at", { ascending: false }).limit(60);
-    if (q) build = sb.from("profiles").select("id, email, created_at").ilike("email", "%" + q + "%").order("created_at", { ascending: false }).limit(40);
+    const profCols = "id, email, created_at, is_admin";
+    let build = sb.from("profiles").select(profCols).order("created_at", { ascending: false }).limit(60);
+    if (q) build = sb.from("profiles").select(profCols).ilike("email", "%" + q + "%").order("created_at", { ascending: false }).limit(40);
     const { data: profs, error } = await build;
     if (error) return msg("acctMsg", error.message);
     ACCT_ROWS = profs || [];
     if (!ACCT_ROWS.length) {
-      $("acctTable").querySelector("tbody").innerHTML = '<tr><td colspan="8" class="muted">No accounts match.</td></tr>';
+      $("acctTable").querySelector("tbody").innerHTML = '<tr><td colspan="9" class="muted">No accounts match.</td></tr>';
       return;
     }
     const ids = ACCT_ROWS.map((p) => p.id);
-    ACCT_ROWS.forEach((p) => { EMAIL_OF[p.id] = p.email; });
-    const [subsRes, balRes] = await Promise.all([
-      sb.from("subscriptions").select("user_id, plan_id, status, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions").in("user_id", ids),
+    ACCT_ROWS.forEach((p) => { EMAIL_OF[p.id] = p.email; ADMIN_OF[p.id] = !!p.is_admin; });
+    const subCols = "user_id, plan_id, status, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions";
+    const [subsRes, balRes, paidRes] = await Promise.all([
+      (async () => {
+        // engine_override and trial_granted_at only exist once the dual-engine
+        // migration has run, and a select that names a missing column fails the
+        // whole query — so ask with them, remember whether that worked, and fall
+        // back to without them rather than showing every account as having no
+        // subscription.
+        const withPin = await sb.from("subscriptions").select(subCols + ", engine_override, trial_granted_at").in("user_id", ids);
+        if (!withPin.error) { hasEngineCols = true; return withPin; }
+        hasEngineCols = false;
+        return sb.from("subscriptions").select(subCols).in("user_id", ids);
+      })(),
       sb.from("credit_balances").select("user_id, modality, balance, unlimited, total_credited, total_spent").in("user_id", ids),
+      // The gateway's own test for "has this account ever been given minutes".
+      // Mirrored here from the two things it looks at so the list can show every
+      // row at once instead of asking the database 60 times. Reason is compared in
+      // JS because a missing reason is still a real credit; SQL's <> skips NULLs.
+      sb.from("credit_ledger").select("user_id, reason").in("user_id", ids).eq("kind", "credit"),
     ]);
     const subOf = Object.fromEntries((subsRes.data || []).map((s) => [s.user_id, s]));
     const wallet = {};
@@ -752,9 +974,59 @@ export const ADMIN_HTML = `<!doctype html>
       wallet[b.user_id] = wallet[b.user_id] || {};
       wallet[b.user_id][b.modality] = b;
     });
+    const paid = new Set((paidRes.data || []).filter((r) => String(r.reason || "") !== "free trial").map((r) => r.user_id));
+    (balRes.data || []).forEach((b) => { if (b.unlimited) paid.add(b.user_id); });
+    ACCT_ROWS.forEach((p) => { PAID_OF[p.id] = paid.has(p.id); });
     const plans = Object.fromEntries(PLAN_ROWS.map((p) => [p.id, p]));
 
-    $("acctTable").querySelector("tbody").innerHTML = ACCT_ROWS.map((p) => {
+    // One sentence per account, worded the way the gateway decided it. Used by both
+    // the accounts table and the Trial vs Paid tab.
+    const engineOfAcct = (id) => {
+      const s = subOf[id];
+      return engineOf(paid.has(id), s?.engine_override ?? null, !!s?.trial_granted_at, !!ADMIN_OF[id]);
+    };
+    const whyOf = (id) => {
+      const s = subOf[id];
+      if (paid.has(id)) return "it has been credited or bought real minutes, so the paid service for good";
+      if (s?.engine_override) return "you pinned it to " + ENGINE_LABEL[s.engine_override].toLowerCase();
+      if (ADMIN_OF[id]) return "it is an admin account, so trial keys never serve it";
+      if (!s?.trial_granted_at) return "it joined before the free trial existed, so nobody promised it a free minute";
+      return "it holds a granted free trial minute";
+    };
+
+    // Same arithmetic the accounts table uses, kept for the Trial vs Paid tab so
+    // the two views can never disagree about who is on which service.
+    SPLIT_ROWS = ACCT_ROWS.map((p) => {
+      const s = subOf[p.id];
+      const w = wallet[p.id] || {};
+      return {
+        id: p.id,
+        email: p.email,
+        created: p.created_at || "",
+        eng: engineOfAcct(p.id),
+        why: whyOf(p.id),
+        isPaid: paid.has(p.id),
+        admin: !!ADMIN_OF[p.id],
+        granted: !!s?.trial_granted_at,
+        pinned: s?.engine_override ?? null,
+        plan: s ? (plans[s.plan_id]?.name || s.plan_id) : "",
+        status: s?.status || "none",
+        videoLeft: w.video?.unlimited ? null : N(w.video?.balance),
+        spent: MODALITIES.reduce((a, m) => a + N(w[m]?.total_spent), 0),
+        credited: MODALITIES.reduce((a, m) => a + N(w[m]?.total_credited), 0),
+      };
+    });
+    renderEngineSplit();
+    const filter = $("acctEngine").value;
+
+    const shown = ACCT_ROWS.filter((p) => {
+      if (!filter) return true;
+      const override = subOf[p.id]?.engine_override ?? null;
+      if (filter === "pinned") return override !== null;
+      return engineOfAcct(p.id) === filter;
+    });
+
+    $("acctTable").querySelector("tbody").innerHTML = shown.map((p) => {
       const s = subOf[p.id];
       const w = wallet[p.id] || {};
       const cell = (m, on) => {
@@ -764,28 +1036,165 @@ export const ADMIN_HTML = `<!doctype html>
       };
       const credited = MODALITIES.reduce((a, m) => a + N(w[m]?.total_credited), 0);
       const spent = MODALITIES.reduce((a, m) => a + N(w[m]?.total_spent), 0);
+      const eng = engineOfAcct(p.id);
+      const pin = s?.engine_override ? ' <span class="pill n" title="you pinned this account">pinned</span>' : "";
       return \`<tr data-user="\${p.id}">
         <td><b>\${esc(p.email)}</b><div class="muted">since \${esc((p.created_at || "").slice(0, 10))}</div></td>
         <td class="muted">\${s ? esc(plans[s.plan_id]?.name || s.plan_id) : '<span class="pill none">no subscription</span>'}</td>
         <td>\${s ? \`<span class="pill \${s.status}">\${s.status}</span>\` : "—"}</td>
+        <td><span class="pill \${ENGINE_PILL[eng]}">\${ENGINE_LABEL[eng]}</span>\${pin}<div class="muted">\${esc(whyOf(p.id))}</div></td>
         <td>\${cell("video", s?.video_enabled)}</td>
         <td>\${cell("audio", s?.audio_enabled)}</td>
         <td>\${cell("video_audio", s?.video_audio_enabled)}</td>
         <td class="muted mono">+\${mins(credited)} / −\${mins(spent)}</td>
         <td style="white-space:nowrap"><button data-act="open" data-id="\${p.id}" class="primary">Credit minutes</button></td></tr>\`;
-    }).join("");
+    }).join("") || '<tr><td colspan="9" class="muted">No account matches that filter.</td></tr>';
     msg("acctMsg", "");
+  }
+
+  // ══ TRIAL VS PAID ═══════════════════════════════════════════════════════
+  // No query of its own: it renders the rows loadAccounts already fetched, so the
+  // two tabs cannot show a different engine for the same account.
+  const esRow = (a) => \`<tr>
+    <td><b>\${esc(a.email)}</b></td>
+    <td class="muted">\${esc((a.created || "").slice(0, 10))}</td>
+    <td class="muted">\${esc(a.plan || "—")}</td>
+    <td><span class="pill \${esc(a.status)}">\${esc(a.status)}</span></td>
+    <td class="mono">\${a.videoLeft == null ? '<span class="pill yes">unlimited</span>' : mins(a.videoLeft)}</td>
+    <td class="mono">\${mins(a.spent)}</td>
+    <td>\${esPin(a)}</td>
+    <td class="muted">\${esc(a.why)}</td>
+    <td style="white-space:nowrap"><button data-act="jump" data-id="\${a.id}" class="primary">Open</button></td></tr>\`;
+
+  // The pin, on every row. It stays visible before the dual-engine migration has
+  // run, because hiding it made the control look missing rather than not yet
+  // wired up; a save then fails with the database's own complaint about the
+  // missing column, which is the thing to fix.
+  function esPin(a) {
+    const opt = (v, label, dis) =>
+      \`<option value="\${v}"\${a.pinned === (v || null) ? " selected" : ""}\${dis ? " disabled" : ""}>\${label}</option>\`;
+    const sel = \`<select data-es-pin="\${a.id}"\${a.isPaid ? ' title="this account has real minutes, so the trial pool cannot serve it"' : ""}>\`
+      + opt("", "Automatic") + opt("fal", "Paid service") + opt("decart", "Trial pool", a.isPaid)
+      + "</select>";
+    return hasEngineCols ? sel : sel + '<div class="muted" style="font-size:11px">needs the dual-engine migration</div>';
+  }
+
+  function renderEngineSplit() {
+    const q = ($("esSearch").value || "").trim().toLowerCase();
+    const rows = SPLIT_ROWS.filter((a) => !q || String(a.email || "").toLowerCase().includes(q));
+    const trial = rows.filter((a) => a.eng === "decart");
+    const paid = rows.filter((a) => a.eng === "fal");
+    $("esTrialCount").textContent = trial.length;
+    $("esPaidCount").textContent = paid.length;
+    const pinned = SPLIT_ROWS.filter((a) => a.pinned).length;
+    const paidSpent = SPLIT_ROWS.filter((a) => a.eng === "fal").reduce((a, r) => a + r.spent, 0);
+    $("esStats").innerHTML = [
+      [SPLIT_ROWS.length, "accounts total"],
+      [SPLIT_ROWS.filter((a) => a.eng === "decart").length, "on the trial pool"],
+      [SPLIT_ROWS.filter((a) => a.eng === "fal").length, "on the paid service"],
+      [mins(paidSpent) + " min", "streamed on the paid service"],
+    ].map(([v, l]) => \`<div class="stat"><div class="v">\${v}</div><div class="l">\${l}</div></div>\`).join("");
+
+    const empty = (what) => \`<tr><td colspan="9" class="muted">\${what}</td></tr>\`;
+    $("esTrialTable").querySelector("tbody").innerHTML = trial.map(esRow).join("")
+      || empty(q ? "No trial-pool account matches that filter." : "Nobody is on the trial pool. Either the free trial is switched off on the Engines tab, or every account here has been credited real minutes.");
+    $("esPaidTable").querySelector("tbody").innerHTML = paid.map(esRow).join("")
+      || empty(q ? "No paid-service account matches that filter." : "Nobody is on the paid service yet — every account still has only its free trial minute, so fal.ai has not been billed for a call.");
+    msg("esMsg", (q ? \`Filtering on “\${q}”: \${rows.length} of \${SPLIT_ROWS.length} accounts shown. \` : "")
+      + (pinned ? \`\${pinned} account\${pinned === 1 ? "" : "s"} pinned by you.\` : "Nothing is pinned; every account follows the normal rule."), "ok");
+  }
+
+  // Pinning from either place. One function so the detail panel and this table
+  // cannot post two different meanings for the same click.
+  async function pinEngine(userId, choice, box) {
+    const target = choice === "" ? null : choice;
+    const name = EMAIL_OF[userId] || userId;
+    if (target === "fal" && !(await paidOf(userId))) {
+      if (!confirm(\`\${name} has only ever had free trial minutes. Pinning it to the paid service means that free minute bills fal.ai. Continue?\`)) return false;
+    }
+    try {
+      const res = await api({ action: "set_engine", userId, engine: target });
+      if (CUR && CUR.user_id === userId) {
+        CUR.pin = { ...(CUR.pin || {}), engine_override: res.engine_override ?? null, engine_override_at: new Date().toISOString() };
+        await renderEnginePin();
+      }
+      await Promise.all([loadAccounts(), loadSessions()]);
+      msg(box, \`\${name} is now \${target === null ? "back on the normal rule (automatic)" : "pinned to the " + ENGINE_LABEL[target].toLowerCase()} (effective: \${res.effective}).\`, "ok");
+      return true;
+    } catch (err) {
+      msg(box, err.message);
+      return false;
+    }
+  }
+
+  // A select has no click handler of its own in this panel's delegation, so the
+  // change event is wired separately and re-renders on a cancelled confirmation.
+  document.addEventListener("change", async (e) => {
+    const el = e.target.closest("select[data-es-pin]");
+    if (!el) return;
+    if (!(await pinEngine(el.getAttribute("data-es-pin"), el.value, "esMsg"))) renderEngineSplit();
+  });
+
+  $("esSearch").oninput = renderEngineSplit;
+  $("esRefresh").onclick = () => loadAccounts();
+
+  // One account, asked directly — loadAccounts only fills the page it listed.
+  async function paidOf(userId) {
+    if (userId in PAID_OF) return PAID_OF[userId];
+    const [led, bal] = await Promise.all([
+      sb.from("credit_ledger").select("reason").eq("user_id", userId).eq("kind", "credit").limit(200),
+      sb.from("credit_balances").select("unlimited").eq("user_id", userId).limit(3),
+    ]);
+    const yes = (led.data || []).some((r) => String(r.reason || "") !== "free trial")
+      || (bal.data || []).some((r) => r.unlimited);
+    PAID_OF[userId] = yes;
+    return yes;
   }
 
   async function openAccount(userId) {
     if (!EMAIL_OF[userId]) await emailsOf([userId]);
     const snap = await rpc("sl_account_snapshot", { p_user: userId });
     if (snap?.ok === false) return msg("detMsg", snap.error || "snapshot failed");
-    CUR = { ...snap, user_id: userId, email: EMAIL_OF[userId] || userId };
+    const { data: pin, error: pinErr } = await sb.from("subscriptions")
+      .select("engine_override, engine_override_by, engine_override_at, trial_granted_at")
+      .eq("user_id", userId).maybeSingle();
+    hasEngineCols = !pinErr;
+    CUR = { ...snap, user_id: userId, email: EMAIL_OF[userId] || userId, pin: pin || null };
     $("acctDetail").classList.remove("hidden");
     renderAccount();
-    await Promise.all([loadAssignments(), loadLedger(userId)]);
+    await Promise.all([loadAssignments(), loadLedger(userId), renderEnginePin()]);
     msg("detMsg", "Account loaded.", "ok");
+  }
+
+  // The pin control tracks the database rather than assuming it: these columns
+  // only exist once the dual-engine migration has run, and this page can be
+  // deployed ahead of it, so the block hides itself instead of offering a save
+  // that cannot work.
+  // The pin control is shown whether or not the pin columns exist yet. Hiding it
+  // until the migration ran read as "this panel has no engine switch", so instead
+  // the line says what is missing, and a save reports the database's own error.
+  async function renderEnginePin() {
+    const c = CUR;
+    const isPaid = await paidOf(c.user_id);
+    const isAdmin = await adminOf(c.user_id);
+    const override = c.pin?.engine_override ?? null;
+    const granted = !!c.pin?.trial_granted_at;
+    $("detEngine").value = override ?? "";
+    $("detEngine").querySelector('option[value="decart"]').disabled = isPaid;
+    const eng = engineOf(isPaid, override, granted, isAdmin);
+    $("detEngineNow").innerHTML = \`<span class="pill \${ENGINE_PILL[eng]}">\${ENGINE_LABEL[eng]}</span> \`
+      + (!hasEngineCols
+        ? "this is the gateway's rule applied to what the database holds today; the pin cannot be saved until the dual-engine migration has run."
+        : isPaid
+          ? "on the paid service for good: this account has been credited minutes."
+          : override
+            ? \`pinned by you\${c.pin.engine_override_at ? " on " + when(c.pin.engine_override_at) : ""}.\`
+            : isAdmin
+              ? "automatic: this is an admin account, so trial keys never serve it."
+              : granted
+                ? "automatic: this account holds a granted free minute, so the trial pool serves it."
+                : "automatic: this account was never granted a free minute, so it runs on the paid service.")
+      + (c.pin?.trial_granted_at ? \`<div class="muted">free trial granted \${when(c.pin.trial_granted_at)}</div>\` : "");
   }
 
   function renderAccount() {
@@ -844,6 +1253,7 @@ export const ADMIN_HTML = `<!doctype html>
   $("acctSearchBtn").onclick = loadAccounts;
   $("acctSearch").onkeydown = (e) => { if (e.key === "Enter") loadAccounts(); };
   $("acctRefresh").onclick = loadAccounts;
+  $("acctEngine").onchange = loadAccounts;
 
   async function creditByEmail() {
     const email = ($("quickEmail").value || "").trim().toLowerCase();
@@ -881,6 +1291,12 @@ export const ADMIN_HTML = `<!doctype html>
     if (!saved || !saved.length) return msg("detMsg", "That account has no subscription row yet — create one below first, then the switches will stick.");
     msg("detMsg", "Saved. This account may now use: " + (allowed.length ? allowed.join(", ") : "nothing — every bucket is switched off."), "ok");
     await openAccount(CUR.user_id);
+  };
+
+  $("detSaveEngine").onclick = async () => {
+    if (!CUR) return;
+    msg("detMsg", "");
+    await pinEngine(CUR.user_id, $("detEngine").value, "detMsg");
   };
 
   $("detCreateSub").onclick = async () => {
@@ -925,10 +1341,17 @@ export const ADMIN_HTML = `<!doctype html>
 
   $("grantBtn").onclick = async () => {
     if (!CUR) return msg("grantMsg", "Open an account first.");
+    let payload;
+    try { payload = grantPayload(1); } catch (err) { return msg("grantMsg", err.message); }
+    const wasPaid = await paidOf(CUR.user_id);
     try {
-      const res = await api(grantPayload(1));
-      msg("grantMsg", \`Granted. \${res.unlimited ? "Bucket is unlimited." : "New balance " + mins(res.balance) + " min."}\`, "ok");
-      await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
+      const res = await api(payload);
+      // The first real minute is the one-way door: from now on this account's
+      // video is served by the paid service, so say it while it is happening.
+      const flip = !wasPaid && N(payload.minutes) > 0 ? " It is now on the paid video service for good." : "";
+      msg("grantMsg", \`Granted. \${res.unlimited ? "Bucket is unlimited." : "New balance " + mins(res.balance) + " min."}\${flip}\`, "ok");
+      delete PAID_OF[CUR.user_id];
+      await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions()]);
     } catch (err) { msg("grantMsg", err.message); }
   };
 
@@ -973,14 +1396,16 @@ export const ADMIN_HTML = `<!doctype html>
     const reason = $("gReason").value.trim() || \`Package \${p.name} purchased\`;
     if (!confirm(\`Credit \${CUR.email}\\n\\n\${mods.map((m) => \`\${mins(amounts[m])} \${MOD_LABEL[m]}\`).join("\\n")}\\n\\nReason: \${reason}\\n\\nThis writes one ledger row per bucket.\`)) return;
     $("packageBtn").disabled = true;
+    const wasPaid = await paidOf(CUR.user_id);
     const done = [];
     try {
       for (const m of mods) {
         const res = await api({ action: "grant", userId: CUR.user_id, modality: m, minutes: amounts[m], reason });
         done.push(\`\${MOD_LABEL[m]} → \${mins(res.balance)} min\`);
       }
-      msg("grantMsg", \`Credited “\${p.name}”: \${done.join(", ")}.\`, "ok");
-      await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
+      msg("grantMsg", \`Credited “\${p.name}”: \${done.join(", ")}.\${wasPaid ? "" : " This account is now on the paid video service for good."}\`, "ok");
+      delete PAID_OF[CUR.user_id];
+      await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions()]);
     } catch (err) {
       msg("grantMsg", err.message + (done.length ? \` — already credited: \${done.join(", ")}\` : ""));
     } finally {
@@ -1050,19 +1475,32 @@ export const ADMIN_HTML = `<!doctype html>
   // admin_key_health is the only source: it carries a last-4 tail per provider,
   // so raw secrets never enter this page.
   async function loadKeys() {
-    const { data, error } = await sb.from("admin_key_health")
-      .select("id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures")
-      .order("priority", { ascending: true });
+    const base = "id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures";
+    let { data, error } = await sb.from("admin_key_health").select(base + ", trial_key_tail, trial_minutes_budget, trial_minutes_used").order("priority", { ascending: true });
+    // The DeCart columns arrive with the dual-engine migration. Probing keeps this
+    // page working whether or not that SQL has run yet.
+    hasTrialCols = !error;
+    if (!hasTrialCols) ({ data, error } = await sb.from("admin_key_health").select(base).order("priority", { ascending: true }));
     if (error) return msg("keyMsg", error.message);
     KEY_ROWS = data || [];
+    ["thTrialKey", "thTrialLeft"].forEach((id) => $(id).classList.toggle("hidden", !hasTrialCols));
+    renderDecartKeys();
 
     const live = KEY_ROWS.filter((k) => k.enabled !== false);
-    $("keyStats").innerHTML = [
+    const trialLive = live.filter((k) => k.trial_key_tail);
+    const uncapped = trialLive.filter((k) => k.trial_minutes_budget == null).length;
+    const left = trialLive.reduce((a, k) => a + (k.trial_minutes_budget == null ? 0 : Math.max(0, N(k.trial_minutes_budget) - N(k.trial_minutes_used))), 0);
+    const stats = [
       [KEY_ROWS.length, "pairs stored"],
-      [live.filter((k) => k.video_key_tail).length, "video keys live"],
-      [live.filter((k) => k.voice_key_tail).length, "voice keys live"],
-      [KEY_ROWS.reduce((a, k) => a + N(k.recent_failures), 0), "failures in 24h"],
-    ].map(([v, l]) => \`<div class="stat"><div class="v">\${v}</div><div class="l">\${l}</div></div>\`).join("");
+      [live.filter((k) => k.video_key_tail).length, "paid video keys live"],
+    ];
+    if (hasTrialCols) {
+      stats.push([trialLive.length, "trial keys live"]);
+      stats.push([uncapped ? "uncapped" : mins(left) + " min", "trial minutes left"]);
+    }
+    stats.push([live.filter((k) => k.voice_key_tail).length, "voice keys live"]);
+    stats.push([KEY_ROWS.reduce((a, k) => a + N(k.recent_failures), 0), "failures in 24h"]);
+    $("keyStats").innerHTML = stats.map(([v, l]) => \`<div class="stat"><div class="v">\${v}</div><div class="l">\${l}</div></div>\`).join("");
 
     const cell = (k, provider, tail) => !tail ? '<span class="pill none">missing</span>' : \`
       <div style="display:flex;align-items:center;gap:7px;white-space:nowrap">
@@ -1074,9 +1512,17 @@ export const ADMIN_HTML = `<!doctype html>
 
     $("keysTable").querySelector("tbody").innerHTML = KEY_ROWS.map((k) => {
       const used = N(k.minutes_today), cap = k.daily_minute_cap;
+      const tRow = \`<td>\${cell(k, "decart", k.trial_key_tail)}</td>\`;
+      const tLeft = k.trial_key_tail
+        ? (k.trial_minutes_budget == null
+          ? '<span class="pill n" title="no budget typed, so this key is never skipped for running low">uncapped</span>'
+          : \`<span class="mono" style="color:\${Math.max(0, N(k.trial_minutes_budget) - N(k.trial_minutes_used)) <= 0 ? "#fb7185" : "#cfe6ef"}">\${mins(Math.max(0, N(k.trial_minutes_budget) - N(k.trial_minutes_used)))}</span><div class="muted">of \${mins(k.trial_minutes_budget)} · \${mins(k.trial_minutes_used)} used</div>\`)
+        : '<span class="muted">—</span>';
       return \`<tr data-key="\${k.id}">
         <td><b>\${esc(k.label || "(unlabeled)")}</b>\${k.is_default ? ' <span class="pill yes">default</span>' : ""}</td>
         <td>\${cell(k, "fal", k.video_key_tail)}</td>
+        \${hasTrialCols ? tRow : ""}
+        \${hasTrialCols ? \`<td>\${tLeft}</td>\` : ""}
         <td>\${cell(k, "elevenlabs", k.voice_key_tail)}</td>
         <td style="white-space:nowrap">\${k.enabled === false ? '<span class="pill no">disabled</span>' : '<span class="pill yes">enabled</span>'} <button data-act="toggle" data-id="\${k.id}">\${k.enabled === false ? "enable" : "disable"}</button></td>
         <td class="mono">\${N(k.priority, 100)}</td>
@@ -1087,7 +1533,7 @@ export const ADMIN_HTML = `<!doctype html>
           <button data-act="edit" data-id="\${k.id}">Edit</button>
           <button data-act="del" data-id="\${k.id}" class="danger">Delete</button>
         </td></tr>\`;
-    }).join("") || '<tr><td colspan="9" class="muted">The pool is empty, so every call falls back to the FAL_KEY / ELEVENLABS_KEY env secrets. Add a pair above and press Verify.</td></tr>';
+    }).join("") || '<tr><td colspan="11" class="muted">The pool is empty, so every call falls back to the FAL_KEY / ELEVENLABS_KEY env secrets. Add a pair above and press Verify.</td></tr>';
 
     $("asKey").innerHTML = KEY_ROWS.map((k) => \`<option value="\${k.id}">\${esc(k.label || shortId(k.id))}</option>\`).join("");
     await Promise.all([loadKeyUsage(), loadAssignments()]);
@@ -1100,7 +1546,7 @@ export const ADMIN_HTML = `<!doctype html>
   }
 
   async function runVerify(provider, key, keyId, ui) {
-    const name = provider === "fal" ? "fal.ai" : "ElevenLabs";
+    const name = provider === "fal" ? "fal.ai" : provider === "decart" ? "DeCart" : "ElevenLabs";
     if (ui.prefix) setChip(ui.prefix, "busy", "checking");
     ui.box.className = "presult show";
     ui.box.textContent = "Asking " + name + "…";
@@ -1175,7 +1621,7 @@ export const ADMIN_HTML = `<!doctype html>
     $("kPriority").value = 100; $("kCap").value = "";
     $("kEnabled").checked = true; $("kDefault").checked = false;
     setChip("vid", "", "not tested"); setChip("voice", "", "not tested");
-    $("vidResult").className = "presult"; $("voiceResult").className = "presult";
+    ["vidResult", "voiceResult"].forEach((i) => $(i).className = "presult");
     msg("keyMsg", "");
   }
 
@@ -1199,9 +1645,86 @@ export const ADMIN_HTML = `<!doctype html>
     if (res.error) return msg("keyMsg", res.error.message);
     msg("keyMsg", "Saved to the pool. Press Verify on each provider to confirm the gateway can actually use it.", "ok");
     clearKeyForm();
-    await loadKeys();
+    await Promise.all([loadKeys(), loadSupply()]);
   };
   $("clearKeyForm").onclick = clearKeyForm;
+
+  // ══ DECART KEYS TAB ═══════════════════════════════════════════════════════
+  // One row in gateway_keys can carry all three providers, so this table is a
+  // filtered view of KEY_ROWS rather than a second query — the two tabs can then
+  // never disagree about how many trial keys exist or how much they have spent.
+  function renderDecartKeys() {
+    ["tkBudget", "tkSave"].forEach((i) => { $(i).disabled = !hasTrialCols; });
+    if (!hasTrialCols) {
+      $("decartTable").querySelector("tbody").innerHTML =
+        '<tr><td colspan="10" class="muted">The DeCart columns are not in the database yet — run the dual-engine migration, then reload this page.</td></tr>';
+      return;
+    }
+    const rows = KEY_ROWS.filter((k) => k.trial_key_tail);
+    $("decartTable").querySelector("tbody").innerHTML = rows.map((k) => {
+      const left = k.trial_minutes_budget == null
+        ? null
+        : Math.max(0, N(k.trial_minutes_budget) - N(k.trial_minutes_used));
+      return \`<tr data-key="\${k.id}">
+        <td><b>\${esc(k.label || "(unlabeled)")}</b></td>
+        <td>
+          <div style="display:flex;align-items:center;gap:7px;white-space:nowrap">
+            <span class="pdot \${N(k.recent_failures) ? "fail" : "ok"}"></span>
+            <span class="mono">\${esc(k.trial_key_tail)}</span>
+            <button data-act="tk-verify" data-id="\${k.id}" style="padding:4px 9px;font-size:11px">Verify</button>
+          </div>
+          <div class="muted" data-vres="tk:\${k.id}" style="font-size:11px;margin-top:3px"></div>
+        </td>
+        <td class="mono">\${k.trial_minutes_budget == null ? '<span class="pill n" title="no budget typed, so this key is never skipped for running low">uncapped</span>' : mins(k.trial_minutes_budget) + " min"}</td>
+        <td class="mono">\${mins(k.trial_minutes_used)}</td>
+        <td class="mono" style="color:\${left != null && left <= 0 ? "#fb7185" : "#cfe6ef"}">\${left == null ? "uncapped" : mins(left) + " min"}</td>
+        <td class="mono">\${N(k.priority, 100)}</td>
+        <td style="white-space:nowrap">\${k.enabled === false ? '<span class="pill no">disabled</span>' : '<span class="pill yes">enabled</span>'} <button data-act="tk-toggle" data-id="\${k.id}">\${k.enabled === false ? "enable" : "disable"}</button></td>
+        <td class="mono">\${N(k.recent_failures) ? \`<span class="pill fail">\${k.recent_failures}</span>\` : '<span class="pill ok">0</span>'}</td>
+        <td class="muted">\${esc(k.last_error || "—")}\${k.last_error_at ? \`<div class="muted">\${when(k.last_error_at)}</div>\` : ""}</td>
+        <td style="white-space:nowrap">
+          <button data-act="tk-edit" data-id="\${k.id}">Edit</button>
+          <button data-act="tk-del" data-id="\${k.id}" class="danger">Delete</button>
+        </td></tr>\`;
+    }).join("") || '<tr><td colspan="10" class="muted">No DeCart key is linked, so every new account is told the lines are busy and fal.ai is billed nothing. Add one above and press Verify.</td></tr>';
+  }
+
+  function clearTkForm() {
+    ["tkId", "tkLabel", "tkKey", "tkBudget"].forEach((i) => $(i).value = "");
+    $("tkPriority").value = 100;
+    $("tkEnabled").checked = true;
+    setChip("tk", "", "not tested");
+    $("tkResult").className = "presult";
+    msg("tkMsg", "");
+  }
+
+  $("tkVerify").onclick = () => runVerify("decart", $("tkKey").value.trim(), $("tkId").value, { prefix: "tk", box: $("tkResult") });
+  $("tkKey").oninput = () => { setChip("tk", "", "not tested"); $("tkResult").className = "presult"; };
+  $("tkClear").onclick = clearTkForm;
+
+  $("tkSave").onclick = async () => {
+    msg("tkMsg", "");
+    if (!hasTrialCols) return msg("tkMsg", "The DeCart columns are not in the database yet — run the dual-engine migration, then reload this page.");
+    const id = $("tkId").value;
+    const key = $("tkKey").value.trim();
+    const label = $("tkLabel").value.trim();
+    if (!label) return msg("tkMsg", "Give the key a label, e.g. “Trial key 3”.");
+    if (!id && !key) return msg("tkMsg", "Paste the DeCart API key you want to add.");
+    const row = {
+      label,
+      enabled: $("tkEnabled").checked,
+      priority: N($("tkPriority").value, 100),
+      trial_minutes_budget: $("tkBudget").value.trim() === "" ? null : N($("tkBudget").value),
+    };
+    if (key) row.decart_key = key;
+    const res = id ? await sb.from("gateway_keys").update(row).eq("id", id) : await sb.from("gateway_keys").insert(row);
+    if (res.error) return msg("tkMsg", res.error.message);
+    msg("tkMsg", id
+      ? "Updated. The stored key stays as it is unless you pasted over it — press Verify on the row to re-check it."
+      : "Saved to the trial pool. Press Verify on the new row before trusting it with a trial.", "ok");
+    clearTkForm();
+    await Promise.all([loadKeys(), loadSupply()]);
+  };
 
   $("addAssignment").onclick = async () => {
     msg("assignMsg", "");
@@ -1214,6 +1737,61 @@ export const ADMIN_HTML = `<!doctype html>
     msg("assignMsg", "Assigned — that key is now tried first for this account.", "ok");
     $("asEmail").value = "";
     await loadAssignments();
+  };
+
+  // ══ ENGINES ═════════════════════════════════════════════════════════════
+  // Supply and the trial switches both come from the gateway's own numbers, so
+  // this page can never report a different amount of free video than a call
+  // start will actually find.
+  async function loadSupply() {
+    $("supplyCards").innerHTML = '<div class="stat"><div class="v">…</div><div class="l">asking the gateway</div></div>';
+    msg("supplyMsg", "");
+    let supply;
+    try {
+      supply = await api({ action: "trial_supply" });
+    } catch (err) {
+      $("supplyCards").innerHTML = "";
+      return msg("supplyMsg", err.message);
+    }
+    const { data: open } = await sb.from("admin_live_sessions").select("engine");
+    const onTrial = (open || []).filter((r) => r.engine === "decart").length;
+    const onPaid = (open || []).filter((r) => r.engine === "fal").length;
+    $("supplyCards").innerHTML = [
+      [N(supply.keys_ready), "trial keys able to serve"],
+      [mins(supply.minutes_remaining) + " min", "budgeted minutes left"],
+      [N(supply.uncapped_keys), "of those keys uncapped"],
+      [onTrial + " / " + onPaid, "calls running now: trial / paid"],
+    ].map(([v, l]) => \`<div class="stat"><div class="v">\${v}</div><div class="l">\${l}</div></div>\`).join("");
+    if (N(supply.keys_ready) === 0) {
+      msg("supplyMsg", "Not one trial key can serve a call right now, so a new account is told the lines are busy and fal.ai is billed nothing. Add or re-enable a DeCart key above.");
+    } else {
+      msg("supplyMsg", N(supply.uncapped_keys) > 0
+        ? "At least one key has no budget typed, so the minutes figure above counts only the keys you gave a budget to."
+        : "", "ok");
+    }
+  }
+  $("engineRefresh").onclick = () => loadSupply();
+
+  function setTrialInputs(on) {
+    ["engTrialEnabled", "engTrialMinutes", "engTrialCeiling", "engFalFallback", "engSave"].forEach((id) => { $(id).disabled = !on; });
+  }
+
+  $("engSave").onclick = async () => {
+    msg("engMsg", "");
+    if (!hasTrialCfg) return msg("engMsg", "The trial columns are not in the database yet — run the dual-engine migration, then reload this page.");
+    const row = {
+      trial_enabled: $("engTrialEnabled").checked,
+      trial_video_minutes: Math.max(0, N($("engTrialMinutes").value, 1)),
+      max_concurrent_trial_sessions: N($("engTrialCeiling").value, 0) > 0 ? Math.floor(N($("engTrialCeiling").value)) : null,
+      allow_fal_when_no_decart: $("engFalFallback").checked,
+    };
+    if (row.allow_fal_when_no_decart && !confirm("Fall back to the paid service when the trial pool is empty? Every free trial after that bills fal.ai at the paid rate.")) return;
+    const { error } = await sb.from("app_config").update(row).eq("id", 1);
+    if (error) return msg("engMsg", error.message);
+    msg("engMsg", row.trial_enabled
+      ? \`Saved. New accounts get \${mins(row.trial_video_minutes)} free video minute\${row.trial_video_minutes === 1 ? "" : "s"} served by the trial pool, starting now.\`
+      : "Saved. The free trial is off: no account is granted trial minutes and no DeCart key is used.", "ok");
+    await Promise.all([loadSupply(), loadKeys()]);
   };
 
   // ══ BURN RATES ══════════════════════════════════════════════════════════
@@ -1294,6 +1872,7 @@ export const ADMIN_HTML = `<!doctype html>
       const expiring = r.lease_expires_at && new Date(r.lease_expires_at) <= new Date();
       return \`<tr>
         <td><b>\${esc(EMAIL_OF[r.user_id] || r.email || shortId(r.user_id))}</b></td>
+        <td>\${r.engine ? \`<span class="pill \${ENGINE_PILL[r.engine]}">\${ENGINE_LABEL[r.engine] || r.engine}</span>\${r.engine === "decart" && r.decart_key_id ? \`<div class="muted">key \${shortId(r.decart_key_id)}</div>\` : ""}\` : '<span class="muted">—</span>'}</td>
         <td class="muted">\${esc(r.tab || "—")}</td>
         <td>\${MOD_LABEL[r.modality] || r.modality}</td>
         <td class="muted mono">\${esc(r.device_id || "—")}</td>
@@ -1306,7 +1885,7 @@ export const ADMIN_HTML = `<!doctype html>
           <button data-act="end" data-id="\${r.id}" class="danger">End now</button>
           <button data-act="reap1" data-id="\${r.user_id}">Reap</button>
         </td></tr>\`;
-    }).join("") || '<tr><td colspan="10" class="muted">No open leases — nothing is burning right now.</td></tr>';
+    }).join("") || '<tr><td colspan="11" class="muted">No open leases — nothing is burning right now.</td></tr>';
   }
   $("sessRefresh").onclick = loadSessions;
 
@@ -1335,6 +1914,12 @@ export const ADMIN_HTML = `<!doctype html>
     const id = b.dataset.id;
 
     if (b.dataset.act === "open") {
+      try { await openAccount(id); } catch (err) { msg("acctMsg", err.message); }
+      $("acctDetail").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (b.dataset.act === "jump") {
+      document.querySelector('.tabs button[data-tab="accounts"]').click();
       try { await openAccount(id); } catch (err) { msg("acctMsg", err.message); }
       $("acctDetail").scrollIntoView({ behavior: "smooth", block: "start" });
       return;
@@ -1387,8 +1972,48 @@ export const ADMIN_HTML = `<!doctype html>
       $("kEnabled").checked = row.enabled !== false;
       $("kDefault").checked = !!row.is_default;
       setChip("vid", "", "not tested"); setChip("voice", "", "not tested");
-      msg("keyMsg", \`Editing “\${row.label || shortId(id)}”. Both stored keys stay exactly as they are unless you paste over them.\`, "ok");
+      msg("keyMsg", \`Editing “\${row.label || shortId(id)}”. Stored keys stay exactly as they are unless you paste over them\${row.trial_key_tail ? ", and its DeCart trial key is edited on the DeCart keys tab" : ""}.\`, "ok");
       window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    if (b.dataset.act === "tk-verify") {
+      const box = document.querySelector(\`[data-vres="tk:\${id}"]\`);
+      if (!box) return;
+      b.disabled = true;
+      await runVerify("decart", "", id, { box });
+      b.disabled = false;
+      await loadSupply();
+      return;
+    }
+    if (b.dataset.act === "tk-edit") {
+      const row = KEY_ROWS.find((k) => k.id === id);
+      if (!row) return;
+      $("tkId").value = row.id; $("tkLabel").value = row.label || "";
+      $("tkKey").value = "";
+      $("tkBudget").value = row.trial_minutes_budget ?? "";
+      $("tkPriority").value = N(row.priority, 100);
+      $("tkEnabled").checked = row.enabled !== false;
+      setChip("tk", "", "not tested");
+      $("tkResult").className = "presult";
+      msg("tkMsg", \`Editing “\${row.label || shortId(id)}” (\${row.trial_key_tail}). The stored DeCart key stays as it is unless you paste a new one.\`, "ok");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    if (b.dataset.act === "tk-toggle") {
+      const row = KEY_ROWS.find((k) => k.id === id);
+      const { error } = await sb.from("gateway_keys").update({ enabled: !(row?.enabled !== false) }).eq("id", id);
+      if (error) return msg("tkMsg", error.message);
+      msg("tkMsg", row?.enabled === false ? "Enabled — this key is back in the trial rotation." : "Disabled — no trial call will be served by this key again.", "ok");
+      await Promise.all([loadKeys(), loadSupply()]);
+      return;
+    }
+    if (b.dataset.act === "tk-del") {
+      const row = KEY_ROWS.find((k) => k.id === id);
+      if (!confirm(\`Delete “\${row?.label || shortId(id)}” (\${row?.trial_key_tail})? Trials already served by it are not changed.\`)) return;
+      const { error } = await sb.from("gateway_keys").delete().eq("id", id);
+      if (error) return msg("tkMsg", error.message);
+      msg("tkMsg", "Deleted from the trial pool.", "ok");
+      await Promise.all([loadKeys(), loadSupply()]);
       return;
     }
     if (b.dataset.act === "del") {
@@ -1430,7 +2055,17 @@ export const ADMIN_HTML = `<!doctype html>
     $("cfgSignup").checked = data.signup_enabled !== false;
     $("cfgMaint").checked = data.maintenance === true;
     $("cfgMaintMsg").value = data.maintenance_message || "";
-    await loadPool();
+
+    const probeTrial = await sb.from("app_config").select("trial_enabled").eq("id", 1).maybeSingle();
+    hasTrialCfg = !probeTrial.error;
+    setTrialInputs(hasTrialCfg);
+    $("engTrialEnabled").checked = data.trial_enabled === true;
+    $("engTrialMinutes").value = N(data.trial_video_minutes, 1);
+    $("engTrialCeiling").value = data.max_concurrent_trial_sessions ?? 0;
+    $("engFalFallback").checked = data.allow_fal_when_no_decart === true;
+    if (!hasTrialCfg) msg("engMsg", "The trial columns are not in the database yet — run the dual-engine migration, then reload this page.");
+
+    await Promise.all([loadPool(), loadSupply()]);
   }
 
   $("cfgSave").onclick = async () => {
