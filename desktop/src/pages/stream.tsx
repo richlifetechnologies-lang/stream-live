@@ -5,7 +5,8 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia } from "../lib/gateway";
+import { gateway, deviceId, useAccount, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia } from "../lib/gateway";
+import { drainOf } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
@@ -1197,6 +1198,32 @@ export default function StreamPage() {
   // Route changes (e.g. opening Settings mid-stream) unmount this page. Without
   // this the fal WebSocket would stay open and keep billing in the background.
   useEffect(() => { return () => { void teardownStream(); }; }, [teardownStream]);
+
+  // ─── Stop the call when the countdown reaches zero ─────────────────────────
+  // The gateway only re-prices the lease on the 45-second heartbeat, so left to
+  // itself a call stays on air for up to that long after the bucket is empty: the
+  // clock reads 0:00 and nothing happens until the user presses Stop. The meter
+  // tells him the call stops now, so arm a timer for the second its own minutes
+  // run out. A call that has not shown a frame spends nothing, so its deadline is
+  // measured from the frame; and a call opened on the last sliver of change gets
+  // its first few seconds rather than a drop that looks like a crash.
+  useEffect(() => {
+    const MIN_FUNDED_MS = 10_000;
+    const lease = account.live;
+    if (!isStreaming || !lease || lease.unlimited) return;
+    const burn = bucketFor(account, lease.modality)?.burnRate ?? 1;
+    const drain = drainOf(lease, burn, Date.now());
+    if (drain.remaining === null) return;
+    const airStart = lease.modality === "audio" ? lease.startedAt : (lease.mediaAt ?? lease.startedAt);
+    const stopAt = Math.max(Date.now() + (drain.remaining * 60_000) / burn, airStart + MIN_FUNDED_MS);
+    const id = setTimeout(() => {
+      if (!sessionIdRef.current) return;
+      void teardownStream();
+      toast({ title: "Out of minutes", description: endReasonMessage("out_of_minutes"), variant: "destructive" });
+      setLocation("/minutes");
+    }, Math.max(0, stopAt - Date.now()));
+    return () => clearTimeout(id);
+  }, [isStreaming, account, teardownStream, toast, setLocation]);
 
   // ─── Start stream ──────────────────────────────────────────────────────────
   const handleStartStream = useCallback(async () => {
