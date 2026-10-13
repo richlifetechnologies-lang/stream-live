@@ -53,6 +53,11 @@ export type AccountState = {
 /**
  * Read the account row + switches. Deliberately read-only: the atomic decision is
  * made inside sl_start_session, this only produces friendly reasons early.
+ *
+ * It does not check balances, because the amount a bucket needs to fund a call
+ * depends on which engine serves it and only the database knows that: a trial
+ * leftover of 53 seconds is spendable, a paid bucket under a minute is not. A
+ * guessed floor here would refuse calls the gateway would have allowed.
  */
 export async function readAccount(userId: string, modality: Modality): Promise<AccountState> {
   const db = adminClient();
@@ -94,10 +99,6 @@ export async function readAccount(userId: string, modality: Modality): Promise<A
   if (state.maintenance) return { ...state, ok: false, reason: "maintenance" };
   if (!state.enabled) return { ...state, ok: false, reason: "modality_disabled" };
 
-  const bal = balances[modality];
-  if (bal !== null && (bal ?? 0) < 1) {
-    return { ...state, ok: false, reason: "out_of_minutes" };
-  }
   return state;
 }
 

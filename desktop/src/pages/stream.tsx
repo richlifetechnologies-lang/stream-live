@@ -592,7 +592,7 @@ async function _startTrialVideoSession(
         ...(refB64 ? { image: `data:image/jpeg;base64,${refB64}` } : {}),
       },
       onRemoteStream: (stream: MediaStream) => onRemote(stream),
-      onConnectionChange: (state: string) => onConnectionState(stateOf(state)),
+      onConnectionChange: (state: string) => { console.info("[video] transport:", state); onConnectionState(stateOf(state)); },
     }).then(
       (c) => {
         clearTimeout(to);
@@ -611,8 +611,17 @@ async function _startTrialVideoSession(
   }
   const rc = opened.client;
 
-  rc.on("sessionEnded", () => onDisconnect());
-  rc.on("error", () => onDisconnect());
+  // Only a session the server finished on purpose may end the call. A "error" event
+  // is the engine reporting trouble while keeping the room open and retrying, and
+  // treating it as a hang-up turned a recoverable blip into a dead stream a few
+  // seconds into the trial. Both are logged with their reason, because nothing here
+  // is allowed to put a provider name on the screen and a silent teardown cannot be
+  // diagnosed afterwards.
+  rc.on("sessionEnded", (e: { reason?: string } | undefined) => {
+    console.warn("[video] the call ended:", e?.reason ?? "no reason given");
+    onDisconnect();
+  });
+  rc.on("error", (e: unknown) => console.warn("[video] engine reported a problem:", e));
 
   return {
     close: () => { try { rc.disconnect(); } catch { /**/ } },

@@ -36,7 +36,10 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
   const running = drain !== null;
   const remaining = drain ? drain.remaining : (wallet?.unlimited ? null : wallet?.balance ?? 0);
   const unlimited = drain ? drain.unlimited : (wallet?.unlimited ?? false);
-  const empty = !unlimited && remaining !== null && remaining < 1;
+  // A bucket is empty at zero, not at "under one minute": a trial that has 53
+  // seconds left can still start a video call, and telling him otherwise on the
+  // clock makes a working account look dead.
+  const empty = !unlimited && remaining !== null && remaining <= 0;
   const low = !unlimited && remaining !== null && remaining < LOW_MINUTES;
   const tone = empty ? "hsl(0 85% 62%)" : low ? "hsl(35 100% 60%)" : C;
   const pct = !drain || unlimited || !lease

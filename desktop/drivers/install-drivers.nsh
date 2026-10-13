@@ -39,6 +39,22 @@
     DetailPrint "Registering Stream Live Camera virtual camera..."
     nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -File "$INSTDIR\drivers\Install-VirtualDevices.ps1" -NoAudio'
 
+  ; ── Desktop icon for the signed-in user ──────────────────────────────────────
+  ; Installing "for all users" (this installer needs admin for the drivers, so it
+  ; usually does) puts the icon in C:\Users\Public\Desktop only. When OneDrive has
+  ; taken over the Desktop folder, that copy is not what Explorer paints, and the
+  ; install looks like it left no icon behind. Write one into the folder this user's
+  ; Desktop actually resolves to, and only then - a per-user install already does it.
+  ${if} $installMode == "all"
+    SetShellVarContext current
+      DetailPrint "Adding desktop icon for the current user..."
+      CreateShortCut "$DESKTOP\${SHORTCUT_NAME}.lnk" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+      ClearErrors
+      WinShell::SetLnkAUMI "$DESKTOP\${SHORTCUT_NAME}.lnk" "${APP_ID}"
+      SetShellVarContext all
+  ${endIf}
+  System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+
   DetailPrint "Stream Live drivers installed."
 !macroend
 

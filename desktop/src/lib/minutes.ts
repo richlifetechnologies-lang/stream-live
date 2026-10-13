@@ -57,9 +57,15 @@ export function drainOf(lease: LiveLease, burnRate: number, now: number): Drain 
   const gate = Math.max(lease.observedAt, lease.mediaAt ?? now);
   const airAt = lease.modality === "audio" ? lease.startedAt : (lease.mediaAt ?? now);
   const drift = (Math.max(0, now - gate) / 60000) * burnRate;
+  const used = lease.billedMinutes + drift;
   return {
-    remaining: lease.unlimited ? null : Math.max(0, (lease.balance ?? 0) - drift),
-    used: lease.billedMinutes + drift,
+    // The lease is bought out of the wallet in one chunk, so `balance` is what is
+    // LEFT UNCOMMITTED - a trial that spends its whole minute on one call sits at
+    // zero there while the call is paid for and running. What the customer can
+    // still use is everything the wallet held when the call started, minus what
+    // this call has cost.
+    remaining: lease.unlimited ? null : Math.max(0, lease.startBalance - used),
+    used,
     live: Math.max(0, (now - airAt) / 60000),
     unlimited: lease.unlimited,
     waiting,

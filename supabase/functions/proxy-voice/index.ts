@@ -96,7 +96,7 @@ Deno.serve(async (req: Request) => {
       // all, so switching audio off for an account also closes its library.
       const audio = await readAccount(user.id, "audio");
       const combined = await readAccount(user.id, "video_audio");
-      const allowed = (a: Awaited<ReturnType<typeof readAccount>>) => a.ok || a.reason === "out_of_minutes";
+      const allowed = (a: Awaited<ReturnType<typeof readAccount>>) => a.ok;
       const usable = [audio, combined].find(allowed);
       if (!usable) {
         return fail(String(audio.message ?? audio.reason ?? "denied"), 403, {

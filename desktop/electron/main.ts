@@ -613,7 +613,11 @@ function createWindow() {
           // key endpoint. Both video hosts stay on the list because either pipeline can
           // serve a call, and a page that cannot open its signalling socket just hangs.
           // localhost stays for the dev server and the app's own local API server.
-          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.fal.ai wss://*.fal.ai https://wma.fal.run https://fal.run wss://fal.run https://*.fal.run wss://*.fal.run https://*.decart.ai wss://*.decart.ai https://fonts.googleapis.com https://fonts.gstatic.com; media-src *; connect-src 'self' http://localhost:* ws://localhost:* https://onhanfathvfkkliayvrn.supabase.co wss://onhanfathvfkkliayvrn.supabase.co https://*.fal.run wss://*.fal.run https://fal.run wss://fal.run https://api.decart.ai wss://api3.decart.ai https://api.github.com https://objects.githubusercontent.com data: blob:;",
+          // Every Decart subdomain is needed, not just the API: the signalling socket on
+          // api3 only hands back the media room, and that lives on a regional
+          // <region>.lkc.decart.ai host the app cannot predict. Listing api3 alone made
+          // every trial call die at "could not establish signal connection".
+          "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob: https://*.fal.ai wss://*.fal.ai https://wma.fal.run https://fal.run wss://fal.run https://*.fal.run wss://*.fal.run https://*.decart.ai wss://*.decart.ai https://fonts.googleapis.com https://fonts.gstatic.com; media-src *; connect-src 'self' http://localhost:* ws://localhost:* https://onhanfathvfkkliayvrn.supabase.co wss://onhanfathvfkkliayvrn.supabase.co https://*.fal.run wss://*.fal.run https://fal.run wss://fal.run https://*.decart.ai wss://*.decart.ai https://api.github.com https://objects.githubusercontent.com data: blob:;",
         ],
       },
     });
