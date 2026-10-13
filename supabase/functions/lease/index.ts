@@ -1,10 +1,12 @@
 // POST lease
 // Heartbeat for an open call. 'renew' bills the window that just elapsed, refunds
-// the unused part of the prepaid chunk and pre-pays the next one; 'end' closes the
-// session for good. The client MUST stop the call when the answer says ended —
-// that is the moment the wallet ran dry.
+// the unused part of the prepaid chunk and pre-pays the next one; 'media' only stamps
+// the instant the first frame reached the screen — a video window is billed from there,
+// so a call that never shows a picture costs nothing; 'end' closes the session for
+// good. The client MUST stop the call when the answer says ended — that is the moment
+// the wallet ran dry.
 //
-// Body: { sessionId: string, action?: "renew"|"end" }   (end === action:"end")
+// Body: { sessionId: string, action?: "renew"|"media"|"end" }   (end === action:"end")
 // Resp: { ended, balance, unlimited, leaseExpiresAt, billedMinutes, lowBalance }
 import { preflight, json, fail } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth.ts";
@@ -21,12 +23,14 @@ Deno.serve(async (req: Request) => {
     const user = await requireUser(req);
     const body = await req.json().catch(() => ({}));
     const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-    const action = body.action === "end" || body.end === true ? "end" : "renew";
+    const action = body.action === "end" || body.end === true
+      ? "end"
+      : body.action === "media" ? "media" : "renew";
     if (!sessionId) return fail("sessionId is required");
 
     const { data: session } = await adminClient()
       .from("usage_sessions")
-      .select("id, user_id, ended_at, settled")
+      .select("id, user_id, ended_at, settled, lease_expires_at")
       .eq("id", sessionId)
       .maybeSingle();
     if (!session || session.user_id !== user.id) return fail("session not found", 404);
@@ -41,7 +45,9 @@ Deno.serve(async (req: Request) => {
       reason: res.reason,
       balance: res.balance,
       unlimited: res.unlimited,
-      leaseExpiresAt: res.expiresAt,
+      // 'media' extends nothing, so report the expiry the renew last wrote rather than
+      // a fresh one counted from this request.
+      leaseExpiresAt: action === "media" ? session.lease_expires_at : res.expiresAt,
       billedMinutes: res.billed,
       lowBalance: res.balance !== null && res.balance <= LOW_BALANCE_MINUTES,
     });

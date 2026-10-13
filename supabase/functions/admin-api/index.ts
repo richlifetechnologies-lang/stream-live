@@ -9,6 +9,7 @@
 //   resolve       { requestId, approve, note?, minutes? }
 //   reap          { userId? }                 -- close expired leases
 //   signout       { userId }                 -- kill every refresh token
+//   delete_account{ userId, reason? }        -- remove the account for good
 //   set_engine    { userId, engine: 'fal'|'decart'|null } -- pin/unpin the service
 //   test_key      { provider, key? , keyId? } -- prove a key works, no inference billed
 // Resp: { ok:true, ...result } or { error, status }
@@ -117,6 +118,63 @@ Deno.serve(async (req: Request) => {
         const { data, error } = await adminClient().rpc("sl_trial_supply");
         if (error) return fail(error.message, 500);
         return json({ ok: true, ...(data ?? {}) });
+      }
+
+      // Remove an account and everything hanging off it: sign-in, devices, buckets,
+      // history. Every app table cascades from profiles(id), so deleting the auth user
+      // sweeps the account clean by itself — which is why a witness row is written to
+      // account_deletions first. Administrators cannot be deleted; that also makes
+      // self-deletion impossible, since only an administrator reaches this code.
+      case "delete_account": {
+        const target = String(body.userId ?? "");
+        if (!target) return fail("userId is required");
+        const db = adminClient();
+        const { data: prof } = await db
+          .from("profiles")
+          .select("id, email, created_at, is_admin")
+          .eq("id", target)
+          .maybeSingle();
+        if (!prof) return fail("no such account", 404);
+        if (prof.is_admin) return fail("That account is an administrator. Clear its admin flag first if it really should go.", 409);
+
+        const { data: buckets } = await db
+          .from("credit_balances")
+          .select("modality, balance, unlimited, total_credited")
+          .eq("user_id", target);
+        const balances: Record<string, number | string> = {};
+        for (const m of MODALITIES) {
+          const b = (buckets ?? []).find((x) => x.modality === m);
+          balances[m] = b?.unlimited === true ? "unlimited" : Number(b?.balance ?? 0);
+        }
+
+        // Close a live lease before the row disappears. Ending it is what hands the
+        // unused prepaid window back to the trial key; deleting the session outright
+        // would leave that key's budget short for good.
+        const { data: open } = await db
+          .from("usage_sessions")
+          .select("id")
+          .eq("user_id", target)
+          .is("ended_at", null);
+        for (const s of open ?? []) {
+          try { await updateLease(String(s.id), "end"); } catch { /**/ }
+        }
+
+        const { error: logErr } = await db.from("account_deletions").insert({
+          actor_id: user.id,
+          actor_email: user.email ?? null,
+          user_id: target,
+          email: prof.email ?? null,
+          created_at: prof.created_at ?? null,
+          balances,
+          minutes: (buckets ?? []).reduce((a, b) => a + Number(b.total_credited ?? 0), 0),
+          reason: body.reason ? String(body.reason) : null,
+        });
+        // The record is the only trace left, so a failure to write it stops the delete.
+        if (logErr) return fail(`refused: the deletion could not be recorded (${logErr.message}). Apply the migrations, then try again.`, 500);
+
+        const { error } = await db.auth.admin.deleteUser(target);
+        if (error) return fail(error.message, 500);
+        return json({ ok: true, email: prof.email ?? null });
       }
 
       case "test_key": {

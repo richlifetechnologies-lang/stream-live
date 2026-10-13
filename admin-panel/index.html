@@ -1047,7 +1047,7 @@
         <td>${cell("audio", s?.audio_enabled)}</td>
         <td>${cell("video_audio", s?.video_audio_enabled)}</td>
         <td class="muted mono">+${mins(credited)} / −${mins(spent)}</td>
-        <td style="white-space:nowrap"><button data-act="open" data-id="${p.id}" class="primary">Credit minutes</button></td></tr>`;
+        <td style="white-space:nowrap"><button data-act="open" data-id="${p.id}" class="primary">Credit minutes</button>${ADMIN_OF[p.id] ? "" : ` <button data-act="del-acct" data-id="${p.id}" class="danger">Delete</button>`}</td></tr>`;
     }).join("") || '<tr><td colspan="9" class="muted">No account matches that filter.</td></tr>';
     msg("acctMsg", "");
   }
@@ -1922,6 +1922,21 @@
       document.querySelector('.tabs button[data-tab="accounts"]').click();
       try { await openAccount(id); } catch (err) { msg("acctMsg", err.message); }
       $("acctDetail").scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (b.dataset.act === "del-acct") {
+      const row = ACCT_ROWS.find((p) => p.id === id);
+      const email = String(row?.email || id);
+      const typed = prompt(`Deleting ${email} is permanent — the sign-in, its devices, every minute in its buckets and its whole history go with it. Type the email address to confirm.`);
+      if (typed === null) return;
+      if (typed.trim().toLowerCase() !== email.toLowerCase()) {
+        return msg("acctMsg", "Nothing was deleted: the address you typed is not this account's.");
+      }
+      try {
+        await api({ action: "delete_account", userId: id, reason: "deleted from the admin panel" });
+        msg("acctMsg", `${email} is gone. What it held and who removed it is on the record.`, "ok");
+        await loadAccounts();
+      } catch (err) { msg("acctMsg", err.message); }
       return;
     }
     if (b.dataset.act === "revoke") {

@@ -455,6 +455,21 @@ export class StreamLiveClient {
   async ping(): Promise<LeaseState | null> {
     if (!this.sessionId) return null;
     const res = await this.invoke("lease", { sessionId: this.sessionId, action: "renew" });
+    return this.leaseState(res);
+  }
+
+  /**
+   * Tell the gateway a picture is on screen. A video lease bills nothing until this
+   * lands, so the call that never connects costs the customer no minutes. Fire it once,
+   * at the first frame; repeat calls are ignored by the gateway.
+   */
+  async markMedia(): Promise<LeaseState | null> {
+    if (!this.sessionId) return null;
+    const res = await this.invoke("lease", { sessionId: this.sessionId, action: "media" });
+    return this.leaseState(res);
+  }
+
+  private leaseState(res: Record<string, never>): LeaseState {
     return {
       ended: res.ended === true,
       reason: res.reason,

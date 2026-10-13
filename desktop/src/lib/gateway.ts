@@ -62,10 +62,31 @@ export function beginLease(ticket: CallTicket): void {
       startBalance: (ticket.balance ?? 0) + ticket.leaseMinutes,
       startedAt: now,
       observedAt: now,
+      mediaAt: null,
       leaseExpiresAt: ticket.leaseExpiresAt,
       lowBalance: false,
     },
   });
+}
+
+/**
+ * The engine put a picture on the screen: start the clock, here and at the gateway.
+ * Called once per call, from whichever stream path renders the first remote frame.
+ */
+export function markMedia(): void {
+  const prev = state.live;
+  if (!prev || prev.mediaAt !== null) return;
+  setState({ live: { ...prev, mediaAt: Date.now() } });
+  // Until the gateway has the stamp it bills nothing, so a lost ping is a free call.
+  // Retried while this same lease is live; a heartbeat that dies first ends the call.
+  const send = (tries: number) => {
+    void gateway.markMedia()
+      .then((lease) => { if (lease?.ended) endLease(); })
+      .catch(() => {
+        if (tries > 0 && state.live?.sessionId === prev.sessionId) setTimeout(() => send(tries - 1), 3_000);
+      });
+  };
+  send(3);
 }
 
 export function updateLease(sessionId: string, lease: LeaseState): void {

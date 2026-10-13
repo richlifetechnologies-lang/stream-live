@@ -14,7 +14,7 @@ const REASON_COPY: Record<string, string> = {
   status_expired: "This account is no longer active. Ask your administrator to reactivate it.",
   device_limit_reached: "You've reached the number of devices allowed on this account. Remove one and try again.",
   device_revoked: "This device was removed by your administrator.",
-  concurrent_limit: "You're already on a call on another device. End that one first.",
+  concurrent_limit: "You're already on a call. End it before starting another one.",
   lines_busy: "Every video line our provider allows is in use right now. Give it a minute and try again.",
   not_entitled: "This account isn't allowed to make that kind of call. Ask your administrator.",
   maintenance: "The service is being updated. Try again in a little while.",

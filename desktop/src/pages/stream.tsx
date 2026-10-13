@@ -5,7 +5,7 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease } from "../lib/gateway";
+import { gateway, deviceId, useAccount, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia } from "../lib/gateway";
 import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
@@ -582,7 +582,7 @@ async function _startTrialVideoSession(
   type Opened = { client: import("@decartai/sdk").RealTimeClient } | { err: unknown };
   let givenUp = false;
   const opened = await new Promise<Opened>((resolve) => {
-    const to = setTimeout(() => { givenUp = true; resolve({ err: `${APP}: connection timed out` }); }, 30_000);
+    const to = setTimeout(() => { givenUp = true; resolve({ err: `${APP}: connection timed out` }); }, 45_000);
     client.realtime.connect(localStream, {
       model: sdk.models.realtime("lucy-2.5"),
       initialState: {
@@ -655,6 +655,7 @@ export default function StreamPage() {
   const [connStatus, setConnStatus]   = useState<"idle"|"connecting"|"connected"|"reconnecting">("idle");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStarting, setIsStarting]  = useState(false);
+  const [isClosing, setIsClosing]    = useState(false);
   const [connStep, setConnStep]       = useState<"auth"|"engine"|null>(null);
   const [elapsed, setElapsed]         = useState(0);
 
@@ -764,6 +765,7 @@ export default function StreamPage() {
   const obsPortraitWindowRef = useRef<Window|null>(null);
   const remoteStreamRef = useRef<MediaStream|null>(null);
   const isStartingRef   = useRef(false);
+  const closingRef      = useRef(false);
   // Live-camera restart handles used by enumerateDevices auto-correct.
   const startCameraRef   = useRef<((deviceId?: string) => Promise<void>) | null>(null);
   const cameraReadyRef   = useRef(false);
@@ -1157,6 +1159,7 @@ export default function StreamPage() {
     if (iceGraceRef.current) { clearTimeout(iceGraceRef.current); iceGraceRef.current = null; }
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     isStartingRef.current = false;
+    closingRef.current = true; setIsClosing(true);
     endLease();
     videoSessionRef.current?.close(); videoSessionRef.current = null;
     clonerRef.current?.stop(); clonerRef.current = null;
@@ -1174,7 +1177,11 @@ export default function StreamPage() {
     // that round-trip first left Stop unresponsive — and an unreached one is
     // refunded by the lease expiring server-side anyway.
     sessionIdRef.current = null;
-    await gateway.endCall().catch(() => {});
+    await Promise.race([
+      gateway.endCall().catch(() => {}),
+      new Promise((r) => setTimeout(r, 5_000)),
+    ]);
+    closingRef.current = false; setIsClosing(false);
     void refreshBalances();
   }, []);
 
@@ -1184,7 +1191,7 @@ export default function StreamPage() {
 
   // ─── Start stream ──────────────────────────────────────────────────────────
   const handleStartStream = useCallback(async () => {
-    if (isStartingRef.current || isStreaming) return;
+    if (isStartingRef.current || closingRef.current || isStreaming) return;
     const needsVideo = activeTab !== "audio-only";
     const needsVoice = activeTab !== "video-only" && vcEnabled;
     const tabName: TabName = activeTab;
@@ -1492,6 +1499,7 @@ export default function StreamPage() {
         {/* AI output video — always clean, no overlay chrome */}
         <video
           ref={el => { remoteVideoRef.current = el; if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) el.srcObject = remoteStreamRef.current; }}
+          onPlaying={markMedia}
           autoPlay playsInline
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }} />
 
@@ -1632,11 +1640,12 @@ export default function StreamPage() {
           <Square style={{ width: 18, height: 18 }} /> Stop
         </button>
       ) : (
-        <button onClick={credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStartStream} disabled={isStarting || (!credsMissing && !canStart)}
-          style={{ width: "100%", height: 54, background: (canStart && !isStarting) ? "linear-gradient(135deg, hsl(187 100% 52%) 0%, hsl(200 100% 45%) 100%)" : "hsl(222 40% 11%)", border: "none", borderRadius: 12, cursor: (canStart && !isStarting) ? "pointer" : "not-allowed", color: (canStart && !isStarting) ? "hsl(222 47% 4%)" : "hsl(222 25% 40%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: (canStart && !isStarting) ? "0 0 28px hsl(187 100% 52% / 0.3)" : "none" }}
-          onMouseEnter={e => { if (canStart && !isStarting) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
+        <button onClick={credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStartStream} disabled={isStarting || isClosing || (!credsMissing && !canStart)}
+          style={{ width: "100%", height: 54, background: (canStart && !isStarting && !isClosing) ? "linear-gradient(135deg, hsl(187 100% 52%) 0%, hsl(200 100% 45%) 100%)" : "hsl(222 40% 11%)", border: "none", borderRadius: 12, cursor: (canStart && !isStarting && !isClosing) ? "pointer" : "not-allowed", color: (canStart && !isStarting && !isClosing) ? "hsl(222 47% 4%)" : "hsl(222 25% 40%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: (canStart && !isStarting && !isClosing) ? "0 0 28px hsl(187 100% 52% / 0.3)" : "none" }}
+          onMouseEnter={e => { if (canStart && !isStarting && !isClosing) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}>
           {isStarting ? <><Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} /> Starting…</>
+            : isClosing ? <><Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} /> Ending call…</>
             : credsMissing ? <><Settings style={{ width: 18, height: 18 }} /> Request credits</>
             : !cameraReady && needsVideo ? <><Camera style={{ width: 18, height: 18 }} /> Enable Camera</>
             : <><Play style={{ width: 18, height: 18 }} /> Start</>}

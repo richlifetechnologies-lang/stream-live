@@ -137,10 +137,16 @@ export async function startLease(
   };
 }
 
-/** Renew or close a lease. `ended` also comes back true when the wallet ran dry. */
+/**
+ * Renew or close a lease, or stamp the first frame. `ended` also comes back true when
+ * the wallet ran dry.
+ *
+ * `media` moves no money: the database only records when the picture arrived, which is
+ * where a video window is billed from. A lease that never got one is refunded in full.
+ */
 export async function updateLease(
   sessionId: string,
-  action: "renew" | "end",
+  action: "renew" | "end" | "media",
 ): Promise<{ ok: boolean; ended: boolean; reason?: string; error?: string; balance: number | null; expiresAt: string | null; billed: number | null; ttlSeconds: number; unlimited: boolean }> {
   const db = adminClient();
   const data = unwrap(await db.rpc("sl_lease", { p_session_id: sessionId, p_action: action }));

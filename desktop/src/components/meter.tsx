@@ -57,7 +57,7 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
             fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
             fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 55%)", whiteSpace: "nowrap",
           }}>
-            {MOD_LABELS[modality]} {running ? "in use" : "available"}
+            {MOD_LABELS[modality]} {running ? (drain.waiting ? "starting up" : "in use") : "available"}
           </span>
         </div>
 
@@ -97,9 +97,31 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
       </div>
 
       {running && !unlimited && (
-        <div style={{ marginTop: 8, height: 3, borderRadius: 2, background: "hsl(222 40% 12%)", overflow: "hidden" }}>
-          <div style={{ width: `${pct}%`, height: "100%", borderRadius: 2, background: `linear-gradient(90deg, ${tone}, hsl(200 100% 45%))`, transition: "width 0.9s linear" }} />
+        <div style={{ marginTop: 9 }}>
+          <div style={{
+            height: 8, borderRadius: 5, overflow: "hidden",
+            background: "hsl(222 40% 12%)", border: "1px solid hsl(222 40% 17%)",
+          }}>
+            <div style={{
+              width: `${pct}%`, height: "100%", borderRadius: 5,
+              background: `linear-gradient(90deg, ${tone}, hsl(200 100% 45%))`,
+              boxShadow: low ? `0 0 14px ${tone}77` : "none",
+              transition: "width 0.9s linear",
+            }} />
+          </div>
+          <p style={{
+            margin: "5px 0 0", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase",
+            color: "hsl(222 25% 46%)", fontFamily: "'Orbitron',monospace", fontVariantNumeric: "tabular-nums",
+          }}>
+            {drain ? countdown(drain.used) : "0:00"} spent of {countdown(lease?.startBalance ?? 0)} on this call
+          </p>
         </div>
+      )}
+
+      {drain?.waiting && (
+        <p style={{ margin: "7px 0 0", fontSize: 10.5, color: "hsl(187 60% 62%)", fontFamily: "'Rajdhani',sans-serif" }}>
+          Connecting — minutes start when your video appears.
+        </p>
       )}
 
       {low && !empty && (
