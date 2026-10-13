@@ -702,7 +702,14 @@ end; $$;
 -- still meets 'out_of_minutes' before it can ever reach a Decart key.
 
 -- -- 11. Admin views: show the engine, and the Decart side of the pool -------
-create or replace view public.admin_live_sessions
+-- Both views gain columns, and Postgres refuses to rename a column of an
+-- existing view: create-or-replace matches the new select list to the old one by
+-- POSITION, so inserting a column shifts every name after it and aborts with
+-- SQLSTATE 42P16. Dropping first is the only way to change a view's shape.
+drop view if exists public.admin_live_sessions;
+drop view if exists public.admin_key_health;
+
+create view public.admin_live_sessions
 with (security_invoker = true) as
 select u.id, u.user_id, p.email, u.tab, u.modality, u.device_id, u.started_at,
        u.lease_started_at, u.lease_expires_at, u.real_minutes, u.billed_minutes,
@@ -711,7 +718,7 @@ from public.usage_sessions u
 join public.profiles p on p.id = u.user_id
 where u.ended_at is null;
 
-create or replace view public.admin_key_health
+create view public.admin_key_health
 with (security_invoker = true) as
 select k.id, k.label, k.enabled, k.priority, k.daily_minute_cap, k.minutes_today, k.usage_day,
        k.last_error, k.last_error_at, k.is_default, k.created_at,
