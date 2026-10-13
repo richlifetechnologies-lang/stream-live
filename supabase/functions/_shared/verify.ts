@@ -73,13 +73,17 @@ export async function verifyKey(provider: Provider, secret: string): Promise<Ver
       body: JSON.stringify({ expiresIn: 60, allowedModels: ["lucy-2.5"] }),
     });
     if (typeof res === "string") return { ok: false, status: null, detail: res };
-    const body = (await res.text().catch(() => "")).slice(0, 200);
+    const raw = await res.text().catch(() => "");
+    // A client token is a JWT, so the JSON body is far longer than anything worth
+    // putting in a log line. Truncate only what gets displayed — parsing the
+    // clipped copy always failed, which made a working key look rejected.
+    const body = raw.slice(0, 200);
     if (!res.ok) {
       return { ok: false, status: res.status, detail: `Decart answered ${res.status}${body ? `: ${body}` : ""}. Sent ${key.length} characters.` };
     }
     let token = "";
-    try { token = String(JSON.parse(body)?.apiKey ?? ""); } catch { /**/ }
-    if (!token) return { ok: false, status: res.status, detail: `Decart accepted the key but returned no client token (${body || "empty body"}).` };
+    try { token = String(JSON.parse(raw)?.apiKey ?? ""); } catch { /**/ }
+    if (token.length < 20) return { ok: false, status: res.status, detail: `Decart accepted the key but returned no client token (${body || "empty body"}).` };
     return { ok: true, status: 200, detail: "Accepted — Decart minted a client token for lucy-2.5." };
   }
 
