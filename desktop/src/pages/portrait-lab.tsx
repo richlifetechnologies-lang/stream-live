@@ -40,8 +40,11 @@ export default function PortraitLabPage() {
   const portRef   = useRef<HTMLCanvasElement | null>(null);
   const timerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const srcRef    = useRef<Source>("camera");
+  const costRef   = useRef({ black: 0, blur: 0 });
+  const framesRef = useRef(0);
   const [source, setSourceState] = useState<Source>("camera");
   const [note, setNote] = useState("Starting…");
+  const [cost, setCost] = useState("measuring…");
 
   const setSource = useCallback((s: Source) => { srcRef.current = s; setSourceState(s); }, []);
 
@@ -55,8 +58,19 @@ export default function PortraitLabPage() {
     else src = live ? v : (paintTestFrame(testRef.current, t), testRef.current);
     const lc = landRef.current?.getContext("2d");
     const pc = portRef.current?.getContext("2d");
-    if (lc) drawOutputFrame(lc, src, W, H, false);
-    if (pc) drawOutputFrame(pc, src, W, H, true);
+    // Time each mode the way the real pump spends it: compose the frame, then read
+    // all 1280x720 pixels back, which is what hands the frame to the driver. A
+    // canvas draw is only queued when the call returns, so the readback is also
+    // what forces the work to finish and makes the number mean something.
+    const t0 = performance.now();
+    if (lc) { drawOutputFrame(lc, src, W, H, false); lc.getImageData(0, 0, W, H); }
+    const t1 = performance.now();
+    if (pc) { drawOutputFrame(pc, src, W, H, true); pc.getImageData(0, 0, W, H); }
+    const t2 = performance.now();
+    costRef.current = { black: t1 - t0, blur: t2 - t1 };
+    if (++framesRef.current % 15 === 0 && (t2 - t1) > 0) {
+      setCost(`one frame costs: landscape ${(t1 - t0).toFixed(1)} ms, portrait ${(t2 - t1).toFixed(1)} ms, of a 33 ms budget`);
+    }
     timerRef.current = setTimeout(() => pump(performance.now()), 33);
   }, []);
 
@@ -129,7 +143,8 @@ export default function PortraitLabPage() {
         These are the exact frames the Stream Live Camera device sends, drawn by the same code the virtual
         camera uses. The device frame is always 1280x720, so portrait puts a tall 9:16 picture in the middle
         of it and fills that picture edge to edge — the person stays, the wide room at the sides is trimmed,
-        exactly like the phone in your screenshot.
+        exactly like the phone in your screenshot. The trimmed space is filled with a blurred, dimmed copy
+        of the room rather than black.
       </p>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
         {btn("camera", "Webcam")}
@@ -138,9 +153,12 @@ export default function PortraitLabPage() {
         <span style={{ fontSize: 12, color: "hsl(187 100% 52%)" }}>{note}</span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 28, marginTop: 18 }}>
-        {cell("LANDSCAPE (16:9)", "what a widescreen call sends today", landRef)}
-        {cell("PORTRAIT (9:16)", "the tall picture, filled", portRef)}
+        {cell("LANDSCAPE (16:9)", "what a widescreen call sends", landRef)}
+        {cell("PORTRAIT (9:16)", "the tall picture, blurred room at the sides", portRef)}
       </div>
+      <p style={{ fontSize: 12, color: "hsl(222 25% 55%)", maxWidth: 760, marginTop: 16 }}>
+        Both panels are the 1280x720 frame the device actually sends. {cost}.
+      </p>
       <video ref={videoRef} playsInline muted autoPlay style={{ position: "fixed", left: -9999, top: 0, width: 2, height: 2 }} />
     </div>
   );
