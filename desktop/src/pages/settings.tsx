@@ -4,6 +4,7 @@ import { useLocation, Link } from "wouter";
 import { User, Wallet, LogOut, Trash2, ArrowRight } from "lucide-react";
 import { clearCredentials } from "../lib/credentials";
 import { useAccount, signOut } from "../lib/gateway";
+import { countdown } from "../lib/minutes";
 import { useToast } from "../hooks/use-toast";
 import type { Modality } from "@stream-live/client";
 
@@ -18,7 +19,7 @@ const MOD_LABELS: Record<Modality, string> = {
 
 function balanceText(m: number | null, unlimited: boolean) {
   if (unlimited) return "Unlimited";
-  return `${(m ?? 0).toFixed(1)} min`;
+  return countdown(m ?? 0);
 }
 
 export default function SettingsPage() {

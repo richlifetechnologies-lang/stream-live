@@ -79,18 +79,10 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
           </span>
         )}
 
-        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 12 }}>
-          {drain && (
-            <>
-              <Stat label="this call" value={countdown(drain.used)} />
-              <Stat label="on air" value={clock(drain.live)} />
-            </>
-          )}
-          <button onClick={() => setLocation("/minutes")}
-            style={{ background: "none", border: "none", cursor: "pointer", padding: 0, color: tone, fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
-            Minutes dashboard →
-          </button>
-        </div>
+        <button onClick={() => setLocation("/minutes")}
+          style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", padding: 0, color: tone, fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
+          Minutes dashboard →
+        </button>
       </div>
 
       {running && !unlimited && (
@@ -110,7 +102,7 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
             margin: "5px 0 0", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase",
             color: "hsl(222 25% 46%)", fontFamily: "'Orbitron',monospace", fontVariantNumeric: "tabular-nums",
           }}>
-            {drain ? countdown(drain.used) : "0:00"} spent of {countdown(lease?.startBalance ?? 0)} on this call
+            What is left in this bucket
           </p>
         </div>
       )}
@@ -128,22 +120,4 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
       )}
     </div>
   );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ textAlign: "right" }}>
-      <p style={{ margin: 0, fontSize: 8.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "hsl(222 25% 42%)", fontFamily: "'Orbitron',monospace" }}>{label}</p>
-      <p style={{ margin: 0, fontSize: 12, fontWeight: 700, color: "hsl(190 80% 88%)", fontFamily: "'Orbitron',monospace", fontVariantNumeric: "tabular-nums" }}>{value}</p>
-    </div>
-  );
-}
-
-/** 90.5 minutes → "1:30:30" wall clock. */
-function clock(mins: number): string {
-  const total = Math.floor(mins * 60);
-  const h = Math.floor(total / 3600);
-  const m = Math.floor((total % 3600) / 60);
-  const s = total % 60;
-  return h > 0 ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}` : `${m}:${String(s).padStart(2, "0")}`;
 }

@@ -212,7 +212,7 @@ export default function AccountPage() {
             <span>
               <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Your minutes</span>
               <span style={{ display: "block", fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
-                Balances per bucket, live drain while you are on air, and asking for more
+                Balances per bucket, your live countdown, and asking for more
               </span>
             </span>
           </span>

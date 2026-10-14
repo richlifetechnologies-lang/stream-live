@@ -194,7 +194,7 @@ export default function MinutesPage() {
                     {w.unlimited ? "UNLIMITED" : countdown(remaining)}
                   </p>
                   <p style={{ fontSize: 10, color: "hsl(222 25% 42%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 4 }}>
-                    {modLive ? `this call ${countdown(modLive.used)} · ${Math.round(modLive.live)} min on air` : "min remaining"}
+                    min remaining
                   </p>
                 </div>
               </div>
@@ -206,10 +206,10 @@ export default function MinutesPage() {
                 {(modLive || otherCall) && (
                   <Badge icon={Radio} tone={C} text={modLive ? "draining on this device" : "in use on another device"} />
                 )}
-                {/* Both sums at the same precision, or they visibly fail to add up to the
-                    balance next to them — a whole-minute "3" hides 2.79 of it. */}
+                {/* Only what the administrator has put in, never what a call took
+                    out - the balance above is already the answer to that. */}
                 <span style={{ fontSize: 10.5, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginLeft: "auto" }}>
-                  {Number(w.total_credited).toFixed(1)} credited · {Number(w.total_spent).toFixed(1)} spent
+                  {Number(w.total_credited).toFixed(1)} min credited
                 </span>
                 {(zero || low) && (
                   <button onClick={() => askFor(w.modality)}
@@ -239,7 +239,7 @@ export default function MinutesPage() {
                       <span style={{ color: "hsl(222 25% 45%)", fontWeight: 400 }}> · started {fmtDate(s.started_at)}</span>
                     </p>
                     <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
-                      {Math.max(0, Math.round((now - new Date(s.started_at).getTime()) / 60000))} min on air · {s.device_id ?? "unknown device"}
+                      {s.device_id ?? "unknown device"}
                     </p>
                   </div>
                   <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace", whiteSpace: "nowrap" }}>

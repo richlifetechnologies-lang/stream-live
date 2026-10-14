@@ -9,7 +9,6 @@ const C = "hsl(187 100% 52%)";
 type CallRow = {
   tab: string;
   started_at: string;
-  billed_minutes: number;
   device_id: string | null;
 };
 
@@ -83,7 +82,7 @@ export default function UsagePage() {
     try {
       const { data, error: qErr } = await gateway.raw
         .from("usage_sessions")
-        .select("tab, started_at, billed_minutes, device_id")
+        .select("tab, started_at, device_id")
         .order("started_at", { ascending: false })
         .limit(100);
       if (qErr) throw new Error(qErr.message);
@@ -155,17 +154,16 @@ export default function UsagePage() {
                   <Empty text="No calls yet. Start a stream to see metered sessions here." />
                 ) : (
                   <div>
-                    {header(["Date / Time", "Tab", "Minutes used", "Device"], "1.3fr 1.1fr 0.9fr 1fr")}
+                    {header(["Date / Time", "Tab", "Device"], "1.5fr 1.2fr 1fr")}
                     <div style={{ maxHeight: 360, overflowY: "auto" }}>
                       {calls.map((s, i) => (
                         <div key={`${s.started_at}-${i}`} style={{
-                          display: "grid", gridTemplateColumns: "1.3fr 1.1fr 0.9fr 1fr", gap: 0, padding: "12px 20px",
+                          display: "grid", gridTemplateColumns: "1.5fr 1.2fr 1fr", gap: 0, padding: "12px 20px",
                           borderBottom: i < calls.length - 1 ? "1px solid hsl(222 40% 8%)" : "none",
                           background: i % 2 === 0 ? "transparent" : "hsl(222 47% 4% / 0.5)",
                         }}>
                           <span style={{ fontSize: 13, color: "hsl(190 80% 90%)", fontFamily: "'Rajdhani',sans-serif", fontWeight: 600, alignSelf: "center" }}>{fmtDate(s.started_at)}</span>
                           <span style={{ fontSize: 13, color: C, fontFamily: "'Rajdhani',sans-serif", fontWeight: 600, alignSelf: "center" }}>{TAB_LABELS[s.tab] ?? s.tab}</span>
-                          <span style={{ fontSize: 13, color: "hsl(190 80% 85%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, alignSelf: "center" }}>{fmtMins(s.billed_minutes)}</span>
                           <span style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", alignSelf: "center", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.device_id ?? ""}>{s.device_id ?? "—"}</span>
                         </div>
                       ))}
@@ -206,7 +204,8 @@ export default function UsagePage() {
             </Panel>
 
             <p style={{ marginTop: 12, fontSize: 11, color: "hsl(222 25% 35%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "right" }}>
-              Minutes shown are what each call took from its bucket. Buckets never expire.
+              Every figure here is minutes in one of your buckets — the same unit your
+              administrator tops up in. Buckets never expire.
             </p>
           </>
         )}
