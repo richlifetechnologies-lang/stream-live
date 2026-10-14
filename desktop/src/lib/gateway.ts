@@ -19,13 +19,18 @@ export type AccountState = {
   email: string | null;
   wallets: Wallet[];
   loading: boolean;
+  /**
+   * False while the account has only ever held its free trial minute. Starts true
+   * so no upgrade copy can flash before the first snapshot lands.
+   */
+  paid: boolean;
   /** The metered lease this machine is holding right now, or null when idle. */
   live: LiveLease | null;
 };
 
 export const gateway = new StreamLiveClient(GATEWAY_CONFIG);
 
-let state: AccountState = { signedIn: false, email: null, wallets: [], loading: true, live: null };
+let state: AccountState = { signedIn: false, email: null, wallets: [], loading: true, paid: true, live: null };
 const listeners = new Set<() => void>();
 
 function setState(patch: Partial<AccountState>) {
@@ -132,7 +137,20 @@ export function hasMinutes(state: AccountState, modality: Modality): boolean {
 
 export async function refreshBalances(): Promise<void> {
   if (!state.signedIn) return;
-  try { setState({ wallets: await gateway.wallets() }); } catch { /* keep last known balances */ }
+  // One snapshot carries both the buckets and the paid flag, so the upgrade copy and
+  // the balances can never disagree. It speaks snake_case; the store does not.
+  try {
+    const s = await gateway.snapshot();
+    setState({
+      paid: s.paid,
+      wallets: s.wallets.map(w => ({
+        modality: w.modality,
+        balance: Number(w.balance),
+        unlimited: w.unlimited,
+        burnRate: Number(w.burn_rate) || 1,
+      })),
+    });
+  } catch { /* keep last known balances */ }
 }
 
 export async function deviceId(): Promise<string> {
@@ -147,7 +165,7 @@ export async function deviceId(): Promise<string> {
 
 export async function restore(): Promise<Session | null> {
   const session = await gateway.restoreSession();
-  if (!session) { setState({ signedIn: false, email: null, wallets: [], loading: false }); return null; }
+  if (!session) { setState({ signedIn: false, email: null, wallets: [], loading: false, paid: true }); return null; }
   setState({ signedIn: true, email: session.user.email ?? null, loading: false });
   await refreshBalances();
   return session;
@@ -171,7 +189,7 @@ export async function signUp(email: string, password: string, displayName?: stri
 
 export async function signOut(): Promise<void> {
   await gateway.signOut();
-  setState({ signedIn: false, email: null, wallets: [], loading: false, live: null });
+  setState({ signedIn: false, email: null, wallets: [], loading: false, paid: true, live: null });
 }
 
 export async function requestTopup(input: {
@@ -186,5 +204,5 @@ export async function requestTopup(input: {
 }
 
 gateway.onChange((session) => {
-  if (!session) setState({ signedIn: false, email: null, wallets: [], loading: false, live: null });
+  if (!session) setState({ signedIn: false, email: null, wallets: [], loading: false, paid: true, live: null });
 });

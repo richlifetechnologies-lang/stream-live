@@ -28,8 +28,10 @@ export function WatermarkOffer({
   const [, setLocation] = useLocation();
 
   if (paid) return null;
-  // Still holding trial time, or no video bucket in view at all: nothing to say yet.
-  if (videoMinutesLeft === null || videoMinutesLeft > 0) return null;
+  // A minute is the smallest thing the app sells, and under a minute no call can
+  // finish, so that — not an exact zero — is where the trial counts as spent. With
+  // no video bucket in view there is nothing to say yet.
+  if (videoMinutesLeft === null || videoMinutesLeft >= 1) return null;
 
   return (
     <div style={{

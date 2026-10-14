@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { AppLayout, RAIL_W } from "../components/layout";
+import { WatermarkOffer } from "../components/watermark-offer";
 import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
@@ -790,6 +791,11 @@ export default function StreamPage() {
 
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
   const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
+
+  // The lease pre-debits on the server, so this balance already reflects a call in
+  // flight; an unlimited bucket has no trial left to talk about.
+  const videoWallet = bucketFor(account, "video");
+  const videoLeft = !videoWallet || videoWallet.unlimited ? null : videoWallet.balance;
 
   // A new account holds one thing: the free video minute. Dropping it on the
   // video+audio tab would open the app on a bucket the customer has never had and
@@ -2018,6 +2024,18 @@ export default function StreamPage() {
       {/* Cloned voice playback — routed to the virtual microphone so calling
           apps and OBS hear the persona voice instead of the raw mic. */}
       <audio ref={cloneAudioRef} autoPlay style={{ display: "none" }} />
+
+      {/* Trial spent: say what the mark on the picture was, and where it ends. */}
+      {account.signedIn && (
+        <div style={{ margin: "16px 32px 0" }}>
+          <WatermarkOffer
+            paid={account.paid}
+            videoMinutesLeft={videoLeft}
+            ctaLabel="See the packages"
+            ctaHref="/plans"
+          />
+        </div>
+      )}
 
       {/* Out-of-minutes banner */}
       {credsMissing && (
