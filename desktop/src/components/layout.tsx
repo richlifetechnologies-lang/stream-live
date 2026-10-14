@@ -2,6 +2,12 @@ import { Link, useLocation } from "wouter";
 import { Video, Settings, History, Hourglass, User, CreditCard } from "lucide-react";
 import { Logo } from "./brand";
 
+/**
+ * Width of the nav rail. Anything that centres itself against the window rather
+ * than against the page has to subtract it, so it is exported instead of repeated.
+ */
+export const RAIL_W = 190;
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
 
@@ -16,14 +22,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "hsl(222 47% 4%)" }}>
-      {/* Sidebar */}
+      {/* Sidebar — every tab names itself: the symbols alone read as a puzzle. */}
       <aside style={{
-        width: 64,
+        width: RAIL_W,
         background: "hsl(222 50% 5%)",
         borderRight: "1px solid hsl(222 40% 9%)",
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
         paddingTop: 16,
         paddingBottom: 16,
         gap: 4,
@@ -37,32 +42,41 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         {navItems.map(({ href, icon: Icon, label }) => {
           const active = href === "/" ? location === "/" : location.startsWith(href);
           return (
-            <Link key={href} href={href}>
-              <a title={label} style={{
-                width: 44, height: 44, borderRadius: 10,
-                display: "flex", alignItems: "center", justifyContent: "center",
-                cursor: "pointer", transition: "all 0.2s",
-                background: active ? "hsl(187 100% 52% / 0.15)" : "transparent",
-                border: active ? "1px solid hsl(187 100% 52% / 0.35)" : "1px solid transparent",
-                color: active ? "hsl(187 100% 52%)" : "hsl(222 25% 50%)",
-                textDecoration: "none",
-              }}
-              onMouseEnter={e => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = "hsl(222 40% 10%)";
-                  (e.currentTarget as HTMLElement).style.color = "hsl(190 80% 90%)";
-                }
-              }}
-              onMouseLeave={e => {
-                if (!active) {
-                  (e.currentTarget as HTMLElement).style.background = "transparent";
-                  (e.currentTarget as HTMLElement).style.color = "hsl(222 25% 50%)";
-                }
-              }}
-              >
-                <Icon style={{ width: 18, height: 18 }} />
-              </a>
-            </Link>
+            <div key={href} style={{ padding: "0 12px" }}>
+              <Link href={href}>
+                <a title={label} style={{
+                  height: 40, borderRadius: 10,
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "0 12px", cursor: "pointer", transition: "all 0.2s",
+                  background: active ? "hsl(187 100% 52% / 0.15)" : "transparent",
+                  border: active ? "1px solid hsl(187 100% 52% / 0.35)" : "1px solid transparent",
+                  color: active ? "hsl(187 100% 52%)" : "hsl(222 25% 50%)",
+                  textDecoration: "none",
+                }}
+                onMouseEnter={e => {
+                  if (!active) {
+                    (e.currentTarget as HTMLElement).style.background = "hsl(222 40% 10%)";
+                    (e.currentTarget as HTMLElement).style.color = "hsl(190 80% 90%)";
+                  }
+                }}
+                onMouseLeave={e => {
+                  if (!active) {
+                    (e.currentTarget as HTMLElement).style.background = "transparent";
+                    (e.currentTarget as HTMLElement).style.color = "hsl(222 25% 50%)";
+                  }
+                }}
+                >
+                  <Icon style={{ width: 18, height: 18, flexShrink: 0 }} />
+                  <span style={{
+                    fontSize: 13, fontWeight: active ? 700 : 600, lineHeight: 1,
+                    fontFamily: "'Rajdhani', sans-serif", letterSpacing: "0.02em",
+                    whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                  }}>
+                    {label}
+                  </span>
+                </a>
+              </Link>
+            </div>
           );
         })}
       </aside>

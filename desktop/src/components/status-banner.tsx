@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
+import { RAIL_W } from "./layout";
 
 const WARN = "hsl(38 95% 55%)";
 const ERR = "hsl(0 80% 62%)";
@@ -45,7 +46,7 @@ export default function StatusBanner() {
 
   return (
     <div style={{
-      position: "fixed", bottom: 16, left: 16, zIndex: 9998,
+      position: "fixed", bottom: 16, left: RAIL_W + 16, zIndex: 9998,
       display: "flex", flexDirection: "column", gap: 8, maxWidth: 460,
     }}>
       {visible.map((m) => (

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
-import { AppLayout } from "../components/layout";
+import { AppLayout, RAIL_W } from "../components/layout";
 import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
@@ -1666,7 +1666,7 @@ export default function StreamPage() {
   // ─── Stream button ─────────────────────────────────────────────────────────
   const canStart = !credsMissing && (needsVideo ? cameraReady : true);
   const StreamBtn = () => (
-    <div style={{ position: "fixed", left: "50%", transform: "translateX(-50%)", bottom: 18, zIndex: 60, width: "min(440px, calc(100vw - 110px))", filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.55))" }}>
+    <div style={{ position: "fixed", left: `calc(${RAIL_W}px + (100vw - ${RAIL_W}px) / 2)`, transform: "translateX(-50%)", bottom: 18, zIndex: 60, width: `min(440px, calc(100vw - ${RAIL_W}px - 48px))`, filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.55))" }}>
       <MinuteMeter modality={modalityForTab(activeTab)} />
       {isStreaming ? (
         <button onClick={handleStop}

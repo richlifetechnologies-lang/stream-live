@@ -4,6 +4,7 @@ import { AppLayout } from "../components/layout";
 import { countdown, drainOf, MOD_LABELS, type LiveLease } from "../lib/minutes";
 import { useTicker } from "../components/meter";
 import { ContactCard, PayCard } from "../components/contact";
+import { WatermarkOffer } from "../components/watermark-offer";
 import { gateway, useAccount, useLease, requestTopup } from "../lib/gateway";
 import { toUserMessage } from "../lib/end-reason";
 import type { AccountSnapshot, Modality } from "@stream-live/client";
@@ -128,6 +129,8 @@ export default function MinutesPage() {
   }, 0);
   const running = snap?.openSessions.length ?? 0;
   const pending = requests.filter(r => r.status === "pending").length;
+  const videoBurn = Number(snap?.wallets.find(w => w.modality === "video")?.burn_rate) || 1;
+  const videoLeft = snap ? bucketRemaining("video", snap, live, videoBurn, now) : null;
 
   return (
     <AppLayout>
@@ -144,6 +147,8 @@ export default function MinutesPage() {
             <RefreshCw style={{ width: 12, height: 12 }} /> Refresh
           </button>
         </div>
+
+        {snap && <WatermarkOffer paid={snap.paid} videoMinutesLeft={videoLeft} />}
 
         {error && (
           <div style={{ marginBottom: 14, padding: "11px 15px", borderRadius: 10, background: "hsl(0 85% 40% / 0.12)", border: "1px solid hsl(0 85% 40% / 0.3)", color: "hsl(0 85% 70%)", fontSize: 13, fontFamily: "'Rajdhani',sans-serif" }}>

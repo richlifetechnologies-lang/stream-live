@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout";
 import { ContactCard, PayCard, hasContact, hasPayment } from "../components/contact";
+import { WatermarkOffer } from "../components/watermark-offer";
 import { gateway, useAccount } from "../lib/gateway";
 import { MOD_LABELS } from "../lib/minutes";
 import { toUserMessage } from "../lib/end-reason";
@@ -41,6 +42,9 @@ export default function PlansPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const videoWallet = snap?.wallets.find(w => w.modality === "video");
+  const videoLeft = videoWallet?.unlimited ? null : Number(videoWallet?.balance ?? 0);
+
   if (!account.signedIn) {
     return (
       <AppLayout>
@@ -61,6 +65,15 @@ export default function PlansPage() {
   return (
     <AppLayout>
       <div style={{ padding: "28px 32px", maxWidth: 980, margin: "0 auto" }}>
+        {snap && (
+          <WatermarkOffer
+            paid={snap.paid}
+            videoMinutesLeft={videoLeft}
+            ctaLabel="Ask for the top-up"
+            ctaHref="/minutes"
+          />
+        )}
+
         <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
           <div>
             <h1 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 20, color: "hsl(190 80% 96%)", marginBottom: 3 }}>Plans and prices</h1>

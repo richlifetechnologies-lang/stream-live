@@ -104,6 +104,13 @@ export type Plan = {
 /** One round-trip to `sl_account_snapshot` — what the user dashboard shows. */
 export type AccountSnapshot = {
   status: string;
+  /**
+   * False while the account has only ever held its free trial minute. The upgrade
+   * copy on screen is tied to this, so a snapshot that predates the field has to
+   * read as paid — hiding a promise is better than making it to someone who has
+   * already paid.
+   */
+  paid: boolean;
   planId: string | null;
   modalities: Record<Modality, boolean>;
   maxConcurrentSessions: number;
@@ -119,6 +126,7 @@ type SnapshotJson = {
   ok?: boolean;
   error?: string;
   status?: string;
+  paid?: boolean;
   plan_id?: string;
   modalities?: Partial<Record<Modality, boolean>>;
   max_concurrent_sessions?: number;
@@ -266,6 +274,7 @@ export class StreamLiveClient {
 
     return {
       status: j.status ?? "none",
+      paid: j.paid !== false,
       planId: j.plan_id ?? null,
       modalities: {
         video: j.modalities?.video === true,
