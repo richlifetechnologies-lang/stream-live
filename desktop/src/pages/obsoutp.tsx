@@ -3,16 +3,17 @@ import { FeedMark } from "../components/brand";
 
 // Portrait (9:16) OBS clean-output window.
 // The AI stream is natively 16:9, so it must be fit into the portrait frame.
-// Two user-selectable fit modes:
-//   "fill" — blurred cover-fit background + sharp contained foreground (no crop)
-//   "crop" — foreground cover-fits the whole window (full-bleed, edges cut off)
+// "crop" is the default because it is what "Stream Live Camera" sends in portrait
+// mode (see lib/vcam-frame.ts): the tall frame filled edge to edge, centre kept.
+// "fill" stays available — it shows the whole wide frame with a blurred backdrop,
+// which loses nothing but leaves the tall frame letterboxed.
 // The toggle control auto-hides after idle so it never shows in an OBS capture.
 type FitMode = "fill" | "crop";
 
 export default function ObsoutPortraitPage() {
   const bgRef = useRef<HTMLVideoElement>(null);
   const fgRef = useRef<HTMLVideoElement>(null);
-  const [fit, setFit] = useState<FitMode>("fill");
+  const [fit, setFit] = useState<FitMode>("crop");
   const [uiVisible, setUiVisible] = useState(true);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 

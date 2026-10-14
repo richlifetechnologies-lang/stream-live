@@ -12,6 +12,7 @@ import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
+import { drawOutputFrame } from "../lib/vcam-frame";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
@@ -658,9 +659,21 @@ export default function StreamPage() {
   const [portraitMode, setPortraitMode] = useState<boolean>(() => {
     try { return localStorage.getItem("ss_portrait_mode") === "1"; } catch { return false; }
   });
+  // The frame pump is a dep-free self-chaining setTimeout loop, so it reads the
+  // mode through a ref instead of closing over state.
+  const portraitRef    = useRef(portraitMode);
   const togglePortrait = useCallback(() => {
-    setPortraitMode(v => { const next = !v; try { localStorage.setItem("ss_portrait_mode", next ? "1" : "0"); } catch { /**/ } return next; });
+    setPortraitMode(v => {
+      const next = !v;
+      // Set the ref here, not only in an effect: the pump must pick the new layout
+      // up on its very next frame instead of waiting for a render pass.
+      portraitRef.current = next;
+      try { localStorage.setItem("ss_portrait_mode", next ? "1" : "0"); } catch { /**/ }
+      return next;
+    });
   }, []);
+  // Covers a mode restored from localStorage on load, and any other state change.
+  useEffect(() => { portraitRef.current = portraitMode; }, [portraitMode]);
 
   // ── Stream state ───────────────────────────────────────────────────────────
   const [connStatus, setConnStatus]   = useState<"idle"|"connecting"|"connected"|"reconnecting">("idle");
@@ -920,6 +933,11 @@ export default function StreamPage() {
   // frame over IPC to the Electron main process, which writes it into the
   // "Stream Live Camera" shared-memory buffer. resizemode=LINEAR in the header
   // makes the filter scale to whatever resolution the calling app negotiated.
+  //
+  // The frame shape never changes between orientations, so flipping the toggle
+  // mid-call needs no renegotiation: the next frame simply carries the other
+  // composition. drawOutputFrame reads the mode once per frame, so a switch can
+  // never land half-way through a composite.
   const VCAM_W = 1280, VCAM_H = 720;
   const vcamTick = useCallback(() => {
     if (!vcamOnRef.current) return;
@@ -930,16 +948,7 @@ export default function StreamPage() {
     if (canvas.height !== VCAM_H) canvas.height = VCAM_H;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (ctx) {
-      const v = remoteVideoRef.current;
-      if (v && v.videoWidth > 0 && v.readyState >= 2) {
-        const vr = v.videoWidth / v.videoHeight, cr = VCAM_W / VCAM_H;
-        let dw = VCAM_W, dh = VCAM_H, dx = 0, dy = 0;
-        if (vr > cr) { dh = VCAM_H; dw = VCAM_H * vr; dx = (VCAM_W - dw) / 2; }
-        else         { dw = VCAM_W; dh = VCAM_W / vr; dy = (VCAM_H - dh) / 2; }
-        ctx.drawImage(v, dx, dy, dw, dh);
-      } else {
-        ctx.fillStyle = "#000"; ctx.fillRect(0, 0, VCAM_W, VCAM_H);
-      }
+      drawOutputFrame(ctx, remoteVideoRef.current, VCAM_W, VCAM_H, portraitRef.current);
       const frame = ctx.getImageData(0, 0, VCAM_W, VCAM_H);
       api?.vcamFrame?.(frame.data.buffer as ArrayBuffer, VCAM_W, VCAM_H);
     }
@@ -1538,7 +1547,10 @@ export default function StreamPage() {
 
     return (
       <div style={panelStyle}>
-        {/* AI output video — always clean, no overlay chrome */}
+        {/* AI output video — always clean, no overlay chrome.
+            objectFit:"cover" on the 9:16 panel IS the portrait rectangle the frame
+            pump paints, so the preview and the caller's view match exactly, and only
+            one element ever decodes the stream. */}
         <video
           ref={el => { remoteVideoRef.current = el; if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) el.srcObject = remoteStreamRef.current; }}
           onPlaying={markMedia}
@@ -1639,26 +1651,30 @@ export default function StreamPage() {
   };
 
   // ─── Portrait / Landscape toggle button (always outside the video panel) ───
+  // Labelled with the mode clicking GIVES you, not the mode you're already in —
+  // a button that only shows the current state reads like a status light, and
+  // users did not know it switched anything.
   const OrientationToggle = () => (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
       <button
         onClick={togglePortrait}
-        title={portraitMode ? "Switch to Landscape (16:9)" : "Switch to Portrait (9:16)"}
+        title={portraitMode ? "Switch back to widescreen (16:9)" : "Switch to tall mobile-call view (9:16)"}
         style={{
           display: "flex", alignItems: "center", gap: 8,
           padding: "8px 16px", borderRadius: 10, cursor: "pointer",
-          background: portraitMode ? "hsl(187 100% 52% / 0.15)" : "hsl(222 40% 8%)",
-          border: `1px solid ${portraitMode ? "hsl(187 100% 52% / 0.5)" : "hsl(222 40% 14%)"}`,
-          color: portraitMode ? C : "hsl(222 25% 55%)",
+          background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 14%)",
+          color: "hsl(190 80% 96%)",
           fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 10,
           letterSpacing: "0.06em", textTransform: "uppercase", transition: "all 0.2s",
         }}>
         {portraitMode
-          ? <><Smartphone style={{ width: 13, height: 13 }} /> Portrait (9:16)</>
-          : <><Monitor style={{ width: 13, height: 13 }} /> Landscape (16:9)</>}
+          ? <><Monitor style={{ width: 13, height: 13 }} /> Switch to Landscape (16:9)</>
+          : <><Smartphone style={{ width: 13, height: 13 }} /> Switch to Portrait (9:16)</>}
       </button>
-      <span style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif" }}>
-        {portraitMode ? "Mobile video call mode — clean output" : "Standard widescreen mode"}
+      <span style={{ fontSize: 10, color: portraitMode ? C : "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif" }}>
+        {portraitMode
+          ? "Portrait is live — calls and OBS receive your video tall"
+          : "Landscape is live — calls and OBS receive your video widescreen"}
       </span>
     </div>
   );

@@ -5,3 +5,4 @@ release/
 *.tsbuildinfo
 .env
 .env.local
+lab-sample.png
