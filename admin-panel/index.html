@@ -108,6 +108,7 @@
       <button data-tab="split">Trial vs Paid</button>
       <button data-tab="burn">Burn rates</button>
       <button data-tab="sessions">Live sessions</button>
+      <button data-tab="airtime">Airtime</button>
       <button data-tab="gateway">Gateway</button>
       <button data-tab="plans">Plans</button>
       <button data-tab="price">Prices</button>
@@ -605,6 +606,32 @@
       </div>
     </section>
 
+    <!-- ══ TAB: AIRTIME ════════════════════════════════════════════════════ -->
+    <section id="tab-airtime" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Time on air</h2>
+          <div class="row" style="gap:8px">
+            <input id="airSearch" placeholder="filter by email" style="max-width:240px" />
+            <button id="airRefresh">Refresh</button>
+          </div>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">
+          <b>Real time</b> is how long the account actually streamed, measured from the first video frame.
+          <b>Minutes used</b> is what came out of the bucket. The gap between them is the burn rate, and it is
+          deliberately invisible to the customer — this tab is the only place the two are shown side by side.
+        </p>
+        <div class="grid4" id="airStats"></div>
+        <div style="overflow:auto;margin-top:12px">
+          <table id="airTable">
+            <thead><tr><th>User</th><th>Bucket</th><th style="text-align:right">Calls</th><th style="text-align:right">Real time</th><th style="text-align:right">Minutes used</th><th style="text-align:right">Rate</th><th>Last streamed</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="airMsg"></div>
+      </div>
+    </section>
+
     <!-- ══ TAB: GATEWAY ════════════════════════════════════════════════════ -->
     <section id="tab-gateway" class="hidden">
       <div class="card">
@@ -830,9 +857,17 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const mask = (v) => (v ? "••••" + String(v).slice(-4) : "—");
   const mins = (v) => { const n = N(v); const s = n.toFixed(1); return s.endsWith(".0") ? s.slice(0, -2) : s; };
+  // One-minute-per-cell rule shared with the desktop: a balance or a stretch of
+  // air time is printed as m:ss (the desktop's countdown), minutes consumed are
+  // printed with the same decimals the desktop prints them with. Before this,
+  // mins(2.033) said "2" while the user's own screen said "2:02" for the same
+  // wallet, and admins concluded the two systems disagreed about the money.
+  const clock = (v) => { const total = Math.max(0, Math.floor(N(v) * 60)); return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0"); };
+  const mins1 = (v) => N(v).toFixed(1);
+  const mins2 = (v) => N(v).toFixed(2);
   const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
   const usd = (v) => (N(v) < 0 ? "-$" : "$") + Math.abs(N(v)).toFixed(2);
-  const bucket = (v) => (v.unlimited ? '<span class="pill yes">Unlimited</span>' : '<span class="mono">' + mins(v.balance) + "</span>");
+  const bucket = (v) => (v.unlimited ? '<span class="pill yes">Unlimited</span>' : '<span class="mono">' + clock(v.balance) + "</span>");
   const shortId = (v) => (v ? String(v).slice(0, 8) : "—");
 
   let ADMIN_ID = null;
@@ -844,6 +879,8 @@
   let ADMIN_OF = {};
   let PAID_OF = {};
   let SPLIT_ROWS = [];
+  let AIR_ROWS = [];
+  let AIR_TRUNC = false;
   let hasEngineCols = false;
   let hasTrialCols = false;
   let hasTrialCfg = false;
@@ -913,7 +950,7 @@
     $("authCard").classList.add("hidden");
     $("dash").classList.remove("hidden");
     await loadPlans();
-    await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadConfig(), loadContact(), loadAccounts()]);
+    await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadAirtime(), loadConfig(), loadContact(), loadAccounts()]);
     setBrFromNow();
     await loadPricing();
   }
@@ -1046,7 +1083,7 @@
         <td>${cell("video", s?.video_enabled)}</td>
         <td>${cell("audio", s?.audio_enabled)}</td>
         <td>${cell("video_audio", s?.video_audio_enabled)}</td>
-        <td class="muted mono">+${mins(credited)} / −${mins(spent)}</td>
+        <td class="muted mono">+${mins1(credited)} / −${mins1(spent)}</td>
         <td style="white-space:nowrap"><button data-act="open" data-id="${p.id}" class="primary">Credit minutes</button>${ADMIN_OF[p.id] ? "" : ` <button data-act="del-acct" data-id="${p.id}" class="danger">Delete</button>`}</td></tr>`;
     }).join("") || '<tr><td colspan="9" class="muted">No account matches that filter.</td></tr>';
     msg("acctMsg", "");
@@ -1060,8 +1097,8 @@
     <td class="muted">${esc((a.created || "").slice(0, 10))}</td>
     <td class="muted">${esc(a.plan || "—")}</td>
     <td><span class="pill ${esc(a.status)}">${esc(a.status)}</span></td>
-    <td class="mono">${a.videoLeft == null ? '<span class="pill yes">unlimited</span>' : mins(a.videoLeft)}</td>
-    <td class="mono">${mins(a.spent)}</td>
+    <td class="mono">${a.videoLeft == null ? '<span class="pill yes">unlimited</span>' : clock(a.videoLeft)}</td>
+    <td class="mono">${mins1(a.spent)}</td>
     <td>${esPin(a)}</td>
     <td class="muted">${esc(a.why)}</td>
     <td style="white-space:nowrap"><button data-act="jump" data-id="${a.id}" class="primary">Open</button></td></tr>`;
@@ -1092,7 +1129,7 @@
       [SPLIT_ROWS.length, "accounts total"],
       [SPLIT_ROWS.filter((a) => a.eng === "decart").length, "on the trial pool"],
       [SPLIT_ROWS.filter((a) => a.eng === "fal").length, "on the paid service"],
-      [mins(paidSpent) + " min", "streamed on the paid service"],
+      [mins1(paidSpent) + " min", "streamed on the paid service"],
     ].map(([v, l]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
 
     const empty = (what) => `<tr><td colspan="9" class="muted">${what}</td></tr>`;
@@ -1216,7 +1253,7 @@
       const w = byMod[m] || { balance: 0, unlimited: false, total_credited: 0, total_spent: 0 };
       return `<tr><td>${MOD_LABEL[m]}</td><td>${bucket(w)}</td><td class="mono">${mins(w.burn_rate ?? 1)}x</td>
         <td>${w.unlimited ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
-        <td class="mono">${mins(w.total_credited)}</td><td class="mono">${mins(w.total_spent)}</td></tr>`;
+        <td class="mono">${mins1(w.total_credited)}</td><td class="mono">${mins1(w.total_spent)}</td></tr>`;
     }).join("");
 
     $("gModality").innerHTML = MODALITIES.map((m) => `<option value="${m}">${MOD_LABEL[m]}</option>`).join("");
@@ -1244,8 +1281,8 @@
     $("ledgerTable").querySelector("tbody").innerHTML = (data || []).map((r) => `<tr>
       <td class="muted">${when(r.created_at)}</td><td>${MOD_LABEL[r.modality] || r.modality}</td>
       <td><span class="pill ${r.kind === "credit" ? "ok" : r.kind === "debit" ? "past_due" : r.kind === "release" ? "yes" : "n"}">${r.kind}</span></td>
-      <td class="mono" style="text-align:right;color:${N(r.delta) >= 0 ? "#4ade80" : "#fb7185"}">${N(r.delta) >= 0 ? "+" : ""}${mins(r.delta)}</td>
-      <td class="mono" style="text-align:right">${mins(r.balance_after)}</td>
+      <td class="mono" style="text-align:right;color:${N(r.delta) >= 0 ? "#4ade80" : "#fb7185"}">${N(r.delta) >= 0 ? "+" : ""}${mins2(r.delta)}</td>
+      <td class="mono" style="text-align:right">${mins2(r.balance_after)}</td>
       <td class="muted">${esc(r.reason || "—")} <span class="muted">${r.session_id ? "· session " + shortId(r.session_id) : ""}${r.request_id ? " · request " + shortId(r.request_id) : ""}</span></td></tr>`).join("")
       || '<tr><td colspan="6" class="muted">No ledger rows yet.</td></tr>';
   }
@@ -1349,9 +1386,9 @@
       // The first real minute is the one-way door: from now on this account's
       // video is served by the paid service, so say it while it is happening.
       const flip = !wasPaid && N(payload.minutes) > 0 ? " It is now on the paid video service for good." : "";
-      msg("grantMsg", `Granted. ${res.unlimited ? "Bucket is unlimited." : "New balance " + mins(res.balance) + " min."}${flip}`, "ok");
+      msg("grantMsg", `Granted. ${res.unlimited ? "Bucket is unlimited." : "New balance " + clock(res.balance) + " on the meter."}${flip}`, "ok");
       delete PAID_OF[CUR.user_id];
-      await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions()]);
+      await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions(), loadAirtime()]);
     } catch (err) { msg("grantMsg", err.message); }
   };
 
@@ -1363,7 +1400,7 @@
     if (!confirm("Deduct from " + CUR.email + "?\n\n" + why + "\n\nThis cannot be undone from the panel — a correction is a new ledger row.")) return;
     try {
       const res = await api(payload);
-      msg("grantMsg", `Deducted. New balance ${mins(res.balance)} min.`, "ok");
+      msg("grantMsg", `Deducted. New balance ${clock(res.balance)} on the meter.`, "ok");
       await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
     } catch (err) { msg("grantMsg", err.message); }
   };
@@ -1401,11 +1438,11 @@
     try {
       for (const m of mods) {
         const res = await api({ action: "grant", userId: CUR.user_id, modality: m, minutes: amounts[m], reason });
-        done.push(`${MOD_LABEL[m]} → ${mins(res.balance)} min`);
+        done.push(`${MOD_LABEL[m]} → ${clock(res.balance)}`);
       }
       msg("grantMsg", `Credited “${p.name}”: ${done.join(", ")}.${wasPaid ? "" : " This account is now on the paid video service for good."}`, "ok");
       delete PAID_OF[CUR.user_id];
-      await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions()]);
+      await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions(), loadAirtime()]);
     } catch (err) {
       msg("grantMsg", err.message + (done.length ? ` — already credited: ${done.join(", ")}` : ""));
     } finally {
@@ -1466,7 +1503,7 @@
     if (!approve && !confirm("Reject this request? No minutes move.")) return;
     try {
       const res = await api({ action: "resolve", requestId: b.dataset.id, approve, note, minutes: approve ? minutes : undefined });
-      msg("reqMsg", approve ? `Approved — ${mins(res.minutes ?? minutes)} min granted (balance ${mins(res.grant?.balance)}).` : "Rejected.", "ok");
+      msg("reqMsg", approve ? `Approved — ${mins(res.minutes ?? minutes)} min granted (balance ${clock(res.grant?.balance)}).` : "Rejected.", "ok");
       await Promise.all([loadRequests(), loadAccounts(), CUR && openAccount(CUR.user_id)]);
     } catch (err) { msg("reqMsg", err.message); }
   });
@@ -1878,9 +1915,9 @@
         <td class="muted mono">${esc(r.device_id || "—")}</td>
         <td class="muted">${when(r.started_at)}</td>
         <td class="muted">${when(r.lease_started_at)} → ${when(r.lease_expires_at)} ${expiring ? '<span class="pill warn">lease expired</span>' : ""}</td>
-        <td class="mono" style="text-align:right">${mins(r.real_minutes)}</td>
-        <td class="mono" style="text-align:right">${mins(r.billed_minutes)}</td>
-        <td class="mono" style="text-align:right">${N(r.pending_debit) ? mins(r.pending_debit) + " min" : "—"}</td>
+        <td class="mono" style="text-align:right">${clock(r.real_minutes)}</td>
+        <td class="mono" style="text-align:right">${mins2(r.billed_minutes)}</td>
+        <td class="mono" style="text-align:right">${N(r.pending_debit) ? mins2(r.pending_debit) + " min" : "—"}</td>
         <td style="white-space:nowrap">
           <button data-act="end" data-id="${r.id}" class="danger">End now</button>
           <button data-act="reap1" data-id="${r.user_id}">Reap</button>
@@ -1894,7 +1931,7 @@
     try {
       const res = await api({ action: "reap" });
       msg("sessMsg", `Closed ${res.closed ?? 0} expired lease(s).`, "ok");
-      await Promise.all([loadSessions(), loadAccounts()]);
+      await Promise.all([loadSessions(), loadAccounts(), loadAirtime()]);
     } catch (err) { msg("sessMsg", err.message); }
   };
 
@@ -1902,10 +1939,66 @@
     if (!confirm("Force-end this session now? The prepaid chunk is settled and refunded to the bucket.")) return;
     try {
       const res = await api({ action: "end_session", sessionId });
-      msg("sessMsg", `Session ended${res.billed != null ? ", total billed " + mins(res.billed) + " min" : ""}${res.balance != null ? " · balance " + mins(res.balance) + " min" : ""}.`, "ok");
-      await Promise.all([loadSessions(), loadAccounts(), CUR && openAccount(CUR.user_id)]);
+      msg("sessMsg", `Session ended${res.billed != null ? ", total billed " + mins2(res.billed) + " min" : ""}${res.balance != null ? " · balance " + clock(res.balance) : ""}.`, "ok");
+      await Promise.all([loadSessions(), loadAccounts(), loadAirtime(), CUR && openAccount(CUR.user_id)]);
     } catch (err) { msg("sessMsg", err.message); }
   }
+
+  // ══ AIRTIME ═════════════════════════════════════════════════════════════
+  // usage_sessions is the meter's own record: real_minutes is wall-clock time
+  // from the first video frame, billed_minutes is what left the wallet. Grouping
+  // the two per account and bucket is the only way to see what the burn rate
+  // actually cost, so it lives here and nowhere the customer can reach.
+  async function loadAirtime() {
+    const { data, error } = await sb.from("usage_sessions")
+      .select("user_id, modality, started_at, real_minutes, billed_minutes, multiplier")
+      .order("started_at", { ascending: false })
+      .limit(5000);
+    if (error) return msg("airMsg", error.message);
+    const rows = data || [];
+    AIR_TRUNC = rows.length === 5000;
+    await emailsOf(rows.map((r) => r.user_id));
+    const acc = {};
+    for (const r of rows) {
+      const k = r.user_id + "|" + r.modality;
+      const a = (acc[k] ||= { user_id: r.user_id, modality: r.modality, calls: 0, real: 0, used: 0, rates: new Set(), last: r.started_at });
+      a.calls++;
+      a.real += N(r.real_minutes);
+      a.used += N(r.billed_minutes);
+      if (r.multiplier != null) a.rates.add(mins(r.multiplier) + "x");
+      if (r.started_at && (!a.last || new Date(r.started_at) > new Date(a.last))) a.last = r.started_at;
+    }
+    AIR_ROWS = Object.values(acc).sort((x, y) => y.real - x.real);
+    renderAirtime();
+    msg("airMsg", "");
+  }
+
+  function renderAirtime() {
+    const q = ($("airSearch").value || "").trim().toLowerCase();
+    const rows = AIR_ROWS.filter((a) => !q || String(EMAIL_OF[a.user_id] || "").toLowerCase().includes(q));
+    const totalReal = AIR_ROWS.reduce((a, r) => a + r.real, 0);
+    const totalUsed = AIR_ROWS.reduce((a, r) => a + r.used, 0);
+    const totalCalls = AIR_ROWS.reduce((a, r) => a + r.calls, 0);
+    $("airStats").innerHTML = [
+      [clock(totalReal), "total time on air"],
+      [mins1(totalUsed) + " min", "minutes used from buckets"],
+      [new Set(AIR_ROWS.map((r) => r.user_id)).size, "accounts streamed"],
+      [totalCalls, "calls metered"],
+    ].map(([v, l]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+    $("airTable").querySelector("tbody").innerHTML = rows.map((a) => `<tr>
+      <td><b>${esc(EMAIL_OF[a.user_id] || shortId(a.user_id))}</b></td>
+      <td>${MOD_LABEL[a.modality] || esc(a.modality)}</td>
+      <td class="mono" style="text-align:right">${a.calls}</td>
+      <td class="mono" style="text-align:right;color:#4ade80">${clock(a.real)}</td>
+      <td class="mono" style="text-align:right">${mins1(a.used)}</td>
+      <td class="mono" style="text-align:right">${[...a.rates].join(" · ") || "—"}</td>
+      <td class="muted">${when(a.last)}</td></tr>`).join("")
+      || `<tr><td colspan="7" class="muted">${q ? "No streamed account matches that filter." : "Nobody has streamed yet — usage_sessions is empty, so there is no air time to show."}</td></tr>`;
+    if (AIR_TRUNC) msg("airMsg", `Showing the most recent 5,000 sessions only. Total time on air and minutes used cover those rows, not the whole history.`, "ok");
+  }
+
+  $("airRefresh").onclick = loadAirtime;
+  $("airSearch").oninput = renderAirtime;
 
   // Delegated actions that live inside table rows.
   document.addEventListener("click", async (e) => {
@@ -1949,7 +2042,7 @@
       try {
         const res = await api({ action: "reap", userId: id });
         msg("sessMsg", `Closed ${res.closed ?? 0} expired lease(s) for that account.`, "ok");
-        await loadSessions();
+        await Promise.all([loadSessions(), loadAirtime()]);
       } catch (err) { msg("sessMsg", err.message); }
       return;
     }
@@ -2120,15 +2213,15 @@
       sum.credited += N(r.total_credited); sum.spent += N(r.total_spent); sum.accounts.add(r.user_id);
     });
     $("poolCards").innerHTML = `
-      <div class="stat"><div class="l">Minutes credited</div><div class="v" style="color:#4ade80">${mins(sum.credited)}</div><div class="l">lifetime grants</div></div>
-      <div class="stat"><div class="l">Minutes spent</div><div class="v" style="color:#c4b5fd">${mins(sum.spent)}</div><div class="l">settled by the lease meter</div></div>
-      <div class="stat"><div class="l">Still in wallets</div><div class="v">${mins(sum.outstanding)}</div><div class="l">${sum.accounts.size} account(s), ${sum.unlimited} bucket(s) unlimited</div></div>
+      <div class="stat"><div class="l">Minutes credited</div><div class="v" style="color:#4ade80">${mins1(sum.credited)}</div><div class="l">lifetime grants</div></div>
+      <div class="stat"><div class="l">Minutes spent</div><div class="v" style="color:#c4b5fd">${mins1(sum.spent)}</div><div class="l">settled by the lease meter</div></div>
+      <div class="stat"><div class="l">Still in wallets</div><div class="v">${clock(sum.outstanding)}</div><div class="l">${sum.accounts.size} account(s), ${sum.unlimited} bucket(s) unlimited</div></div>
       <div class="stat"><div class="l">Burn ratio</div><div class="v">${sum.credited > 0 ? Math.round((sum.spent / sum.credited) * 100) + "%" : "—"}</div><div class="l">of granted minutes used</div></div>`;
     $("poolTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => `<tr>
       <td>${MOD_LABEL[m]}</td>
-      <td class="mono" style="text-align:right">${mins(byMod[m].outstanding)}${byMod[m].unlimited ? ' <span class="pill yes">' + byMod[m].unlimited + " unlimited</span>" : ""}</td>
-      <td class="mono" style="text-align:right">${mins(byMod[m].credited)}</td>
-      <td class="mono" style="text-align:right">${mins(byMod[m].spent)}</td>
+      <td class="mono" style="text-align:right">${clock(byMod[m].outstanding)}${byMod[m].unlimited ? ' <span class="pill yes">' + byMod[m].unlimited + " unlimited</span>" : ""}</td>
+      <td class="mono" style="text-align:right">${mins1(byMod[m].credited)}</td>
+      <td class="mono" style="text-align:right">${mins1(byMod[m].spent)}</td>
       <td class="muted">${byMod[m].accounts.size}</td></tr>`).join("");
   }
   $("poolRefresh").onclick = loadPool;

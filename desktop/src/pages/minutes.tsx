@@ -188,9 +188,6 @@ export default function MinutesPage() {
               <div style={{ display: "flex", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
                 <div style={{ flex: "1 1 190px", minWidth: 0 }}>
                   <p style={{ ...head, marginBottom: 4, color: tone }}>{MOD_LABELS[w.modality]}</p>
-                  <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>
-                    1 real minute = {burn} credit minute{burn === 1 ? "" : "s"}
-                  </p>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone, fontVariantNumeric: "tabular-nums", margin: 0 }}>
@@ -209,8 +206,10 @@ export default function MinutesPage() {
                 {(modLive || otherCall) && (
                   <Badge icon={Radio} tone={C} text={modLive ? "draining on this device" : "in use on another device"} />
                 )}
+                {/* Both sums at the same precision, or they visibly fail to add up to the
+                    balance next to them — a whole-minute "3" hides 2.79 of it. */}
                 <span style={{ fontSize: 10.5, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginLeft: "auto" }}>
-                  {Number(w.total_credited).toFixed(0)} credited · {Number(w.total_spent).toFixed(1)} spent
+                  {Number(w.total_credited).toFixed(1)} credited · {Number(w.total_spent).toFixed(1)} spent
                 </span>
                 {(zero || low) && (
                   <button onClick={() => askFor(w.modality)}
@@ -240,7 +239,7 @@ export default function MinutesPage() {
                       <span style={{ color: "hsl(222 25% 45%)", fontWeight: 400 }}> · started {fmtDate(s.started_at)}</span>
                     </p>
                     <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
-                      {Math.max(0, Math.round((now - new Date(s.started_at).getTime()) / 60000))} min on air · billed {Number(s.real_minutes).toFixed(2)} min at last settle · {s.device_id ?? "unknown device"}
+                      {Math.max(0, Math.round((now - new Date(s.started_at).getTime()) / 60000))} min on air · {s.device_id ?? "unknown device"}
                     </p>
                   </div>
                   <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace", whiteSpace: "nowrap" }}>

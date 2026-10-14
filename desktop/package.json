@@ -1,6 +1,6 @@
 {
   "name": "stream-live",
-  "version": "1.5.5",
+  "version": "1.5.6",
   "description": "Stream Live desktop app — real-time AI webcam transformation powered by fal.ai Lucy 2.5. Account-gated: all AI keys are served by the STREAM LIVE gateway, the user never enters one.",
   "main": "dist-electron/main.js",
   "author": "Rich Life Technologies",

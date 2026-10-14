@@ -72,12 +72,6 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
           {unlimited ? "UNLIMITED" : countdown(remaining)}
         </span>
 
-        {!unlimited && !empty && burnRate !== 1 && (
-          <span style={{ fontSize: 10, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif" }}>
-            {burnRate}× rate
-          </span>
-        )}
-
         {empty && !unlimited && (
           <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, color: tone, fontFamily: "'Rajdhani',sans-serif" }}>
             <TriangleAlert style={{ width: 12, height: 12 }} />
