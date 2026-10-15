@@ -107,7 +107,7 @@
       <button data-tab="engines">Engines</button>
       <button data-tab="split">Trial vs Paid</button>
       <button data-tab="burn">Burn rates</button>
-      <button data-tab="sessions">Live sessions</button>
+      <button data-tab="sessions">Calls</button>
       <button data-tab="airtime">Airtime</button>
       <button data-tab="gateway">Gateway</button>
       <button data-tab="plans">Plans</button>
@@ -587,11 +587,11 @@
       </div>
     </section>
 
-    <!-- ══ TAB: LIVE SESSIONS ══════════════════════════════════════════════ -->
+    <!-- ══ TAB: CALLS ══════════════════════════════════════════════════════ -->
     <section id="tab-sessions" class="hidden">
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Open leases</h2>
+          <h2 style="font-size:14px;margin:0">Calls running now</h2>
           <button id="reapAll" class="danger">Reap expired leases (all accounts)</button>
           <button id="sessRefresh">Refresh</button>
         </div>
@@ -603,6 +603,31 @@
           </table>
         </div>
         <div id="sessMsg"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Every call in the last 3 days</h2>
+          <div class="row" style="gap:8px">
+            <input id="histSearch" placeholder="filter by email" style="max-width:240px" />
+            <button id="histRefresh">Refresh</button>
+          </div>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">
+          The meter's own record, running or finished. <b>Still open</b> means the gateway is holding that
+          lease and its prepaid minutes: if the account is not actually streaming, <b>End it</b> puts the
+          minutes back at once. This is the list to read when someone reports a call that would not start —
+          the table above only ever shows a lease while it is alive, so the evidence of a stuck one disappears
+          on its own after a couple of minutes.
+        </p>
+        <div class="grid4" id="histStats"></div>
+        <div style="overflow:auto;margin-top:12px">
+          <table id="histTable">
+            <thead><tr><th>User</th><th>Video service</th><th>Bucket</th><th>Device</th><th>Started</th><th>Ended</th><th>On air</th><th style="text-align:right">Billed</th><th style="text-align:right">Held</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="histMsg"></div>
       </div>
     </section>
 
@@ -881,6 +906,7 @@
   let SPLIT_ROWS = [];
   let AIR_ROWS = [];
   let AIR_TRUNC = false;
+  let HIST = [];
   let hasEngineCols = false;
   let hasTrialCols = false;
   let hasTrialCfg = false;
@@ -1682,16 +1708,27 @@
     }
   }
 
+  // This panel is a monitoring screen, so it keeps itself current without a click.
+  // Two timers, on purpose:
+  //  - the Key pool's "Today / cap" figure moves while you watch it, so it is patched
+  //    in place every 15 s. A full reload of that tab would clear a Verify result you
+  //    are still reading, and it sits next to the secret fields, so the tab as a whole
+  //    is never auto-reloaded.
+  //  - every other tab re-reads itself once a minute, and never under a field the
+  //    admin is typing into. Tables are what re-render; the forms around them are
+  //    static markup, so a half-typed credit amount survives a refresh.
   setInterval(() => {
     const on = document.querySelector(".tabs button[data-tab].on");
-    if (!on) return;
-    if (on.dataset.tab === "keys") { void refreshKeyUsage(); return; }
-    if (on.dataset.tab !== "sessions" && on.dataset.tab !== "airtime") return;
-    // Never re-read under a field the admin is typing into.
+    if (on && on.dataset.tab === "keys") void refreshKeyUsage();
+  }, 15_000);
+
+  setInterval(() => {
+    const on = document.querySelector(".tabs button[data-tab].on");
+    if (!on || on.dataset.tab === "keys") return;
     const a = document.activeElement;
     if (a && ["INPUT", "TEXTAREA", "SELECT"].includes(a.tagName)) return;
     void reloadTab(on.dataset.tab);
-  }, 15_000);
+  }, 60_000);
 
   document.addEventListener("click", (e) => {
     const t = e.target.closest("button[data-show]");
@@ -1955,17 +1992,39 @@
     await Promise.all([loadRates(), loadAccounts()]);
   };
 
-  // ══ LIVE SESSIONS ═══════════════════════════════════════════════════════
+  // ══ CALLS ══════════════════════════════════════════════════════════════
+  // One read feeds both tables, and it goes to usage_sessions rather than
+  // admin_live_sessions: that view hides every closed call, so a lease left open and
+  // then lapsed took its own evidence with it. An account reporting "it would not
+  // start" could not be checked after the fact, which is exactly what this table is
+  // for.
   async function loadSessions() {
-    const { data, error } = await sb.from("admin_live_sessions").select("*").order("started_at", { ascending: false }).limit(200);
+    const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    const { data, error } = await sb.from("usage_sessions")
+      .select("id, user_id, tab, modality, device_id, engine, decart_key_id, started_at, lease_started_at, lease_expires_at, real_minutes, billed_minutes, pending_debit, ended_at")
+      .gte("started_at", since)
+      .order("started_at", { ascending: false })
+      .limit(1000);
     if (error) return msg("sessMsg", error.message);
-    const rows = data || [];
-    await emailsOf(rows.map((r) => r.user_id));
+    HIST = data || [];
+    await emailsOf(HIST.map((r) => r.user_id));
+    renderOpenLeases();
+    renderHist();
+  }
+
+  function engCell(r) {
+    return r.engine
+      ? `<span class="pill ${ENGINE_PILL[r.engine]}">${ENGINE_LABEL[r.engine] || r.engine}</span>${r.engine === "decart" && r.decart_key_id ? `<div class="muted">key ${shortId(r.decart_key_id)}</div>` : ""}`
+      : '<span class="muted">—</span>';
+  }
+
+  function renderOpenLeases() {
+    const rows = HIST.filter((r) => !r.ended_at);
     $("sessTable").querySelector("tbody").innerHTML = rows.map((r) => {
       const expiring = r.lease_expires_at && new Date(r.lease_expires_at) <= new Date();
       return `<tr>
-        <td><b>${esc(EMAIL_OF[r.user_id] || r.email || shortId(r.user_id))}</b></td>
-        <td>${r.engine ? `<span class="pill ${ENGINE_PILL[r.engine]}">${ENGINE_LABEL[r.engine] || r.engine}</span>${r.engine === "decart" && r.decart_key_id ? `<div class="muted">key ${shortId(r.decart_key_id)}</div>` : ""}` : '<span class="muted">—</span>'}</td>
+        <td><b>${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</b></td>
+        <td>${engCell(r)}</td>
         <td class="muted">${esc(r.tab || "—")}</td>
         <td>${MOD_LABEL[r.modality] || r.modality}</td>
         <td class="muted mono">${esc(r.device_id || "—")}</td>
@@ -1978,9 +2037,39 @@
           <button data-act="end" data-id="${r.id}" class="danger">End now</button>
           <button data-act="reap1" data-id="${r.user_id}">Reap</button>
         </td></tr>`;
-    }).join("") || '<tr><td colspan="11" class="muted">No open leases — nothing is burning right now.</td></tr>';
+    }).join("") || '<tr><td colspan="11" class="muted">Nothing is on air right now — every call has closed.</td></tr>';
+  }
+
+  function renderHist() {
+    const q = ($("histSearch").value || "").trim().toLowerCase();
+    const rows = HIST.filter((r) => !q || String(EMAIL_OF[r.user_id] || "").toLowerCase().includes(q));
+    const shown = rows.slice(0, 300);
+    const held = rows.reduce((a, r) => a + N(r.pending_debit), 0);
+    $("histStats").innerHTML = [
+      [rows.length, "calls in the window"],
+      [rows.filter((r) => !r.ended_at).length, "still open"],
+      [clock(rows.reduce((a, r) => a + N(r.real_minutes), 0)), "time on air"],
+      [mins1(held) + " min", "held by an open call"],
+    ].map(([v, l]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+    $("histTable").querySelector("tbody").innerHTML = shown.map((r) => `<tr>
+        <td><b>${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</b></td>
+        <td>${engCell(r)}</td>
+        <td>${MOD_LABEL[r.modality] || r.modality}</td>
+        <td class="muted mono">${esc(r.device_id || "—")}</td>
+        <td class="muted">${when(r.started_at)}</td>
+        <td class="muted">${r.ended_at ? when(r.ended_at) : '<span class="pill warn">still open</span>'}</td>
+        <td class="mono" style="text-align:right">${clock(r.real_minutes)}</td>
+        <td class="mono" style="text-align:right">${mins2(r.billed_minutes)}</td>
+        <td class="mono" style="text-align:right">${N(r.pending_debit) ? mins2(r.pending_debit) + " min" : "—"}</td>
+        <td style="white-space:nowrap">${r.ended_at ? "" : `<button data-act="end" data-id="${r.id}" class="danger">End it</button>`}</td></tr>`).join("")
+      || '<tr><td colspan="10" class="muted">No call in the last 3 days matches that filter.</td></tr>';
+    msg("histMsg", rows.length > shown.length
+      ? `Showing the most recent ${shown.length} of ${rows.length} calls in that filter.`
+      : "");
   }
   $("sessRefresh").onclick = loadSessions;
+  $("histRefresh").onclick = loadSessions;
+  $("histSearch").oninput = renderHist;
 
   $("reapAll").onclick = async () => {
     if (!confirm("Close every lease that ran past its TTL across all accounts? Used minutes stay billed, unused pre-debits are refunded.")) return;
