@@ -1,0 +1,58 @@
+<!--
+  Stream Live — sign-up confirmation email.
+  Paste into: Supabase Dashboard -> Authentication -> Sign In / Up -> Email templates
+  -> "Confirm signup" -> HTML body. Subject line to paste is in README.md next to this file.
+  Table layout + inline styles only, so it survives Outlook, Gmail and mobile mail.
+  {{ .ConfirmationURL }} is the only variable this template needs.
+-->
+<html>
+  <body style="margin:0;padding:0;background:#06090f;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#06090f;">
+      <tr>
+        <td align="center" style="padding:34px 16px;">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;background:#0b1120;border:1px solid #16233a;border-radius:16px;">
+            <tr>
+              <td style="padding:30px 32px 0 32px;">
+                <div style="font-family:Arial,Helvetica,sans-serif;font-size:17px;font-weight:bold;letter-spacing:5px;color:#0cf2ff;">STREAM&nbsp;LIVE</div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 32px 0 32px;">
+                <h1 style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:22px;line-height:29px;font-weight:bold;color:#eaf7fb;">Your Stream Live account is created</h1>
+                <p style="margin:14px 0 0;font-family:Arial,Helvetica,sans-serif;font-size:15px;line-height:23px;color:#9fb4c4;">
+                  Go live with your own camera and microphone straight into OBS, or feed an AI voice through
+                  and let the software carry the picture. Before you start, confirm that this address is yours.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:26px 32px 8px 32px;">
+                <a href="{{ .ConfirmationURL }}"
+                   style="display:inline-block;background:#0cf2ff;color:#04101a;font-family:Arial,Helvetica,sans-serif;font-size:15px;font-weight:bold;text-decoration:none;padding:14px 30px;border-radius:10px;">
+                  Confirm my email address
+                </a>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:26px 32px 0 32px;">
+                <div style="border-top:1px solid #16233a;padding-top:18px;">
+                  <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:18px;color:#64808f;">
+                    You are getting this because an account was created on your Stream Live software.
+                    If that wasn't you, nothing happens unless this link is opened &mdash; you can ignore this email.
+                  </p>
+                </div>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:18px 32px 30px 32px;">
+                <p style="margin:0;font-family:Arial,Helvetica,sans-serif;font-size:11px;letter-spacing:2px;color:#41596b;">
+                  STREAM LIVE &middot; REAL PEOPLE &middot; REAL VOICES &middot; AI POWERED
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>

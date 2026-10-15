@@ -179,7 +179,11 @@ export async function signIn(email: string, password: string): Promise<Session> 
 }
 
 export async function signUp(email: string, password: string, displayName?: string): Promise<Session | null> {
-  const session = await gateway.signUp(email, password, displayName);
+  // The machine id travels with the account from its first moment, because the free
+  // trial belongs to the computer rather than to the login. The server reads it and
+  // decides there whether this machine has already had one; nothing here promises an
+  // outcome, so a second account on the same PC simply finds no trial waiting.
+  const session = await gateway.signUp(email, password, displayName, await deviceId());
   if (session) {
     setState({ signedIn: true, email: session.user.email ?? null, loading: false });
     await refreshBalances();

@@ -6,13 +6,13 @@
 const GENERIC_END = "Something went wrong, so the call stopped. You weren't charged for it — please try again.";
 
 const REASON_COPY: Record<string, string> = {
-  out_of_minutes: "You've used all your minutes. Ask your administrator for more from your minutes dashboard.",
+  out_of_minutes: "This account has no minutes to call with. Ask your administrator for more from your minutes dashboard.",
   modality_disabled: "This kind of call isn't switched on for your account. Ask your administrator to enable it.",
   no_subscription: "Your account doesn't have a plan yet. Ask your administrator to set one up.",
   status_canceled: "Your administrator cancelled this account.",
   status_past_due: "This account is on hold for payment. Ask your administrator to sort it out.",
   status_expired: "This account is no longer active. Ask your administrator to reactivate it.",
-  device_limit_reached: "You've reached the number of devices allowed on this account. Remove one and try again.",
+  device_limit_reached: "You've reached the number of devices allowed on this account. Your administrator can free one up for you.",
   device_revoked: "This device was removed by your administrator.",
   concurrent_limit: "You're already on a call. End it before starting another one.",
   lines_busy: "Every video line our provider allows is in use right now. Give it a minute and try again.",
@@ -50,6 +50,10 @@ function looksInternal(text: string): boolean {
   if (/^(Stream Live|Stream Studio)\b/i.test(text)) return true; // our own internal throw prefix
   if (/stack|\bat\s+\S+\.\S+\s+\(/.test(text)) return true;
   if (/\n\s{2,}/.test(text)) return true; // multi-line stack traces
+  // GoTrue wraps anything the database refuses during sign-up (including a trigger
+  // that rejects a malformed address) in its own wording, which names our provider.
+  // The refusal is real; the sentence is not something a customer should read.
+  if (/database error|saving new user|duplicate key|trigger|function/i.test(text)) return true;
   return false;
 }
 

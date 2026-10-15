@@ -6,10 +6,25 @@ import { useToast } from "../hooks/use-toast";
 import { gateway, useAccount, signIn, signUp, signOut } from "../lib/gateway";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
 import { toUserMessage } from "../lib/end-reason";
-import { LogIn, LogOut, UserPlus, KeyRound, Loader2, MonitorX, Hourglass, CreditCard } from "lucide-react";
+import { LogIn, LogOut, UserPlus, KeyRound, Loader2, Hourglass, CreditCard } from "lucide-react";
 
 const C = "hsl(187 100% 52%)";
 const BG = "hsl(222 47% 4%)";
+
+// Refuses the addresses that cannot exist at all — nothing before the @, a space
+// anywhere, a domain with no real ending. It cannot judge a correctly spelled address
+// that belongs to nobody: only a link that actually arrives proves an address, which is
+// why the account email is worth confirming. The gateway checks this same shape on the
+// server, so an older build cannot get past it either.
+const EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[A-Za-z]{2,}$/;
+
+function emailProblem(value: string): string | null {
+  const v = value.trim();
+  if (!v) return "Enter your email address.";
+  if (/\s/.test(v)) return "An email address cannot contain spaces.";
+  if (!EMAIL_SHAPE.test(v)) return "That is not a valid email address. Check for a missing @, a missing dot, or a mistyped ending like “.con”.";
+  return null;
+}
 
 function fmtDate(ts: string | null) {
   if (!ts) return "—";
@@ -52,6 +67,11 @@ export default function AccountPage() {
       toast({ title: "Gateway not configured", description: "This build was packaged without VITE_SUPABASE_ANON_KEY, so it cannot reach your account.", variant: "destructive" });
       return;
     }
+    const badEmail = emailProblem(email);
+    if (badEmail) {
+      toast({ title: "Check the email address", description: badEmail, variant: "destructive" });
+      return;
+    }
     setBusy(true);
     try {
       if (authMode === "signup") {
@@ -69,16 +89,6 @@ export default function AccountPage() {
     } catch (err) {
       toast({ title: authMode === "signup" ? "Could not create account" : "Sign-in failed", description: toUserMessage(err, authMode === "signup" ? "We couldn't create the account. Try again." : "Check your email and password, then try again."), variant: "destructive" });
     } finally { setBusy(false); }
-  };
-
-  const handleRevoke = async (deviceId: string) => {
-    try {
-      await gateway.revokeDevice(deviceId);
-      await loadDevices();
-      toast({ title: "Device removed" });
-    } catch (err) {
-      toast({ title: "Could not remove device", description: toUserMessage(err, "We couldn't remove that device. Try again."), variant: "destructive" });
-    }
   };
 
   const handleChangePassword = async () => {
@@ -132,12 +142,12 @@ export default function AccountPage() {
               </h1>
               <p style={{ color: "hsl(222 25% 58%)", fontSize: 12.5, lineHeight: 1.5, fontFamily: "'Rajdhani', sans-serif", margin: 0 }}>
                 {authMode === "signup"
-                  ? "No email verification and nothing to buy up front. Your administrator tops up the minutes you call with."
+                  ? "Nothing to buy up front. Use the email you can actually receive mail on — your administrator tops up the minutes you call with."
                   : "Sign in with the account you created — your minutes, devices and requests are waiting."}
               </p>
               <div style={{ marginTop: 12, padding: "12px 14px", borderRadius: 12, background: "hsl(187 100% 52% / 0.08)", border: "1px solid hsl(187 100% 52% / 0.3)" }}>
                 <p style={{ margin: 0, fontSize: 15.5, fontWeight: 700, lineHeight: 1.4, fontFamily: "'Rajdhani', sans-serif", color: "hsl(190 85% 95%)" }}>
-                  Every new account gets 1 minute of free video streaming to test the software.
+                  Your first account on a computer gets 1 minute of free video streaming to test the software.
                 </p>
                 <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.45, fontFamily: "'Rajdhani', sans-serif", color: "hsl(187 55% 80%)" }}>
                   That free minute shows a watermark on the AI video. Get minutes in your account — by buying them or by having them credited — and the watermark is gone.
@@ -242,19 +252,19 @@ export default function AccountPage() {
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               {devices.map(d => (
-                <div key={String(d.device_id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 12px", background: "hsl(222 40% 8%)", borderRadius: 8, border: "1px solid hsl(222 40% 12%)" }}>
+                <div key={String(d.device_id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "8px 12px", background: "hsl(222 40% 8%)", borderRadius: 8, border: "1px solid hsl(222 40% 12%)" }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontSize: 12, color: "hsl(190 80% 92%)", fontFamily: "monospace", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{String(d.label || d.device_id)}</p>
                     <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani', sans-serif" }}>last seen {fmtDate(d.last_seen as string)}</p>
                   </div>
-                  <button onClick={() => handleRevoke(String(d.device_id))}
-                    style={{ display: "flex", alignItems: "center", gap: 5, padding: "6px 12px", borderRadius: 7, background: "hsl(0 85% 40% / 0.15)", border: "1px solid hsl(0 85% 40% / 0.3)", cursor: "pointer", color: "hsl(0 85% 65%)", fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani', sans-serif" }}>
-                    <MonitorX style={{ width: 12, height: 12 }} /> Remove
-                  </button>
+                  <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Orbitron', monospace", color: "hsl(222 25% 42%)" }}>in use</span>
                 </div>
               ))}
             </div>
           )}
+          <p style={{ fontSize: 11.5, color: "hsl(222 25% 48%)", fontFamily: "'Rajdhani', sans-serif", margin: "12px 0 0", lineHeight: 1.5 }}>
+            A device joins this list the first time a call starts on it, and stays tied to your account. If you are told you have too many devices, your administrator frees one for you.
+          </p>
         </div>
 
         {/* Change password */}

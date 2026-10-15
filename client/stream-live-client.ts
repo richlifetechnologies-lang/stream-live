@@ -177,11 +177,18 @@ export class StreamLiveClient {
   }
 
   // ── Auth ───────────────────────────────────────────────────────────────────
-  async signUp(email: string, password: string, displayName?: string): Promise<Session | null> {
+  /**
+   * Create the account. `deviceId` is the same machine id the app sends when a call
+   * starts, carried here so the server can give the free trial to the computer rather
+   * than to the account — otherwise one machine can register its way to a trial every
+   * time. The server decides on its own what to do with it; this client promises
+   * nothing about the outcome.
+   */
+  async signUp(email: string, password: string, displayName?: string, deviceId?: string): Promise<Session | null> {
     const { data, error } = await this.sb.auth.signUp({
       email,
       password,
-      options: { data: { display_name: displayName } },
+      options: { data: { display_name: displayName, device_id: deviceId } },
     });
     if (error) throw error;
     return data.session;
@@ -339,13 +346,6 @@ export class StreamLiveClient {
       .order("last_seen", { ascending: false });
     if (error) throw new Error(error.message);
     return data ?? [];
-  }
-
-  /** Release a device slot. The row stays (revoked) so it can never re-bind silently. */
-  async revokeDevice(deviceId: string): Promise<void> {
-    await this.token();
-    const { error } = await this.sb.from("devices").update({ revoked: true }).eq("device_id", deviceId);
-    if (error) throw new Error(error.message);
   }
 
   /** Ask the administrator for minutes. Payment happens outside the software. */

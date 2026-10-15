@@ -34,7 +34,7 @@ const STATUS_BY_REASON: Record<string, number> = {
   maintenance: 503,
 };
 
-async function mintFalToken(userId: string, appId: string, ttlSeconds: number, billMinutes: number) {
+async function mintFalToken(userId: string, appId: string, ttlSeconds: number) {
   const expiration = Math.max(DEFAULT_TOKEN_TTL_SECONDS, ttlSeconds);
   return runWithKeys<{ token: string; expiresAt: string }>(userId, "fal", async (key) => {
     const res = await fetch("https://rest.fal.ai/tokens/", {
@@ -54,13 +54,15 @@ async function mintFalToken(userId: string, appId: string, ttlSeconds: number, b
       else if (parsed?.token) token = String(parsed.token);
       else token = raw.replace(/^"|"$/g, "");
     } catch { /* plain-text token */ }
-    // The daily per-key cap only binds if the key is told what it just signed up
-    // to burn, so book the prepaid chunk against it. Long calls re-charge through
-    // the lease, which has no key attached yet — this is a floor, not an exact bill.
+    // Nothing is booked against the key here. The prepaid chunk is only a hold: the
+    // call may never deliver a frame and get refunded, and every minute after the
+    // first window was always billed by the lease, not by this mint. sl_settle_window
+    // books each window against usage_sessions.fal_key_id, so a key's daily figure is
+    // the minutes it actually delivered.
     return {
       ok: true,
       value: { token, expiresAt: new Date(Date.now() + expiration * 1000).toISOString() },
-      minutes: billMinutes,
+      minutes: 0,
     };
   });
 }
@@ -162,7 +164,7 @@ Deno.serve(async (req: Request) => {
     if (modality !== "audio") {
       const minted = engine === "decart"
         ? await mintDecartToken(user.id, lease.ttlSeconds, lease.chunkMinutes)
-        : await mintFalToken(user.id, appId, lease.ttlSeconds, lease.chunkMinutes);
+        : await mintFalToken(user.id, appId, lease.ttlSeconds);
       if (!minted.ok) {
         // Give the prepaid chunk straight back — the call never happened.
         await updateLease(lease.sessionId, "end").catch(() => null);
@@ -181,6 +183,18 @@ Deno.serve(async (req: Request) => {
           p_minutes: lease.chunkMinutes,
           p_session_id: lease.sessionId,
         });
+      }
+      // The paid-video key that served this call has to be remembered on the session,
+      // because the minutes that make the call expensive are booked later, window by
+      // window, inside the lease settle. 'env' is the last-resort secret rather than a
+      // pooled key, so there is no row to attribute it to.
+      if (engine !== "decart" && minted.keyId && minted.keyId !== "env") {
+        const db = adminClient();
+        const { error } = await db
+          .from("usage_sessions")
+          .update({ fal_key_id: minted.keyId })
+          .eq("id", lease.sessionId);
+        if (error) console.error(`[start-session] fal key link failed: ${error.message}`);
       }
     }
 

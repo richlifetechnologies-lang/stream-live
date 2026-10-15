@@ -918,11 +918,37 @@
 
   // ── Tabs ──────────────────────────────────────────────────────────────────
   const TABS = [...document.querySelectorAll(".tabs button[data-tab]")].map((b) => b.dataset.tab);
+  // Every tab reads its figures out of the gateway tables when it is opened, so a tab
+  // you switch back to can never keep showing the numbers from before a call ran. A
+  // tab click means the same thing as pressing that tab's Refresh button.
+  const TAB_LOADERS = {
+    accounts: [loadAccounts],
+    topups: [loadRequests],
+    keys: [loadKeys],
+    decart: [loadKeys, loadSupply],
+    split: [loadAccounts],
+    engines: [loadConfig],
+    burn: [loadRates],
+    sessions: [loadSessions],
+    airtime: [loadAirtime],
+    gateway: [loadConfig],
+    plans: [loadPlans],
+    price: [loadPricing],
+    contact: [loadContact],
+  };
+
+  async function reloadTab(tab) {
+    for (const fn of TAB_LOADERS[tab] || []) {
+      try { await fn(); } catch (err) { console.warn("tab reload failed:", tab, err); }
+    }
+  }
+
   document.querySelectorAll(".tabs button[data-tab]").forEach((b) => {
     b.onclick = () => {
       document.querySelectorAll(".tabs button[data-tab]").forEach((x) => x.classList.remove("on"));
       b.classList.add("on");
       TABS.forEach((t) => $("tab-" + t).classList.toggle("hidden", t !== b.dataset.tab));
+      void reloadTab(b.dataset.tab);
     };
   });
 
@@ -1561,7 +1587,7 @@
         <td>${cell(k, "elevenlabs", k.voice_key_tail)}</td>
         <td style="white-space:nowrap">${k.enabled === false ? '<span class="pill no">disabled</span>' : '<span class="pill yes">enabled</span>'} <button data-act="toggle" data-id="${k.id}">${k.enabled === false ? "enable" : "disable"}</button></td>
         <td class="mono">${N(k.priority, 100)}</td>
-        <td class="mono">${cap == null ? "uncapped" : mins(used) + " / " + mins(cap)}${cap != null && used >= N(cap) ? ' <span class="pill warn">capped</span>' : ""}</td>
+        <td class="mono" data-usage="${k.id}">${cap == null ? "uncapped" : mins(used) + " / " + mins(cap)}${cap != null && used >= N(cap) ? ' <span class="pill warn">capped</span>' : ""}</td>
         <td class="mono">${N(k.recent_failures) ? `<span class="pill fail">${k.recent_failures}</span>` : '<span class="pill ok">0</span>'}</td>
         <td class="muted">${esc(k.last_error || "—")}${k.last_error_at ? `<div class="muted">${when(k.last_error_at)}</div>` : ""}</td>
         <td style="white-space:nowrap">
@@ -1634,6 +1660,36 @@
 
   $("refreshKeys").onclick = loadKeys;
   $("refreshUsage").onclick = loadKeyUsage;
+
+  // A call bills its key window by window, so the "Today / cap" figure is the one
+  // number on this page that moves while you are looking at it. Patching just that
+  // cell means it can update on a timer without disturbing a key form half filled in
+  // or a Verify result you are still reading, which a full reload of the tab would.
+  async function refreshKeyUsage() {
+    const { data, error } = await sb
+      .from("admin_key_health")
+      .select("id, minutes_today, daily_minute_cap");
+    if (error || !data) return;
+    for (const k of data) {
+      const td = document.querySelector(`[data-usage="${k.id}"]`);
+      if (!td) continue;
+      const used = N(k.minutes_today), cap = k.daily_minute_cap;
+      td.innerHTML = cap == null
+        ? "uncapped"
+        : mins(used) + " / " + mins(cap) + (used >= N(cap) ? ' <span class="pill warn">capped</span>' : "");
+    }
+  }
+
+  setInterval(() => {
+    const on = document.querySelector(".tabs button[data-tab].on");
+    if (!on) return;
+    if (on.dataset.tab === "keys") { void refreshKeyUsage(); return; }
+    if (on.dataset.tab !== "sessions" && on.dataset.tab !== "airtime") return;
+    // Never re-read under a field the admin is typing into.
+    const a = document.activeElement;
+    if (a && ["INPUT", "TEXTAREA", "SELECT"].includes(a.tagName)) return;
+    void reloadTab(on.dataset.tab);
+  }, 15_000);
 
   document.addEventListener("click", (e) => {
     const t = e.target.closest("button[data-show]");
@@ -2336,7 +2392,10 @@
   // costs" into "what one sold minute costs" — the unit actually priced here.
   // Margin is measured on the sale price, so a price that keeps M% of itself is
   // cost / (1 - M).
-  const PG_DEFAULT = { falMin: 2.4, voiceMin: 0.18, margin: 40 };
+  // fal prices decart/lucy-2-5/realtime at 0.02 USD per second, which is $1.20 for a
+  // real minute. These are only the fallbacks for a blank field or a failed read; the
+  // saved billing_config row normally supplies the number.
+  const PG_DEFAULT = { falMin: 1.2, voiceMin: 0.18, margin: 40 };
   const PG_MINCOL = { video: "video_minutes", audio: "audio_minutes", video_audio: "video_audio_minutes" };
   const PG_SHOP_LABEL = { video: "Video only", audio: "Voice only", video_audio: "Video + voice" };
   const PG_QUICK = [15, 30, 60, 120, 300, 600];

@@ -23,13 +23,29 @@ is a 401 — sign in first. Errors come back as
 
 ```ts
 const client = new StreamLiveClient({ supabaseUrl, supabaseAnonKey, falAppId: "lucy-2-5", appVersion });
-await client.signUp(email, password, displayName); // no email confirmation
+await client.signUp(email, password, displayName, deviceId); // see §1.1
 await client.signIn(email, password);
 await client.restoreSession();
 ```
 
 Sign-up is open, verification is off, and the account is usable the moment it is
 created — with an empty wallet.
+
+### 1.1 Sign-up metadata
+
+`deviceId` is the same stable install id `startCall()` sends. It rides along at
+account creation because the free trial is granted per **computer**, not per account:
+the gateway records the machine in its own trial register and refuses a second grant to
+a device that has already carried one. A sign-up that carries no device id (a build
+older than this change) keeps the previous one-trial-per-account behaviour, so the
+funnel stays open while installs update themselves — nothing about the outcome is
+decided in the app, and the client promises nothing.
+
+Addresses are checked against the same shape on the server, so an older build cannot
+create an account with an email that cannot exist.
+
+Sign-up is open and the account is usable the moment it is created — with an empty
+wallet unless the trial was granted.
 
 ## 2. Open a lease — `start-session`
 
@@ -95,8 +111,10 @@ exists. Anything else is rejected.
 
 Balances, ledger, credit requests and devices are RLS-scoped reads:
 `client.wallets()`, `client.ledger()`, `client.requestTopup({ modality, minutes,
-paymentChannel, paymentReference, note })`, `client.devices()`,
-`client.revokeDevice(id)`.
+paymentChannel, paymentReference, note })`, `client.devices()`. A device row is
+read-only to the account that owns it — only an administrator can revoke or delete a
+binding, from the panel. There is deliberately no client method for it: a user who
+removed their own device could never bind it again, and only an admin could undo that.
 
 Crediting an account is **never** reachable from a client token —
 `sl_grant_credits`, `sl_resolve_request`, `sl_pick_keys` and the rest are
