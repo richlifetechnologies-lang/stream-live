@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stream Live — an AI camera for OBS, Zoom, Teams and calls</title>
+<meta name="description" content="Stream Live puts a photoreal AI presenter and a cloned voice on your webcam, as a camera and microphone any app can see. Windows and macOS. One free minute on every new account." />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256'%3E%3Crect width='256' height='256' rx='58' fill='%230a1026'/%3E%3Ctext x='128' y='172' font-size='120' text-anchor='middle' fill='%233ec6ff' font-family='sans-serif'%3ES%3C/text%3E%3C/svg%3E" />
+<style>
+  :root {
+    --ink: #060a18;
+    --panel: #0a1026;
+    --line: #1b2444;
+    --text: #e8eefc;
+    --muted: #94a3c8;
+    --cyan: #3ec6ff;
+    --blue: #1b3ff2;
+    --violet: #8b2ff5;
+  }
+  * { box-sizing: border-box }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--text);
+    font: 16px/1.65 system-ui, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--cyan) }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 22px }
+  header.site {
+    position: sticky; top: 0; z-index: 5;
+    background: rgba(6,10,24,.86); backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar { display: flex; align-items: center; gap: 14px; height: 60px }
+  .mark { width: 30px; height: 30px; border-radius: 8px; flex: none;
+          background: linear-gradient(135deg, var(--cyan), var(--blue) 55%, var(--violet)); }
+  .wordmark { font-weight: 700; letter-spacing: .18em; text-transform: uppercase; font-size: 14px }
+  nav { margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap }
+  nav a { color: var(--muted); text-decoration: none; font-size: 14px }
+  nav a:hover { color: var(--text) }
+
+  .hero {
+    position: relative; overflow: hidden;
+    padding: 88px 0 76px;
+    background:
+      radial-gradient(900px 460px at 12% -10%, rgba(62,198,255,.20), transparent 60%),
+      radial-gradient(760px 420px at 88% 8%, rgba(139,47,245,.18), transparent 62%),
+      linear-gradient(180deg, #0a1026, #060a18 70%);
+    border-bottom: 1px solid var(--line);
+  }
+  h1 { font-size: clamp(32px, 6vw, 54px); line-height: 1.08; margin: 0 0 16px; letter-spacing: -.02em }
+  h1 em { font-style: normal; color: var(--cyan) }
+  .lede { font-size: clamp(17px, 2.2vw, 21px); color: var(--muted); max-width: 640px; margin: 0 0 30px }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; align-items: center }
+  .btn { display: inline-block; padding: 13px 22px; border-radius: 10px; font-weight: 650;
+         text-decoration: none; font-size: 15px }
+  .btn.primary { background: linear-gradient(135deg, var(--cyan), var(--blue) 60%, var(--violet));
+                color: #061021; }
+  .btn.ghost { border: 1px solid var(--line); color: var(--text) }
+  .btn:hover { filter: brightness(1.12) }
+  .free { margin-top: 16px; font-size: 14px; color: var(--muted) }
+  .free b { color: var(--text); font-weight: 650 }
+
+  section { padding: 62px 0; border-bottom: 1px solid var(--line) }
+  h2 { font-size: clamp(22px, 3.4vw, 30px); margin: 0 0 8px; letter-spacing: -.01em }
+  .kicker { font-size: 12px; letter-spacing: .2em; text-transform: uppercase; color: var(--cyan); margin: 0 0 14px }
+  .sub { color: var(--muted); margin: 0 0 32px; max-width: 660px }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)) }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px }
+  .card h3 { margin: 0 0 6px; font-size: 17px }
+  .card p { margin: 0; color: var(--muted); font-size: 15px }
+  ol.steps { list-style: none; counter-reset: s; padding: 0; margin: 0; display: grid; gap: 14px }
+  ol.steps li { counter-increment: s; background: var(--panel); border: 1px solid var(--line);
+                border-radius: 14px; padding: 18px 20px 18px 62px; position: relative; color: var(--muted) }
+  ol.steps li b { color: var(--text) }
+  ol.steps li::before { content: counter(s); position: absolute; left: 18px; top: 16px;
+    width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    font-weight: 700; font-size: 14px; color: #061021;
+    background: linear-gradient(135deg, var(--cyan), var(--violet)); }
+  .chips { display: flex; flex-wrap: wrap; gap: 9px; margin: 0 0 26px; padding: 0; list-style: none }
+  .chips li { border: 1px solid var(--line); border-radius: 999px; padding: 7px 14px;
+              font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted) }
+  .note { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--cyan);
+          border-radius: 12px; padding: 18px 20px; color: var(--muted); margin: 0 0 16px }
+  .note b { color: var(--text) }
+  ul.plain { margin: 0; padding-left: 20px; color: var(--muted) }
+  ul.plain li { margin-bottom: 8px }
+  footer { padding: 40px 0 54px; color: var(--muted); font-size: 14px }
+  footer .bar { height: auto }
+  code { background: #101838; border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; font-size: 13px }
+</style>
+</head>
+<body>
+
+<header class="site">
+  <div class="wrap bar">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="wordmark">Stream Live</span>
+    <nav>
+      <a href="#get">Download</a>
+      <a href="#how">How it works</a>
+      <a href="#mac">Mac install</a>
+      <a href="#looks">Looks</a>
+      <a href="#time">Minutes</a>
+      <a href="#help">Help</a>
+      <a href="#contact">Contact</a>
+    </nav>
+  </div>
+</header>
+
+<div class="hero">
+  <div class="wrap">
+    <h1>Your camera, <em>rebuilt</em> while you talk.</h1>
+    <p class="lede">Stream Live turns your webcam into a live AI presenter and your microphone into a
+      clean cloned voice, then hands both to OBS, Zoom, Teams, Chrome or WhatsApp as if they were a
+      camera and a mic. Nothing to render, nothing to upload: what you say is what goes out.</p>
+    <div class="cta" id="download">
+      <a class="btn primary" href="#contact">Get the installer</a>
+      <a class="btn ghost" href="#get">Which file do I need?</a>
+      <a class="btn ghost" href="#how">See how it works</a>
+    </div>
+    <p class="free"><b>One free minute of video</b> on every new account, on the computer you install it on.
+      No card, no trial period to cancel.</p>
+  </div>
+</div>
+
+<section>
+  <div class="wrap">
+    <p class="kicker">What you get</p>
+    <h2>Two devices other apps believe</h2>
+    <p class="sub">Once you are running, your app list gains a camera and a microphone that did not exist
+      before. Point anything at them — a stream, a meeting, a browser call.</p>
+    <div class="grid">
+      <div class="card">
+        <h3>An AI picture, as a camera</h3>
+        <p>On Windows the installer adds <code>Stream Live Camera</code> and any app can select it: OBS, Zoom,
+          Teams, Google Meet, WhatsApp Web. On a Mac the picture goes out through OBS instead — one free
+          program, three clicks, covered under
+          <a href="#mac">Mac install</a>.</p>
+      </div>
+      <div class="card">
+        <h3>A cloned voice, as a microphone</h3>
+        <p>Voice on its own, or paired with video. Noise cancellation is on by default and clears the room out
+          of your mic. On a Mac a free silent speaker called BlackHole carries it to your call app.</p>
+      </div>
+      <div class="card">
+        <h3>Landscape or tall</h3>
+        <p>Full frame for OBS scenes, or an exact 9:16 portrait window for phone-shaped video — calls and
+          captures both receive it tall.</p>
+      </div>
+      <div class="card">
+        <h3>Windows and macOS</h3>
+        <p>Windows 10 and 11 get both devices straight from the installer, nothing else to fetch. A Mac
+          installs the same way and then needs the two free helpers, because Apple only lets an app it has
+          approved host a system webcam.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="get">
+  <div class="wrap">
+    <p class="kicker">Downloads</p>
+    <h2>Take the file that matches your machine</h2>
+    <p class="sub">Ask for the current build on <a href="#contact">Telegram</a> and say which computer you
+      have — the link comes back, and it is always the newest version. These are the three files it can
+      be.</p>
+    <div class="grid">
+      <div class="card">
+        <h3>Windows 10 or 11</h3>
+        <p><code>StreamLive-Setup-&lt;version&gt;.exe</code><br>
+          Double-click it, accept the security prompt, let it finish. The camera and the microphone are both in
+          place when it closes — nothing else to install.</p>
+      </div>
+      <div class="card">
+        <h3>Mac with an Apple chip</h3>
+        <p><code>StreamLive-&lt;version&gt;-arm64.dmg</code><br>
+          For M1, M2, M3 and M4 Macs. Installs like any other Mac app, then follows the
+          <a href="#mac">five steps below</a> so a call app can see it.</p>
+      </div>
+      <div class="card">
+        <h3>Mac with an Intel chip</h3>
+        <p><code>StreamLive-&lt;version&gt;-x64.dmg</code><br>
+          For Intel Macs from 2020 and earlier. Same five steps as the Apple-chip disk.</p>
+      </div>
+    </div>
+    <div class="note" style="margin-top:20px">
+      <b>Not sure which Mac you have?</b> Click the Apple menu → <i>About This Mac</i>. If it says
+      <b>Chip: Apple M…</b>, ask for the <code>arm64</code> disk. If it says <b>Processor: Intel…</b>, ask for
+      the <code>x64</code> one. Either way the app updates itself from inside, so the first download is the last
+      one you ask for by hand.
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <p class="kicker">How it works</p>
+    <h2>Three moves, then you are live</h2>
+    <ol class="steps">
+      <li><b>Install and sign up.</b> Run the installer, open Stream Live, create an account in the app. It
+        works the moment it is created.</li>
+      <li><b>Pick a look and a voice.</b> Choose a style, then a face or voice reference. Video, voice, or both
+        together.</li>
+      <li><b>Select it in your app.</b> In the call or streaming app, choose <code>Stream Live Camera</code> and
+        <code>Stream Live Microphone</code> — on a Mac they are named <code>OBS Virtual Camera</code> and
+        <code>BlackHole 2ch</code> — then press Start in Stream Live. Your own camera stays off-air.</li>
+    </ol>
+    <div class="note" style="margin-top:22px">
+      <b>On a Mac?</b> The short version of this page is the
+      <a href="#mac">Mac install walk-through</a>: approve the app once, allow camera and microphone, add the
+      two free helpers, then point OBS at the Stream Live window.
+    </div>
+  </div>
+</section>
+
+<section id="mac">
+  <div class="wrap">
+    <p class="kicker">Mac install</p>
+    <h2>Getting Stream Live onto a Mac</h2>
+    <p class="sub">Five steps, about three minutes. Do them in order; steps 1 and 2 are one-time, and steps 4
+      and 5 are what make a call app see the AI picture and hear the AI voice.</p>
+    <ol class="steps">
+      <li><b>Move the app into Applications.</b> Double-click the <code>.dmg</code> you downloaded, drag
+        <i>Stream Live</i> onto <i>Applications</i>, then eject the disk. Keep it in Applications — running it
+        from the Downloads folder is what makes later updates fail.</li>
+      <li><b>Approve it the first time.</b> Stream Live is not signed with a paid Apple developer certificate,
+        so macOS blocks the very first launch. Open it once, then go to <b>System Settings → Privacy &amp;
+        Security</b>, scroll to Security and click <b>“Open Anyway”</b> beside “Stream Live was blocked”. Enter
+        your password and launch it again — it stays approved. If <i>Open Anyway</i> never appears, right-click
+        the app in Applications and choose <i>Open</i>; as a last resort run this in Terminal:
+        <code>xattr -dr com.apple.quarantine "/Applications/Stream Live.app"</code></li>
+      <li><b>Allow the camera and the microphone.</b> In <b>System Settings → Privacy &amp; Security</b>, switch
+        <i>Stream Live</i> on under both <b>Camera</b> and <b>Microphone</b>. Without them the preview stays
+        black and no voice is cloned.</li>
+      <li><b>Install the two free helpers.</b> They do the job the Windows installer does with bundled drivers:
+        one carries sound, one carries video.
+        <ul class="plain" style="margin-top:10px">
+          <li><a href="https://existential.audio/blackhole/" target="_blank" rel="noreferrer">BlackHole 2ch</a> —
+            a silent virtual speaker; the AI voice goes in here. After installing it, <b>log out and back in</b>,
+            and it appears under System Settings → Sound and in the app’s “Audio out” list.</li>
+          <li><a href="https://obsproject.com/" target="_blank" rel="noreferrer">OBS Studio</a> — turns the
+            Stream Live window into a webcam.</li>
+        </ul>
+      </li>
+      <li><b>Put the AI feed into your call.</b> On the stream screen, open the <b>OBS</b> window and turn
+        <b>Stream Live Microphone</b> on, so the cloned voice moves to BlackHole 2ch. Then:
+        <ol style="margin:10px 0 0; padding-left:20px; color:var(--muted)">
+          <li>In OBS: <b>Sources → + → Window Capture</b> → pick “Stream Live OBS”.</li>
+          <li>In OBS: <b>Controls → Start Virtual Camera</b>.</li>
+          <li>In Zoom, Teams, Meet or WhatsApp: Camera → <b>OBS Virtual Camera</b>, Microphone →
+            <b>BlackHole 2ch</b>.</li>
+        </ol>
+      </li>
+    </ol>
+    <div class="note" style="margin-top:22px">
+      <b>Want to be heard next to the AI voice?</b> Open <i>Audio MIDI Setup</i>, create a
+      <b>Multi-Output Device</b> that combines your own microphone with BlackHole 2ch, and pick that as the
+      call app’s input. OBS carries picture only, which is why the call app takes its microphone from
+      BlackHole rather than from OBS.
+    </div>
+    <p class="sub" style="margin:18px 0 0">macOS only accepts a system webcam from software Apple has approved
+      with a special entitlement, so on a Mac the picture always travels through OBS. Everything else — the
+      styles, portrait mode, noise cancellation, your minute balance — works the same as on Windows.</p>
+  </div>
+</section>
+
+<section id="looks">
+  <div class="wrap">
+    <p class="kicker">Styles</p>
+    <h2>Wear a different render</h2>
+    <p class="sub">Switch look mid-session from the app. Movement, speech and eye contact all stay yours.</p>
+    <ul class="chips">
+      <li>Hyper-real</li><li>Anime</li><li>Cinematic</li><li>Cyberpunk</li><li>Fantasy</li>
+      <li>Neon noir</li><li>Horror</li><li>Watercolour</li><li>Pencil sketch</li>
+    </ul>
+    <h2 style="font-size:19px;margin-top:34px">Watermark</h2>
+    <p class="sub" style="margin-bottom:0">The free minute carries a small mark on the picture. Minutes you buy
+      have none — nothing to switch on, it is gone once you are paid up.</p>
+  </div>
+</section>
+
+<section id="time">
+  <div class="wrap">
+    <p class="kicker">Minutes</p>
+    <h2>Pay for time, not for seats</h2>
+    <p class="sub">Stream Live is metered in minutes of airtime. Your balance sits in the app and counts down
+      only while you are actually on air, so a session you never started costs you nothing.</p>
+    <ul class="plain">
+      <li>Packages and prices are listed in the app under <b>Plans</b>, and your remaining time under
+        <b>Minutes</b>.</li>
+      <li>Pay for a package, then send the reference from the same screen — the app shows the payment and
+        contact details to use.</li>
+      <li>An administrator adds the minutes to your account, and the app shows the new balance without you
+        restarting it.</li>
+      <li>Time does not expire, and one account can be used on more than one computer.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="help">
+  <div class="wrap">
+    <p class="kicker">Sign-in trouble</p>
+    <h2>Locked out</h2>
+    <p class="sub">If you reached this page from an email link, the link reached us — but Stream Live does not
+      change a password through a web form, so there is nothing to fill in here.</p>
+    <ul class="plain">
+      <li>Open the app and use <b>Plans</b> to send your account email to the contact shown there.</li>
+      <li>An administrator sets a new password and sends it back to you.</li>
+      <li>If the app will not start, message on Telegram or reply to the email you signed up with — both reach
+        the team.</li>
+    </ul>
+    <div class="cta" style="margin-top:22px">
+      <a class="btn primary" href="https://t.me/rich_life2k15">Message us on Telegram</a>
+    </div>
+    <h2 style="font-size:19px;margin-top:30px">Keeping your stream up</h2>
+    <p class="sub" style="margin-bottom:0">Airtime stops when your balance hits zero, and the call closes rather
+      than running into debt. Add minutes before a long session: the app tells you the balance at all times.</p>
+  </div>
+</section>
+
+<section id="contact">
+  <div class="wrap">
+    <p class="kicker">Reach the team</p>
+    <h2>Anything not working</h2>
+    <p class="sub">One place to send it: Telegram. Include the email your account was created with, the app
+      version shown on the sign-in screen, and what happened — that is usually enough to fix it in one reply.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://t.me/rich_life2k15">t.me/rich_life2k15</a>
+      <a class="btn ghost" href="#get">Which file do I need?</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap bar">
+    <span class="mark" aria-hidden="true"></span>
+    <span class="wordmark">Stream Live</span>
+    <nav>
+      <a href="https://t.me/rich_life2k15">Telegram</a>
+      <a href="#get">Which file do I need?</a>
+    </nav>
+  </div>
+  <div class="wrap" style="margin-top:14px">
+    The Windows installer and the two Mac disks are sent on request — say which computer you have and the
+    newest build comes back.
+  </div>
+</footer>
+
+</body>
+</html>

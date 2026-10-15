@@ -7,6 +7,13 @@ under version control.
 
 ## What to paste
 
+Not yet pasteable on this project's plan. Supabase gates the template editor behind
+custom SMTP: the subject fields are read-only, the body editor and **Save changes** are
+both disabled, and the only routes that screen offers are an upgrade to Pro, or a
+**Send Email hook**. The sender-name field does not exist until SMTP is switched on, so
+there is nowhere to type `Stream Live` yet. These files stay ready for whichever of
+those three happens; the Site URL below is set and does not need any of them.
+
 Dashboard → project → **Authentication → Sign In / Up → Email templates**.
 
 | Template | Subject line | HTML body |
@@ -35,9 +42,15 @@ While you are in that screen:
   unsent.
 - **Sender name** → `Stream Live`. It is the single thing a customer reads first, and
   by default it is the auth provider's own name.
-- **Site URL** (Authentication → URL Configuration) → your own page, e.g.
-  `https://richlifetechnologies-lang.github.io/stream-live/`. Where the link lands
-  after confirming is your address, not a provider's.
+- **Site URL** (Authentication → URL Configuration) → `https://richlifetechnologies-lang.github.io/stream-live/`,
+  which is the customer page at `index.html` in this repo. Set on 2026-10-15. Where the
+  link lands after confirming is your address, not a provider's. Keep it that way: Pages
+  builds this repo with Jekyll, and before `_config.yml` existed the same address served
+  the rendered README — provider names, metering rules, migrations and gateway source
+  downloadable by anyone. A customer clicking a reset link goes there, so if that root
+  ever reverts to developer documentation, fix the build or move the Site URL somewhere
+  else. `admin-panel/` stays at its own path on the same host and is gated by an admin
+  login; it is simply no longer advertised on the page a customer lands on.
 
 ## What these files cannot change
 

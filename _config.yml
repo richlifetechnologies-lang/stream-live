@@ -1,0 +1,27 @@
+# GitHub Pages builds this repository with Jekyll. With no config file Pages took
+# the whole tree: README.md became the site root, so a customer's password-reset
+# link landed on the developer documentation, and every migration, gateway
+# function and desktop source file was downloadable off the same host.
+#
+# Publishing is limited to what a customer should be able to read:
+#   index.html     the Stream Live page, and the target of the Site URL
+#   admin-panel/   the operator screen, at its existing address
+#
+# Do not add a .nojekyll file. That disables Jekyll entirely, which serves the
+# raw repository instead of the two entries below and re-opens the whole leak.
+title: Stream Live
+description: An AI camera and voice for OBS, Zoom, Teams and calls
+
+readme_index:
+  enabled: false
+
+exclude:
+  - README.md
+  - DEPLOY.md
+  - .env.example
+  - package.json
+  - client
+  - desktop
+  - scripts
+  - supabase
+  - node_modules
