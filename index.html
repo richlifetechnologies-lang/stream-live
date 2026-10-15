@@ -227,21 +227,29 @@
       <li><b>Move the app into Applications.</b> Double-click the <code>.dmg</code> you downloaded, drag
         <i>Stream Live</i> onto <i>Applications</i>, then eject the disk. Keep it in Applications — running it
         from the Downloads folder is what makes later updates fail.</li>
-      <li><b>Approve it the first time.</b> Stream Live is not signed with a paid Apple developer certificate,
-        so macOS blocks the very first launch. Open it once, then go to <b>System Settings → Privacy &amp;
-        Security</b>, scroll to Security and click <b>“Open Anyway”</b> beside “Stream Live was blocked”. Enter
-        your password and launch it again — it stays approved. If <i>Open Anyway</i> never appears, right-click
-        the app in Applications and choose <i>Open</i>; as a last resort run this in Terminal:
-        <code>xattr -dr com.apple.quarantine "/Applications/Stream Live.app"</code></li>
+      <li><b>Clear the “damaged” warning, once.</b> Stream Live is not signed with a paid Apple developer
+        certificate, so the first launch can say <i>“Stream Live is damaged and can’t be opened”</i>. That is
+        the missing signature talking, <b>not</b> a broken download — the file you got is complete. Two things
+        to do: finish step 1 so the app really is in <i>Applications</i>, then open <b>Terminal</b>
+        (<code>Cmd + Space</code>, type <i>Terminal</i>, press Return) and paste this line, then press
+        Return:<br>
+        <code>xattr -dr com.apple.quarantine "/Applications/Stream Live.app"</code><br>
+        Launch Stream Live normally after that — it stays cleared and you never do this again. If Terminal
+        answers <code>No such file</code>, the app is not in <i>Applications</i> yet, so go back to step 1. If
+        it asks for permission, run the same line with <code>sudo</code> in front of it and type your Mac login
+        password — nothing appears on screen while you type it, which is normal.</li>
       <li><b>Allow the camera and the microphone.</b> In <b>System Settings → Privacy &amp; Security</b>, switch
         <i>Stream Live</i> on under both <b>Camera</b> and <b>Microphone</b>. Without them the preview stays
         black and no voice is cloned.</li>
       <li><b>Install the two free helpers.</b> They do the job the Windows installer does with bundled drivers:
         one carries sound, one carries video.
         <ul class="plain" style="margin-top:10px">
-          <li><a href="https://existential.audio/blackhole/" target="_blank" rel="noreferrer">BlackHole 2ch</a> —
-            a silent virtual speaker; the AI voice goes in here. After installing it, <b>log out and back in</b>,
-            and it appears under System Settings → Sound and in the app’s “Audio out” list.</li>
+          <li><a href="https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg" download>BlackHole 2ch</a> —
+            a silent virtual speaker; the AI voice goes in here. <b>Clicking it downloads the installer
+            straight into your Downloads folder</b>. It is free software and that link asks you for nothing —
+            no sign-up, no email, no payment page. After installing it, <b>log out and back in</b>,
+            and it appears under System Settings → Sound and in the app’s “Audio out” list. If the link ever
+            fails, <a href="#contact">message us on Telegram</a> and we will send you the file.</li>
           <li><a href="https://obsproject.com/" target="_blank" rel="noreferrer">OBS Studio</a> — turns the
             Stream Live window into a webcam.</li>
         </ul>
