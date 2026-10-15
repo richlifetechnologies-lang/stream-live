@@ -209,6 +209,14 @@ if (-not $NoVideo) {
 }
 
 # ── AUDIO: VB-Audio Virtual Cable ("Stream Live Microphone") ────────────────
+# The service the vendor inf installs is VBAudioVACMME (trailing E). This script
+# used to test ...VBAudioVACMM, a key that only exists because our old installer
+# created it - so a manual run printed "[FAIL] ... did not register the
+# VBAudioVACMM service" even on a machine where the driver installed fine.
+# The vendor setup now runs with its OWN visible UI: its readme requires a reboot to
+# finish, and its licence states the package may not be integrated silently into
+# another software installation procedure without the author's agreement.
+$VbSvc = 'SYSTEM\CurrentControlSet\Services\VBAudioVACMME'
 if (-not $NoAudio) {
   # The setup exe reads its .inf/.sys/.cat siblings from its own folder, so the
   # full pack lives in drivers\vbcable\ (exe alone fails: "Missing 'inf' file").
@@ -216,31 +224,44 @@ if (-not $NoAudio) {
   if (-not (Test-Path $vbSetup)) { $vbSetup = Join-Path $Root "VBCable_Setup_x64.exe" }
   if (-not (Test-Path $vbSetup)) { $vbSetup = Join-Path $Root "VBCABLE_Setup_x64.exe" }
 
+  function Test-VbCable {
+    $k = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, 'Registry64').OpenSubKey($VbSvc)
+    if (-not $k) { return $false }
+    $img = $k.GetValue('ImagePath', $null)
+    $k.Close()
+    return ($null -ne $img -and $img -ne '')
+  }
+
   if ($Uninstall) {
     Write-Warn2 "VB-Cable is not removed automatically (shared system audio driver)."
     Write-Host "      Uninstall it from 'Apps & features' > 'VB-CABLE Virtual Audio Device' if desired."
   }
-  else {
-    $svc = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, 'Registry64').OpenSubKey('SYSTEM\CurrentControlSet\Services\VBAudioVACMM')
-    $already = $null -ne $svc
-    if ($svc) { $svc.Close() }
-    if ($already) {
-      Write-Ok "VB-Cable audio driver already installed."
-    } elseif (Test-Path $vbSetup) {
-      Write-Step "Installing VB-Audio Virtual Cable (Stream Live Microphone)..."
-      $p = Start-Process $vbSetup -ArgumentList "/VERYSILENT","/NORESTART","/SUPPRESSMSGBOXES" -Wait -PassThru
-      Start-Sleep -Seconds 3
-      $svc2 = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, 'Registry64').OpenSubKey('SYSTEM\CurrentControlSet\Services\VBAudioVACMM')
-      if ($svc2) {
-        $svc2.Close()
-        Write-Ok "Audio driver installed and VERIFIED."
-      } else {
-        Write-Bad "Audio driver install did not register the VBAudioVACMM service (exit $($p.ExitCode))."
-        $exit = 1
-      }
+  elseif (Test-VbCable) {
+    Write-Ok "VB-Cable audio driver already installed."
+  }
+  elseif (Test-Path $vbSetup) {
+    Write-Step "Installing VB-Audio Virtual Cable - its own setup window will open."
+    Push-Location (Split-Path -Parent $vbSetup)
+    $p = Start-Process $vbSetup -Wait -PassThru
+    Pop-Location
+    Start-Sleep -Seconds 3
+    if (Test-VbCable) {
+      $pk = [Microsoft.Win32.RegistryKey]::OpenBaseKey([Microsoft.Win32.RegistryHive]::LocalMachine, 'Registry64').CreateSubKey("$VbSvc\Parameters")
+      $pk.SetValue('DeviceName',    'Stream Live Microphone')
+      $pk.SetValue('DeviceNameOut', 'Stream Live Speaker')
+      $pk.Close()
+      Write-Ok "Audio driver installed and VERIFIED (service $VbSvc)."
+      Write-Bad "RESTART THE COMPUTER now - the cable is not usable until you do."
     } else {
-      Write-Warn2 "VBCable_Setup_x64.exe not found next to this script; skipping audio."
+      Write-Bad "Audio driver still not registered after setup (exit $($p.ExitCode))."
+      Write-Host "      Download it free from https://vb-audio.com/Cable/ , run VBCABLE_Setup_x64.exe"
+      Write-Host "      as administrator, then restart."
+      $exit = 1
     }
+  }
+  else {
+    Write-Warn2 "VBCABLE_Setup_x64.exe not found next to this script; skipping audio."
+    Write-Host "      Download it free from https://vb-audio.com/Cable/ and run it as administrator."
   }
 }
 
