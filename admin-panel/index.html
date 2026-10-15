@@ -273,8 +273,12 @@
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
           <h2 style="font-size:14px;margin:0">Key pool</h2>
-          <button id="refreshKeys">Refresh</button>
+          <div class="row" style="align-items:center;gap:10px">
+            <span class="muted" id="poolWhen"></span>
+            <button id="refreshKeys">Refresh</button>
+          </div>
         </div>
+        <div id="poolMsg"></div>
         <div class="grid4" style="margin-top:12px" id="keyStats"></div>
         <p class="muted" style="margin:12px 0 0">For every call the gateway tries the key assigned to that account first, then every enabled key by ascending <b>priority</b>, skipping any that already hit its daily cap, and only then the env secret. A key that fails is logged and the next one is tried in the same request, so one bad key never takes the product down. Users never see, send or store any of this.</p>
       </div>
@@ -370,7 +374,10 @@
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
           <h2 style="font-size:14px;margin:0">Key usage — last 24 hours</h2>
-          <button id="refreshUsage">Refresh</button>
+          <div class="row" style="align-items:center;gap:10px">
+            <span class="muted" id="usageWhen"></span>
+            <button id="refreshUsage">Refresh</button>
+          </div>
         </div>
         <p class="muted" style="margin:6px 0 12px">Every upstream attempt lands here, so a run of <span class="pill fail">fail</span> followed by <span class="pill ok">ok</span> on the same user is the failover history.</p>
         <div style="overflow:auto">
@@ -379,6 +386,7 @@
             <tbody></tbody>
           </table>
         </div>
+        <div id="usageMsg"></div>
       </div>
     </section>
 
@@ -1563,6 +1571,12 @@
   // ══ KEY POOL ════════════════════════════════════════════════════════════
   // admin_key_health is the only source: it carries a last-4 tail per provider,
   // so raw secrets never enter this page.
+  // Each figure on this tab is read by its own query, so each one reports into the box
+  // next to the button that re-reads it. Everything used to fail into "keyMsg", which
+  // sits under the Save key pair form — so a refresh that could not reach the pool
+  // looked like the form had broken, and the usage Refresh had no message of its own.
+  function stamp(id) { $(id).textContent = "read " + new Date().toISOString().slice(11, 19) + " UTC"; }
+
   async function loadKeys() {
     const base = "id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures";
     let { data, error } = await sb.from("admin_key_health").select(base + ", trial_key_tail, trial_minutes_budget, trial_minutes_used").order("priority", { ascending: true });
@@ -1570,7 +1584,8 @@
     // page working whether or not that SQL has run yet.
     hasTrialCols = !error;
     if (!hasTrialCols) ({ data, error } = await sb.from("admin_key_health").select(base).order("priority", { ascending: true }));
-    if (error) return msg("keyMsg", error.message);
+    if (error) return msg("poolMsg", "Could not read the key pool: " + error.message);
+    msg("poolMsg", "");
     KEY_ROWS = data || [];
     ["thTrialKey", "thTrialLeft"].forEach((id) => $(id).classList.toggle("hidden", !hasTrialCols));
     renderDecartKeys();
@@ -1625,6 +1640,7 @@
     }).join("") || '<tr><td colspan="11" class="muted">The pool is empty, so every call falls back to the FAL_KEY / ELEVENLABS_KEY env secrets. Add a pair above and press Verify.</td></tr>';
 
     $("asKey").innerHTML = KEY_ROWS.map((k) => `<option value="${k.id}">${esc(k.label || shortId(k.id))}</option>`).join("");
+    stamp("poolWhen");
     await Promise.all([loadKeyUsage(), loadAssignments()]);
   }
 
@@ -1658,7 +1674,9 @@
     const { data, error } = await sb.from("key_usage_log")
       .select("created_at, key_id, provider, user_id, outcome, status, detail")
       .gt("created_at", cutoff).order("created_at", { ascending: false }).limit(200);
-    if (error) return msg("keyMsg", error.message);
+    if (error) return msg("usageMsg", "Could not read the usage log: " + error.message);
+    msg("usageMsg", "");
+    stamp("usageWhen");
     await emailsOf((data || []).map((r) => r.user_id));
     const labelOf = Object.fromEntries(KEY_ROWS.map((k) => [k.id, k.label]));
     $("usageTable").querySelector("tbody").innerHTML = (data || []).map((r) => `<tr>
@@ -1686,8 +1704,13 @@
       || '<tr><td colspan="5" class="muted">No per-account assignments — every account draws on the pool by priority.</td></tr>';
   }
 
-  $("refreshKeys").onclick = loadKeys;
-  $("refreshUsage").onclick = loadKeyUsage;
+  // Both buttons re-read the live "Today / cap" figures, because a call books its
+  // minutes when a window settles — those cells are the ones that can be stale the
+  // moment you look away. The pool button reloads every table on the tab; the usage
+  // button reloads the 24-hour log plus the caps and leaves a half-filled key form
+  // exactly as it is.
+  $("refreshKeys").onclick = () => loadKeys();
+  $("refreshUsage").onclick = () => Promise.all([loadKeyUsage(), refreshKeyUsage()]);
 
   // A call bills its key window by window, so the "Today / cap" figure is the one
   // number on this page that moves while you are looking at it. Patching just that
@@ -1697,7 +1720,9 @@
     const { data, error } = await sb
       .from("admin_key_health")
       .select("id, minutes_today, daily_minute_cap");
-    if (error || !data) return;
+    if (error) return msg("poolMsg", "Could not re-read today's minutes: " + error.message);
+    msg("poolMsg", "");
+    stamp("poolWhen");
     for (const k of data) {
       const td = document.querySelector(`[data-usage="${k.id}"]`);
       if (!td) continue;
@@ -1719,7 +1744,13 @@
   //    static markup, so a half-typed credit amount survives a refresh.
   setInterval(() => {
     const on = document.querySelector(".tabs button[data-tab].on");
-    if (on && on.dataset.tab === "keys") void refreshKeyUsage();
+    if (on && on.dataset.tab === "keys") {
+      void refreshKeyUsage();
+      // The 24-hour log is a plain table with nothing to type into, so re-reading it
+      // on the same tick is safe — and it means a failover you are watching for
+      // appears without a click. The key form above it is never touched.
+      void loadKeyUsage();
+    }
   }, 15_000);
 
   setInterval(() => {
