@@ -85,7 +85,9 @@ comfortably below the lease TTL (default 120 s); if a renew does not land, the
 session is reaped at `lease_expires_at` and nothing further is billed.
 
 Always end deliberately: `await client.endCall()` (an `action: "end"` lease call) on
-stop, on error and on window close.
+stop, on error and on window close. `endCall` retries once and, if the gateway is still
+unreachable, remembers the session and hands it back on the next `startCall`, so a lost
+Stop cannot leave the machine reading as "already on a call".
 
 ## 4. Voice — `proxy-voice`
 

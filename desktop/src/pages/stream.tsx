@@ -1185,29 +1185,34 @@ export default function StreamPage() {
     if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
     isStartingRef.current = false;
     closingRef.current = true; setIsClosing(true);
-    endLease();
-    videoSessionRef.current?.close(); videoSessionRef.current = null;
-    clonerRef.current?.stop(); clonerRef.current = null;
-    if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
-    syncPipeRef.current?.stop(); syncPipeRef.current = null;
-    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
-    remoteStreamRef.current = null; window.__slRemoteStream = null;
-    [popoutRef, obsWindowRef, obsPortraitWindowRef].forEach(r => {
-      if (r.current && !r.current.closed) try { r.current.postMessage("stream-live-clear", "*"); } catch { /**/ }
-    });
-    setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
-    setAudioActive(false); setSyncDelay(0.8); setVuLevel(0);
-    setVcActive(false); setVcVu(0); setVcAnalyser(null);
-    // Refund the prepaid chunk only after the call is locally dead. Waiting for
-    // that round-trip first left Stop unresponsive — and an unreached one is
-    // refunded by the lease expiring server-side anyway.
-    sessionIdRef.current = null;
-    await Promise.race([
-      gateway.endCall().catch(() => {}),
-      new Promise((r) => setTimeout(r, 5_000)),
-    ]);
-    closingRef.current = false; setIsClosing(false);
-    void refreshBalances();
+    try {
+      endLease();
+      videoSessionRef.current?.close(); videoSessionRef.current = null;
+      clonerRef.current?.stop(); clonerRef.current = null;
+      if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
+      syncPipeRef.current?.stop(); syncPipeRef.current = null;
+      if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+      remoteStreamRef.current = null; window.__slRemoteStream = null;
+      [popoutRef, obsWindowRef, obsPortraitWindowRef].forEach(r => {
+        if (r.current && !r.current.closed) try { r.current.postMessage("stream-live-clear", "*"); } catch { /**/ }
+      });
+      setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
+      setAudioActive(false); setSyncDelay(0.8); setVuLevel(0);
+      setVcActive(false); setVcVu(0); setVcAnalyser(null);
+      // Refund the prepaid chunk only after the call is locally dead. Waiting for
+      // that round-trip first left Stop unresponsive — and an unreached one is
+      // handed back by the gateway on the next Start from this machine.
+      sessionIdRef.current = null;
+      await Promise.race([
+        gateway.endCall().catch(() => {}),
+        new Promise((r) => setTimeout(r, 5_000)),
+      ]);
+    } finally {
+      // Nothing below this point may be skipped. A throw from the engine's close left
+      // the page believing it was still closing, which dead-ends Start with no message.
+      closingRef.current = false; setIsClosing(false);
+      void refreshBalances();
+    }
   }, []);
 
   // Route changes (e.g. opening Settings mid-stream) unmount this page. Without

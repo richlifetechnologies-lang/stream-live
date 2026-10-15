@@ -164,6 +164,7 @@ export class StreamLiveClient {
   private heartbeat: ReturnType<typeof setInterval> | null = null;
   private pingFailures = 0;
   private sessionId: string | null = null;
+  private pendingEnd: string | null = null;
 
   constructor(cfg: GatewayConfig) {
     this.cfg = cfg;
@@ -202,7 +203,10 @@ export class StreamLiveClient {
   }
 
   async signOut(): Promise<void> {
-    await this.endCall();
+    // Never let an unreachable gateway block the sign-out. The lease stays pending
+    // and is handed back on the next call from this machine.
+    await this.endCall().catch(() => {});
+    this.pendingEnd = null;
     await this.sb.auth.signOut();
   }
 
@@ -400,6 +404,12 @@ export class StreamLiveClient {
    * modality_disabled / update_required / maintenance.
    */
   async startCall(tab: TabName, deviceId?: string): Promise<CallTicket> {
+    // A Stop whose hand-back never landed leaves this id behind. Send it again now:
+    // it cannot disturb the call about to open (ending an already-closed session is a
+    // no-op server-side), and it returns the minutes the abandoned lease is holding.
+    if (this.pendingEnd) void this.sendEnd(this.pendingEnd);
+    this.pendingEnd = null;
+
     const res = await this.invoke("start-session", {
       appId: this.cfg.falAppId,
       tab,
@@ -493,10 +503,15 @@ export class StreamLiveClient {
   /** Close the lease and refund whatever was pre-paid but unused. */
   async endCall(): Promise<LeaseState | null> {
     this.stopHeartbeat();
-    const id = this.sessionId;
+    const id = this.sessionId ?? this.pendingEnd;
     this.sessionId = null;
     if (!id) return null;
-    const res = await this.invoke("lease", { sessionId: id, action: "end" });
+    // Held until the gateway confirms it, so the next call can hand the same ticket
+    // back. See startCall.
+    this.pendingEnd = id;
+    const res = await this.sendEnd(id);
+    if (!res) throw new Error("could not reach the gateway to end the call");
+    this.pendingEnd = null;
     return {
       ended: true,
       balance: res.balance === null || res.balance === undefined ? null : Number(res.balance),
@@ -505,6 +520,24 @@ export class StreamLiveClient {
       billedMinutes: res.billedMinutes === undefined ? null : Number(res.billedMinutes),
       lowBalance: false,
     } satisfies LeaseState;
+  }
+
+  /**
+   * Closing a lease is the only thing that ends it server-side, and losing that
+   * request used to lose the session id with it: a Stop during a network blip or an
+   * Edge Function cold start left the lease open for its whole TTL, and the next
+   * Start was told the machine was already on a call. Retry once for the cold start,
+   * and report failure instead of forgetting the id.
+   */
+  private async sendEnd(id: string): Promise<Record<string, never> | null> {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await this.invoke("lease", { sessionId: id, action: "end" });
+      } catch {
+        if (attempt === 0) await new Promise((r) => setTimeout(r, 1_200));
+      }
+    }
+    return null;
   }
 
   /**
