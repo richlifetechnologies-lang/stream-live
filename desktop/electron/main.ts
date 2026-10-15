@@ -12,7 +12,9 @@ const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 let mainWindow: BrowserWindow | null = null;
 
 const GITHUB_OWNER = "richlifetechnologies-lang";
-const GITHUB_REPO  = "stream-live";
+// Installed apps read their updates from the downloads repo, which holds nothing but
+// the installers. The source repo can then go private without blinding the updater.
+const GITHUB_REPO  = "stream-live-releases";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;   // scheduled re-check cadence
 const FOCUS_CHECK_MIN_GAP_MS   = 15 * 60 * 1000;      // focus-triggered checks are throttled
