@@ -57,6 +57,7 @@ function looksInternal(text: string): boolean {
   // Supabase and LiveKit ship upgrade notices that carry their own documentation
   // links inside the error message. A customer screen must never show one.
   if (/https?:\/\//.test(text)) return true;
+  if (/wss?:\/\//.test(text)) return true;
   return false;
 }
 
