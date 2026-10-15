@@ -1,5 +1,4 @@
 import { useRef, useEffect } from "react";
-import { FeedMark } from "../components/brand";
 
 export default function ObsoutPage() {
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -43,7 +42,6 @@ export default function ObsoutPage() {
           display: "block",
         }}
       />
-      <FeedMark size={Math.max(28, Math.round(window.innerHeight * 0.07))} />
     </div>
   );
 }

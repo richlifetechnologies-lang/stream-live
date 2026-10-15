@@ -57,22 +57,3 @@ export function Logo({ size = 40, word = false, style }: {
     </span>
   );
 }
-
-// Corner bug for the OBS capture windows. `pointerEvents: none` keeps it from
-// stealing clicks, and it sits top-left because platforms overlay their own UI
-// along the bottom and right of a video.
-export function FeedMark({ size = 46 }: { size?: number }) {
-  return (
-    <img
-      src={mark}
-      alt=""
-      aria-hidden
-      draggable={false}
-      style={{
-        position: "absolute", top: "3.5%", left: "3%", width: size * 1.16, height: size,
-        objectFit: "contain", pointerEvents: "none", userSelect: "none",
-        filter: "drop-shadow(0 2px 8px rgba(0,0,0,0.65))",
-      }}
-    />
-  );
-}

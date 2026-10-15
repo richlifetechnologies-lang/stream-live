@@ -143,8 +143,7 @@ export default function PortraitLabPage() {
         These are the exact frames the Stream Live Camera device sends, drawn by the same code the virtual
         camera uses. The device frame is always 1280x720, so portrait puts a tall 9:16 picture in the middle
         of it and fills that picture edge to edge — the person stays, the wide room at the sides is trimmed,
-        exactly like the phone in your screenshot. The trimmed space is filled with a blurred, dimmed copy
-        of the room rather than black.
+        exactly like the phone in your screenshot. The trimmed space is left black.
       </p>
       <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 14 }}>
         {btn("camera", "Webcam")}
@@ -154,7 +153,7 @@ export default function PortraitLabPage() {
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 28, marginTop: 18 }}>
         {cell("LANDSCAPE (16:9)", "what a widescreen call sends", landRef)}
-        {cell("PORTRAIT (9:16)", "the tall picture, blurred room at the sides", portRef)}
+        {cell("PORTRAIT (9:16)", "the tall picture, black at the sides", portRef)}
       </div>
       <p style={{ fontSize: 12, color: "hsl(222 25% 55%)", maxWidth: 760, marginTop: 16 }}>
         Both panels are the 1280x720 frame the device actually sends. {cost}.

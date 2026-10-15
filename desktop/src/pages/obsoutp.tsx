@@ -1,17 +1,15 @@
 import { useRef, useEffect, useState, useCallback } from "react";
-import { FeedMark } from "../components/brand";
 
 // Portrait (9:16) OBS clean-output window.
 // The AI stream is natively 16:9, so it must be fit into the portrait frame.
 // "crop" is the default because it is what "Stream Live Camera" sends in portrait
 // mode (see lib/vcam-frame.ts): the tall frame filled edge to edge, centre kept.
-// "fill" stays available — it shows the whole wide frame with a blurred backdrop,
-// which loses nothing but leaves the tall frame letterboxed.
+// "fill" stays available — it shows the whole wide frame with nothing cropped,
+// letterboxed in black.
 // The toggle control auto-hides after idle so it never shows in an OBS capture.
 type FitMode = "fill" | "crop";
 
 export default function ObsoutPortraitPage() {
-  const bgRef = useRef<HTMLVideoElement>(null);
   const fgRef = useRef<HTMLVideoElement>(null);
   const [fit, setFit] = useState<FitMode>("crop");
   const [uiVisible, setUiVisible] = useState(true);
@@ -22,7 +20,6 @@ export default function ObsoutPortraitPage() {
       try {
         const stream = (window.opener as any)?.__slRemoteStream as MediaStream | undefined;
         if (!stream) return;
-        if (bgRef.current && bgRef.current.srcObject !== stream) bgRef.current.srcObject = stream;
         if (fgRef.current && fgRef.current.srcObject !== stream) fgRef.current.srcObject = stream;
       } catch { /* cross-origin guard */ }
     };
@@ -32,7 +29,6 @@ export default function ObsoutPortraitPage() {
     const handler = (e: MessageEvent) => {
       if (e.data?.type === "stream-live-stream") attach();
       if (e.data === "stream-live-clear") {
-        if (bgRef.current) bgRef.current.srcObject = null;
         if (fgRef.current) fgRef.current.srcObject = null;
       }
     };
@@ -59,24 +55,6 @@ export default function ObsoutPortraitPage() {
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#000", overflow: "hidden", margin: 0, padding: 0, position: "relative" }}>
-      {/* Blurred cover-fit background — only used in "fill" mode */}
-      {fit === "fill" && (
-        <video
-          ref={bgRef}
-          autoPlay
-          playsInline
-          muted
-          style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
-            objectFit: "cover",
-            transform: "scaleX(-1)",
-            filter: "blur(28px) brightness(0.55)",
-          }}
-        />
-      )}
       {/* Sharp foreground — contained in "fill", full-bleed cover in "crop" */}
       <video
         ref={fgRef}
@@ -92,7 +70,6 @@ export default function ObsoutPortraitPage() {
           transform: "scaleX(-1)",
         }}
       />
-      <FeedMark size={Math.max(26, Math.round(window.innerHeight * 0.045))} />
 
       {/* Fit-mode toggle — faded grey + auto-hides so it never distracts from,
           or shows up in, the OBS capture. */}

@@ -682,6 +682,9 @@ export default function StreamPage() {
   const [isClosing, setIsClosing]    = useState(false);
   const [connStep, setConnStep]       = useState<"auth"|"engine"|null>(null);
   const [elapsed, setElapsed]         = useState(0);
+  // Frames-per-second readout, shown below the video panel. Never on the panel:
+  // that frame is what OBS and the calling apps capture.
+  const [fpsRead, setFpsRead] = useState<{ cam: number | null; ai: number | null }>({ cam: null, ai: null });
 
   // ── Devices ───────────────────────────────────────────────────────────────
   const [cameras, setCameras]             = useState<MediaDeviceInfo[]>([]);
@@ -769,6 +772,10 @@ export default function StreamPage() {
   // ── Refs ──────────────────────────────────────────────────────────────────
   const localVideoRef   = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef  = useRef<HTMLVideoElement | null>(null);
+  // Offscreen twin of the camera preview. The picture-in-picture box is hidden in
+  // portrait mode, so this is what keeps the camera stream presenting frames for
+  // the readout to count.
+  const camCountRef     = useRef<HTMLVideoElement | null>(null);
   // Plays the cloned voice; routed to the same output as the AI video.
   const cloneAudioRef   = useRef<HTMLAudioElement | null>(null);
   const localStreamRef  = useRef<MediaStream|null>(null);
@@ -894,6 +901,7 @@ export default function StreamPage() {
       localStreamRef.current?.getTracks().forEach(t => t.stop());
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
+      if (camCountRef.current) camCountRef.current.srcObject = stream;
       cameraReadyRef.current = true;
       setCameraReady(true); enumerateDevices();
     } catch { toast({ title: "Camera Error", description: "Could not access camera.", variant: "destructive" }); }
@@ -907,6 +915,7 @@ export default function StreamPage() {
     localStreamRef.current?.getTracks().forEach(t => t.stop());
     localStreamRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    if (camCountRef.current) camCountRef.current.srcObject = null;
     cameraReadyRef.current = false;
     setCameraReady(false);
   }, []);
@@ -927,6 +936,32 @@ export default function StreamPage() {
   // a camera turned on in one tab never keeps showing in another. Each tab starts
   // with its preview off until the user enables it there.
   useEffect(() => { stopCamera(); }, [activeTab, stopCamera]);
+
+  // ─── Frame-rate readout ────────────────────────────────────────────────────
+  // Counts the frames each element actually presented, once a second. The camera
+  // figure is what her webcam delivers; the AI figure is what comes back. A call
+  // that looks like a slideshow shows up here as a low AI number while the camera
+  // keeps counting, which is the one thing a screenshot of the picture cannot
+  // prove. Rendered below the panel, never on it.
+  useEffect(() => {
+    const presented = (el: HTMLVideoElement | null): number | null => {
+      if (!el || !el.srcObject) return null;
+      const q = el.getVideoPlaybackQuality?.();
+      return q ? q.totalVideoFrames : null;
+    };
+    let prevCam = presented(camCountRef.current);
+    let prevAi  = presented(remoteVideoRef.current);
+    const iv = setInterval(() => {
+      const cam = presented(camCountRef.current);
+      const ai  = presented(remoteVideoRef.current);
+      setFpsRead({
+        cam: cam !== null && prevCam !== null ? cam - prevCam : null,
+        ai:  ai  !== null && prevAi  !== null ? ai  - prevAi  : null,
+      });
+      prevCam = cam; prevAi = ai;
+    }, 1000);
+    return () => clearInterval(iv);
+  }, [cameraReady, isStreaming]);
 
   // ─── Virtual camera: pump AI output frames to the native feeder ─────────────
   // Draws the AI output video into a fixed 1280x720 RGBA8 canvas and pushes each
@@ -1551,6 +1586,7 @@ export default function StreamPage() {
         };
 
     return (
+      <>
       <div style={panelStyle}>
         {/* AI output video — always clean, no overlay chrome.
             objectFit:"cover" on the 9:16 panel IS the portrait rectangle the frame
@@ -1652,6 +1688,24 @@ export default function StreamPage() {
           </div>
         )}
       </div>
+
+      {/* Frame-rate readout — deliberately BELOW the panel. Nothing may sit on
+          the AI picture: that frame is what OBS and the calling apps capture,
+          and a customer's screenshot of it is what support has to work from. */}
+      <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 45%)" }}>
+        <span>Camera {fpsRead.cam === null ? "—" : `${fpsRead.cam} fps`}</span>
+        <span>·</span>
+        <span>AI picture {fpsRead.ai === null ? "—" : `${fpsRead.ai} fps`}</span>
+        {fpsRead.cam !== null && fpsRead.ai !== null && fpsRead.cam >= 5 && fpsRead.ai <= Math.floor(fpsRead.cam / 2) && (
+          <span style={{ color: "hsl(38 95% 55%)" }}>The AI is sending fewer pictures than your camera.</span>
+        )}
+      </div>
+
+      {/* Offscreen camera sink so the camera figure keeps counting in portrait,
+          where the picture-in-picture box is not rendered. */}
+      <video ref={camCountRef} autoPlay muted playsInline
+        style={{ position: "fixed", left: -9999, top: 0, width: 4, height: 4, opacity: 0 }} />
+      </>
     );
   };
 
