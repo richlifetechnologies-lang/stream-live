@@ -683,8 +683,11 @@ export default function StreamPage() {
   const [connStep, setConnStep]       = useState<"auth"|"engine"|null>(null);
   const [elapsed, setElapsed]         = useState(0);
   // Frames-per-second readout, shown below the video panel. Never on the panel:
-  // that frame is what OBS and the calling apps capture.
-  const [fpsRead, setFpsRead] = useState<{ cam: number | null; ai: number | null }>({ cam: null, ai: null });
+  // that frame is what OBS and the calling apps capture. Updated straight into
+  // these spans, never through state - see the readout effect below.
+  const fpsCamRef  = useRef<HTMLSpanElement | null>(null);
+  const fpsAiRef   = useRef<HTMLSpanElement | null>(null);
+  const fpsHintRef = useRef<HTMLSpanElement | null>(null);
 
   // ── Devices ───────────────────────────────────────────────────────────────
   const [cameras, setCameras]             = useState<MediaDeviceInfo[]>([]);
@@ -942,7 +945,13 @@ export default function StreamPage() {
   // figure is what her webcam delivers; the AI figure is what comes back. A call
   // that looks like a slideshow shows up here as a low AI number while the camera
   // keeps counting, which is the one thing a screenshot of the picture cannot
-  // prove. Rendered below the panel, never on it.
+  // prove.
+  //
+  // Written straight into the spans instead of through state. `DeviceSelectors`
+  // is declared inside this component, so every re-render replaces its identity,
+  // React tears the block down and builds a new one, and an open camera drop-down
+  // closes under the cursor - which is exactly what a one-second state tick did to
+  // it in 1.6.6. Rendered below the panel, never on it.
   useEffect(() => {
     const presented = (el: HTMLVideoElement | null): number | null => {
       if (!el || !el.srcObject) return null;
@@ -954,10 +963,14 @@ export default function StreamPage() {
     const iv = setInterval(() => {
       const cam = presented(camCountRef.current);
       const ai  = presented(remoteVideoRef.current);
-      setFpsRead({
-        cam: cam !== null && prevCam !== null ? cam - prevCam : null,
-        ai:  ai  !== null && prevAi  !== null ? ai  - prevAi  : null,
-      });
+      const camN = cam !== null && prevCam !== null ? cam - prevCam : null;
+      const aiN  = ai  !== null && prevAi  !== null ? ai  - prevAi  : null;
+      if (fpsCamRef.current) fpsCamRef.current.textContent = `Camera ${camN === null ? "—" : `${camN} fps`}`;
+      if (fpsAiRef.current)  fpsAiRef.current.textContent  = `AI picture ${aiN === null ? "—" : `${aiN} fps`}`;
+      if (fpsHintRef.current) {
+        fpsHintRef.current.style.display =
+          camN !== null && aiN !== null && camN >= 5 && aiN <= Math.floor(camN / 2) ? "inline" : "none";
+      }
       prevCam = cam; prevAi = ai;
     }, 1000);
     return () => clearInterval(iv);
@@ -1691,14 +1704,14 @@ export default function StreamPage() {
 
       {/* Frame-rate readout — deliberately BELOW the panel. Nothing may sit on
           the AI picture: that frame is what OBS and the calling apps capture,
-          and a customer's screenshot of it is what support has to work from. */}
+          and a customer's screenshot of it is what support has to work from.
+          These three spans are written by the interval above, so updating them
+          never re-renders this page. */}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 45%)" }}>
-        <span>Camera {fpsRead.cam === null ? "—" : `${fpsRead.cam} fps`}</span>
+        <span ref={fpsCamRef}>Camera —</span>
         <span>·</span>
-        <span>AI picture {fpsRead.ai === null ? "—" : `${fpsRead.ai} fps`}</span>
-        {fpsRead.cam !== null && fpsRead.ai !== null && fpsRead.cam >= 5 && fpsRead.ai <= Math.floor(fpsRead.cam / 2) && (
-          <span style={{ color: "hsl(38 95% 55%)" }}>The AI is sending fewer pictures than your camera.</span>
-        )}
+        <span ref={fpsAiRef}>AI picture —</span>
+        <span ref={fpsHintRef} style={{ color: "hsl(38 95% 55%)", display: "none" }}>The AI is sending fewer pictures than your camera.</span>
       </div>
 
       {/* Offscreen camera sink so the camera figure keeps counting in portrait,
