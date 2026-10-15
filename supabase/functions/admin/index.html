@@ -99,6 +99,7 @@
   <div id="dash" class="hidden">
     <div class="tabs">
       <button data-tab="accounts" class="on">Accounts</button>
+      <button data-tab="machines">Machines</button>
       <button data-tab="topups">Top-ups</button>
       <button data-tab="keys">Key pool</button>
       <button data-tab="decart">DeCart keys</button>
@@ -244,6 +245,46 @@
           </table>
         </div>
         <div id="acctMsg"></div>
+      </div>
+    </section>
+
+    <!-- ══ TAB: MACHINES ═══════════════════════════════════════════════════ -->
+    <section id="tab-machines" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Every machine bound to an account</h2>
+          <div class="row" style="align-items:center;gap:10px">
+            <span class="muted" id="machWhen"></span>
+            <button id="machRefresh">Refresh</button>
+          </div>
+        </div>
+        <div class="grid4" style="margin-top:12px" id="machStats"></div>
+        <p class="muted" style="margin:12px 0 0">A machine is recorded the first time a call starts on it, and only you can take it off an account: <b>Revoke</b> stops that computer starting a call on that address, and <b>Allow again</b> puts it back. An account holder who removed their own machine from the app cannot get it back themselves — that is what this table is for.</p>
+        <div class="row" style="margin-top:12px">
+          <div style="flex:1 1 340px"><label style="margin-top:0">Filter by email or machine id</label><input id="machSearch" placeholder="part of an address, or part of a machine id" /></div>
+        </div>
+        <div style="overflow:auto;margin-top:10px">
+          <table id="machTable">
+            <thead><tr><th>Account</th><th>Machine</th><th>Label</th><th>Bound since</th><th>Last seen</th><th>Trial drawn here</th><th>Status</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="machMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 4px">Free-trial register — one trial per machine</h2>
+        <p class="muted" style="margin:0 0 12px">The free minute is granted at sign-up to the machine named in that sign-up, and a machine already listed here is refused a second one — that is the whole defence against opening new accounts on the same computer to collect the trial again. So when someone signs up on a machine in this list and arrives with nothing in their video bucket, the answer is on this row, not in a bug.</p>
+        <div class="row" style="margin-bottom:10px">
+          <div style="flex:1 1 340px"><label style="margin-top:0">Filter by machine id or email</label><input id="regSearch" placeholder="part of a machine id, or an address" /></div>
+        </div>
+        <div style="overflow:auto">
+          <table id="regTable">
+            <thead><tr><th>Machine</th><th>Drew the trial</th><th>Minutes</th><th>When</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="regMsg"></div>
       </div>
     </section>
 
@@ -957,6 +998,7 @@
   // tab click means the same thing as pressing that tab's Refresh button.
   const TAB_LOADERS = {
     accounts: [loadAccounts],
+    machines: [loadMachines],
     topups: [loadRequests],
     keys: [loadKeys],
     decart: [loadKeys, loadSupply],
@@ -1517,6 +1559,122 @@
     msg("deviceMsg", "Device revoked.", "ok");
     await openAccount(userId);
   }
+
+  // ══ MACHINES ═════════════════════════════════════════════════════════════
+  // The account screen lists one person's machines; this is the flat list across
+  // everyone, because the two jobs that need it are both cross-account: working out
+  // which machine a complaint came from, and seeing whether that machine has already
+  // drawn the free minute before a newer account on it asks for one.
+  let MACH_ROWS = [], REG_ROWS = [];
+
+  async function loadMachines() {
+    const [dev, reg] = await Promise.all([
+      sb.from("devices").select("user_id, device_id, label, first_seen, last_seen, revoked")
+        .order("last_seen", { ascending: false }).limit(1000),
+      sb.from("device_trial_grants").select("device_id, user_id, minutes, granted_at")
+        .order("granted_at", { ascending: false }).limit(1000),
+    ]);
+    if (dev.error) return msg("machMsg", "Could not read the bound machines: " + dev.error.message);
+    msg("machMsg", "");
+    MACH_ROWS = dev.data || [];
+    REG_ROWS = reg.error ? [] : (reg.data || []);
+    await emailsOf(MACH_ROWS.map((r) => r.user_id).concat(REG_ROWS.map((r) => r.user_id)));
+    stamp("machWhen");
+    renderMachines();
+    renderReg();
+    if (reg.error) msg("regMsg", "Could not read the trial register: " + reg.error.message);
+  }
+
+  function renderMachines() {
+    const q = ($("machSearch").value || "").trim().toLowerCase();
+    const hit = (r) => !q
+      || String(EMAIL_OF[r.user_id] || "").toLowerCase().includes(q)
+      || String(r.device_id || "").toLowerCase().includes(q)
+      || String(r.label || "").toLowerCase().includes(q);
+    const shown = MACH_ROWS.filter(hit);
+
+    const perUser = {};
+    MACH_ROWS.forEach((r) => { perUser[r.user_id] = (perUser[r.user_id] || 0) + 1; });
+    $("machStats").innerHTML = [
+      [MACH_ROWS.length, "machines bound"],
+      [Object.keys(perUser).length, "accounts with a machine"],
+      [Object.values(perUser).filter((n) => n > 1).length, "accounts on 2+ machines"],
+      [MACH_ROWS.filter((r) => r.revoked).length, "revoked"],
+      [REG_ROWS.length, "trials drawn"],
+    ].map(([v, l]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+
+    $("machTable").querySelector("tbody").innerHTML = shown.map((r) => {
+      // The register is keyed on the machine alone, so the account it names is the one
+      // that took this machine's single free minute — usually, but not always, this row's.
+      const g = REG_ROWS.find((x) => x.device_id === r.device_id);
+      return `<tr>
+        <td><b>${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</b></td>
+        <td class="mono">${esc(r.device_id)}</td>
+        <td class="muted">${esc(r.label || "—")}</td>
+        <td class="muted">${when(r.first_seen)}</td>
+        <td class="muted">${when(r.last_seen)}</td>
+        <td>${g ? `${mins(g.minutes)} · ${esc(EMAIL_OF[g.user_id] || shortId(g.user_id))}` : '<span class="muted">never</span>'}</td>
+        <td>${r.revoked ? '<span class="pill rejected">revoked</span>' : '<span class="pill active">bound</span>'}</td>
+        <td style="white-space:nowrap">${r.revoked
+          ? `<button data-mact="restore" data-user="${r.user_id}" data-dev="${esc(r.device_id)}">Allow again</button>`
+          : `<button data-mact="revoke" data-user="${r.user_id}" data-dev="${esc(r.device_id)}" class="danger">Revoke</button>`}</td></tr>`;
+    }).join("")
+      || `<tr><td colspan="8" class="muted">${MACH_ROWS.length ? "No machine matches that filter." : "No machine has bound yet — they bind on the first call."}</td></tr>`;
+  }
+
+  function renderReg() {
+    const q = ($("regSearch").value || "").trim().toLowerCase();
+    const shown = REG_ROWS.filter((r) => !q
+      || String(r.device_id || "").toLowerCase().includes(q)
+      || String(EMAIL_OF[r.user_id] || "").toLowerCase().includes(q));
+    $("regTable").querySelector("tbody").innerHTML = shown.map((r) => `<tr>
+      <td class="mono">${esc(r.device_id)}</td>
+      <td>${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</td>
+      <td class="mono">${mins(r.minutes)}</td>
+      <td class="muted">${when(r.granted_at)}</td>
+      <td><button data-mact="clear" data-dev="${esc(r.device_id)}" class="danger">Clear this machine</button></td></tr>`).join("")
+      || `<tr><td colspan="5" class="muted">${REG_ROWS.length ? "No machine in the register matches that filter." : "The register is empty, so no machine has drawn a free minute yet."}</td></tr>`;
+  }
+
+  async function setMachine(userId, deviceId, revoked) {
+    const { error, data } = await sb.from("devices").update({ revoked }).eq("user_id", userId).eq("device_id", deviceId).select("id");
+    if (error) return msg("machMsg", error.message);
+    if (!data || !data.length) {
+      return msg("machMsg", "No machine row changed — that machine is not bound to that account any more.");
+    }
+    msg("machMsg", revoked ? "Revoked: that machine can no longer start a call on this account." : "Allowed again: that machine can call on this account.", "ok");
+    await loadMachines();
+    if (CUR && String(CUR.user_id) === String(userId)) await openAccount(userId);
+  }
+
+  document.addEventListener("click", async (e) => {
+    const b = e.target.closest("button[data-mact]");
+    if (!b) return;
+    const dev = b.dataset.dev, userId = b.dataset.user;
+    const who = EMAIL_OF[userId] || shortId(userId);
+    if (b.dataset.mact === "revoke") {
+      if (!confirm(`Revoke machine ${dev} for ${who}? That computer can no longer start a call on this account.`)) return;
+      await setMachine(userId, dev, true);
+      return;
+    }
+    if (b.dataset.mact === "restore") {
+      if (!confirm(`Let machine ${dev} call on ${who} again?`)) return;
+      await setMachine(userId, dev, false);
+      return;
+    }
+    if (b.dataset.mact === "clear") {
+      if (!confirm(`Clear ${dev} from the trial register? The next account signing up on that machine will be offered the free minute again. Nobody's existing minutes change.`)) return;
+      const { error, data } = await sb.from("device_trial_grants").delete().eq("device_id", dev).select("device_id");
+      if (error) return msg("regMsg", error.message);
+      if (!data || !data.length) return msg("regMsg", "Nothing was cleared — that machine is no longer in the register.");
+      msg("regMsg", "Cleared. That machine can carry a free trial again.", "ok");
+      await loadMachines();
+    }
+  });
+
+  $("machRefresh").onclick = loadMachines;
+  $("machSearch").oninput = renderMachines;
+  $("regSearch").oninput = renderReg;
 
   // ══ TOP-UP REQUESTS ══════════════════════════════════════════════════════
   async function loadRequests() {
