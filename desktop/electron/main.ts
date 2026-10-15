@@ -289,7 +289,7 @@ async function checkForUpdate(win: BrowserWindow, opts: { force?: boolean } = {}
 
     if (res.status === 403 || res.status === 429 || (remaining === "0" && res.status >= 400)) {
       rateLimitedUntil = now + backoffMs(res.headers);
-      reportStatus(win, "check-failed", "GitHub is limiting update checks from this network — it will retry automatically");
+      reportStatus(win, "check-failed", "the update service is busy on this network — Stream Live will retry by itself");
       return;
     }
     // A healthy reply can still be the last of the hourly budget; honour it so the
@@ -297,11 +297,11 @@ async function checkForUpdate(win: BrowserWindow, opts: { force?: boolean } = {}
     if (remaining === "0") rateLimitedUntil = now + backoffMs(res.headers);
 
     if (res.status === 404) {
-      reportStatus(win, "check-failed", "no Stream Live release has been published yet");
+      reportStatus(win, "check-failed", "no version of Stream Live has been announced yet");
       return;
     }
     if (res.status < 200 || res.status > 299) {
-      reportStatus(win, "check-failed", `GitHub answered ${res.status}`);
+      reportStatus(win, "check-failed", `the update service answered ${res.status}`);
       return;
     }
 
@@ -312,14 +312,14 @@ async function checkForUpdate(win: BrowserWindow, opts: { force?: boolean } = {}
     try {
       release = JSON.parse(res.body.toString("utf8"));
     } catch {
-      reportStatus(win, "check-failed", "GitHub returned an unreadable reply");
+      reportStatus(win, "check-failed", "the update service sent a reply Stream Live couldn’t read");
       return;
     }
 
     const remoteVer = String(release.tag_name ?? "").replace(/^v/, "");
     const localVer  = app.getVersion();
     if (!remoteVer) {
-      reportStatus(win, "check-failed", "GitHub returned a release with no version");
+      reportStatus(win, "check-failed", "the update service announced a version with no number");
       return;
     }
 

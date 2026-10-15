@@ -37,7 +37,7 @@ export default function StatusBanner() {
           id: "gateway",
           color: WARN,
           text: "This Stream Live build was installed without its gateway settings, so sign-in cannot work. " +
-                "Reinstall the current build from https://github.com/richlifetechnologies-lang/stream-live/releases",
+                "Message the team that gave you this installer and ask for the current build.",
         }, ...prev]);
   }, []);
 

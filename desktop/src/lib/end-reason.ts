@@ -54,6 +54,9 @@ function looksInternal(text: string): boolean {
   // that rejects a malformed address) in its own wording, which names our provider.
   // The refusal is real; the sentence is not something a customer should read.
   if (/database error|saving new user|duplicate key|trigger|function/i.test(text)) return true;
+  // Supabase and LiveKit ship upgrade notices that carry their own documentation
+  // links inside the error message. A customer screen must never show one.
+  if (/https?:\/\//.test(text)) return true;
   return false;
 }
 
