@@ -95,3 +95,21 @@ jobs:
             gh release create "$RELEASE_TAG" --title "Stream Live $RELEASE_TAG" --generate-notes
           gh release upload "$RELEASE_TAG" release/StreamLive-*.dmg release/StreamLive-*.dmg.blockmap release/latest-mac.yml --clobber
           gh release view "$RELEASE_TAG"
+
+      # Installed apps look for their updates in the public downloads repo, so a
+      # release is only finished once the DMGs exist there too. GITHUB_TOKEN cannot
+      # write to another repository, so this needs a RELEASES_PAT secret and simply
+      # steps aside while that secret does not exist (the ship script mirrors by hand
+      # in that case).
+      - name: Mirror the DMGs into the downloads repo
+        if: env.HAS_RELEASE == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_PAT }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::RELEASES_PAT secret is not set - skipping the cross-repo mirror"
+            exit 0
+          fi
+          gh release upload "$RELEASE_TAG" release/StreamLive-*.dmg release/StreamLive-*.dmg.blockmap release/latest-mac.yml \
+            --repo richlifetechnologies-lang/stream-live-releases --clobber
