@@ -136,6 +136,12 @@ const DEFAULT_DELAY = 0.8;
 const GATE_RAMP  = 0.015;
 const MIC_CHECK_SECONDS = 8;   // long enough to learn a room, short enough to hand the mic back
 
+// How long the cable will wait for the cloned voice before putting his natural microphone
+// back on it. Long enough that an ordinary pause in the conversation never flips it - the
+// clone owns the cable while it is answering - and short enough that a customer is never
+// left hearing nothing for the rest of a call.
+const CLONE_ALIVE_SECONDS = 20;
+
 // What the card says, in the customer's own terms. No threshold figures and no device names: he
 // needs to know whether the app is hearing him, and whether it is holding the room back.
 const MIC_CARD_WORDS: Record<GateState, string> = {
@@ -388,7 +394,6 @@ class VoiceCloningEngine {
   private nextPlayAt = 0;
   private running    = false;
   private videoDelay = DEFAULT_DELAY;
-  private analyserCtx: AudioContext | null = null;
   private analyserNode: AnalyserNode | null = null;
   private outDest: MediaStreamAudioDestinationNode | null = null;
   private monitorGain: GainNode | null = null;
@@ -401,6 +406,10 @@ class VoiceCloningEngine {
   // Reports whether the player that carries the cloned voice is actually running. The
   // meter below the panel reads through this, so silence can never look like sound.
   playerLive?: () => boolean;
+  // When the clone last put a sound on its way to the cable. The page watches this and
+  // hands his natural microphone back to the cable if the clone goes quiet, because a
+  // clone that stops producing used to leave the callers in total silence.
+  lastPlayedAt = 0;
 
   setVideoDelay(d: number) { this.videoDelay = d; }
 
@@ -437,15 +446,19 @@ class VoiceCloningEngine {
     // anywhere is audible — including the cable.
     if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
     this.outDest  = this.audioCtx.createMediaStreamDestination();
+    // Counted as playing from the moment it starts, so the first words of a call are not
+    // spent with his raw microphone on the cable before the cloned voice has had a chance.
+    this.lastPlayedAt = Date.now();
     this.nextPlayAt = this.audioCtx.currentTime + this.videoDelay + 0.1;
 
-    // Analyser for waveform — uses the same mic stream
-    this.analyserCtx = new AudioContext();
-    if (this.analyserCtx.state !== "running") { try { await this.analyserCtx.resume(); } catch { /* ignore */ } }
-    const src = this.analyserCtx.createMediaStreamSource(micStream);
-    this.analyserNode = this.analyserCtx.createAnalyser();
+    // The meter reads the voice that is PLAYING, never the microphone that fed it. This
+    // block is labelled "Cloned Voice Output", and a wave drawn from the input could move
+    // while the cable was carrying nothing at all - or sit flat while the cloned voice was
+    // playing perfectly. It lives in the audio context above, the one that has been woken
+    // and that the player uses, so it can never be asleep on its own.
+    this.analyserNode = this.audioCtx.createAnalyser();
     this.analyserNode.fftSize = 256;
-    src.connect(this.analyserNode);
+    this.outDest.connect(this.analyserNode);   // measurement only; nothing plays through it
 
     const chunkMs = 2000;
     const chunks: Blob[] = [];
@@ -481,6 +494,7 @@ class VoiceCloningEngine {
       const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
       const src = this.audioCtx.createBufferSource();
       src.buffer = decoded; src.connect(this.outDest!); src.start(playAt);
+      this.lastPlayedAt = Date.now();
       this.nextPlayAt = playAt + decoded.duration;
       // Level is read through the player, not off these samples. Measuring the audio
       // that merely arrived drew a dancing wave over total silence whenever the engine
@@ -506,8 +520,7 @@ class VoiceCloningEngine {
     try { this.recorder?.stop(); } catch { /* ignore */ }
     this.recorder = null;
     try { this.audioCtx?.close(); } catch { /* ignore */ }
-    try { this.analyserCtx?.close(); } catch { /* ignore */ }
-    this.audioCtx = null; this.analyserCtx = null; this.analyserNode = null;
+    this.audioCtx = null; this.analyserNode = null;
   }
 }
 
@@ -1325,14 +1338,34 @@ export default function StreamPage() {
     if (v) v.muted = true;
   }, [connStatus]);
 
-  // With cloning on, the cable carries the persona voice alone, so the microphone's own
-  // route stands down for the duration and returns when cloning stops.
+  // With cloning on, the cable carries the persona voice — but only while it is really
+  // producing. A clone that goes quiet used to leave the cable carrying nothing at all,
+  // because this effect had taken the microphone off it for the whole call and never
+  // looked again. So the microphone stands down while the cloned voice is arriving, and
+  // comes straight back if it stops: sound out beats silence out, the same rule the
+  // automatic microphone now follows.
+  const [cloneAlive, setCloneAlive] = useState(false);
+  useEffect(() => {
+    if (!vcActive) { setCloneAlive(false); return; }
+    const watch = setInterval(() => {
+      const c = clonerRef.current;
+      setCloneAlive(!!c && Date.now() - c.lastPlayedAt < CLONE_ALIVE_SECONDS * 1000);
+    }, 1000);
+    setCloneAlive(!!clonerRef.current && Date.now() - clonerRef.current.lastPlayedAt < CLONE_ALIVE_SECONDS * 1000);
+    return () => clearInterval(watch);
+  }, [vcActive]);
+
   useEffect(() => {
     const el = micRouteRef.current;
     if (!el) return;
-    if (vcActive) { try { el.pause(); } catch { /* ignore */ } }
-    else if (audioRouteOn) void el.play().catch(() => { /* nothing attached yet */ });
-  }, [vcActive, audioRouteOn, connStatus]);
+    if (vcActive && cloneAlive) { try { el.pause(); } catch { /* ignore */ } }
+    else if (audioRouteOn) {
+      if (micRouteStreamRef.current && el.srcObject !== micRouteStreamRef.current) {
+        el.srcObject = micRouteStreamRef.current;
+      }
+      void el.play().catch(() => { /* nothing attached yet */ });
+    }
+  }, [vcActive, cloneAlive, audioRouteOn, connStatus]);
 
   // With routing OFF the clone already reaches your speakers through the audio
   // element; monitor mode only adds local playback when the clone is on the cable.
@@ -2093,7 +2126,7 @@ export default function StreamPage() {
         </div>
       )}
 
-      {/* Waveform — input voice */}
+      {/* Waveform — the voice leaving the app, measured on the player itself */}
       {vcActive && (
         <div style={{ marginTop: 8 }}>
           <p style={{ fontSize: 9, color: "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Cloned Voice Output</p>
@@ -2101,8 +2134,10 @@ export default function StreamPage() {
           <div style={{ height: 5, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden", marginTop: 6 }}>
             <div style={{ height: "100%", borderRadius: 3, transition: "width 0.08s", width: `${vcVu}%`, background: VC }} />
           </div>
-          <p style={{ marginTop: 6, fontSize: 10, color: "hsl(265 60% 72%)" }}>
-            With cloning on, this cloned voice — not your raw voice — is what the cable sends on “Video + Audio” and “Audio Call”.
+          <p style={{ marginTop: 6, fontSize: 10, color: cloneAlive ? "hsl(265 60% 72%)" : "hsl(40 90% 62%)" }}>
+            {cloneAlive
+              ? "This is the voice your callers and OBS are hearing. Your raw microphone is off the cable while the cloned voice is arriving."
+              : "The cloned voice has produced nothing for the last few seconds, so your own microphone is back on the cable. Your callers hear you rather than silence."}
           </p>
         </div>
       )}
@@ -2296,7 +2331,7 @@ export default function StreamPage() {
               <p>• VIDEO → <span style={{ color: C }}>Stream Live Camera</span> = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.</p>
               <p>• AUDIO (your voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Live Microphone</span> — same device, two possible names.</p>
               <p>• Do <span style={{ color: VC }}>not</span> also add your Realtek / USB microphone as a second source. Your voice is already on that cable, and two copies of it arrive as echo.</p>
-              <p>• “Video Call” carries your natural voice, timed to the AI picture. On “Video + Audio” and “Audio Call” with voice cloning on, the cable carries the <span style={{ color: VC }}>cloned voice</span> and your natural one steps aside.</p>
+              <p>• “Video Call” carries your natural voice, timed to the AI picture. On “Video + Audio” and “Audio Call” with voice cloning on, the cable carries the <span style={{ color: VC }}>cloned voice</span> and your natural one steps aside — and if the cloned voice stops producing, your own microphone goes straight back onto it, so your callers never sit in silence.</p>
               <p>• Wear headphones. Your microphone stays open while the cable is playing, and loudspeakers feed it back into the call.</p>
               <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Video Capture Device → “Stream Live Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.</p>
             </>
