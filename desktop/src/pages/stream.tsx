@@ -385,8 +385,21 @@ class AudioSyncPipeline {
 }
 
 // ─── Voice cloning engine ─────────────────────────────────────────────────────
-// Records mic in 2-second chunks, transforms each chunk via the voice API,
-// plays the result back delayed to match video output.
+// This engine lives in the pause between his words. The microphone is recorded
+// continuously, its level is watched, and when he stops talking - or after a second and
+// a half of talking without a breath - the piece is closed, handed to the voice service,
+// and the voice that comes back is played onto the cable. One piece is ever in flight:
+// while an answer is still out there the recorder simply keeps collecting, so a slow
+// reply makes his words late rather than lost, and cutting on a pause means a word is
+// never sliced in half by a stopwatch.
+
+const PUMP_MS             = 60;   // how often the microphone level is looked at
+const CLONE_MAX_PIECE_MS  = 1500; // ...unless he is still talking, then send it anyway
+const CLONE_MIN_SPEECH_MS = 200;  // less than this is a cough, not a line worth paying for
+const CLONE_IDLE_MS       = 5000; // a piece holding no speech at all is thrown away this often
+// A request that never lands must not hold the pipeline shut for the rest of the call, so the
+// wait has a deadline: the piece is abandoned and his next words are tried again.
+const CLONE_SEND_MS       = 6000;
 
 class VoiceCloningEngine {
   private recorder:   MediaRecorder | null = null;
@@ -399,6 +412,18 @@ class VoiceCloningEngine {
   private outDest: MediaStreamAudioDestinationNode | null = null;
   private monitorGain: GainNode | null = null;
   private monitored = false;
+  // The microphone watched, not forwarded. Nothing audible hangs off this tap: it exists
+  // so the engine can tell his voice from his room and know when he has finished speaking.
+  private inSrc:      MediaStreamAudioSourceNode | null = null;
+  private inAnalyser: AnalyserNode | null = null;
+  private inFreq:     Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  private gate = new VoiceGate();
+  private pump: ReturnType<typeof setInterval> | null = null;
+  // One piece at a time, and no words dropped while one is out: the recorder just keeps
+  // gathering until the answer lands.
+  private busy = false;
+  private pieceMs  = 0;
+  private speechMs = 0;
 
   call       = null as null | ((path: string, body: FormData) => Promise<Response>);
   voiceId    = BUILTIN_VOICES[0].id;
@@ -407,10 +432,17 @@ class VoiceCloningEngine {
   // Reports whether the player that carries the cloned voice is actually running. The
   // meter below the panel reads through this, so silence can never look like sound.
   playerLive?: () => boolean;
-  // When the clone last put a sound on its way to the cable. The page watches this and
-  // hands his natural microphone back to the cable if the clone goes quiet, because a
-  // clone that stops producing used to leave the callers in total silence.
-  lastPlayedAt = 0;
+  // When his microphone last held a real word, and when cloned audio last came back. A
+  // clone is only dead if he spoke and nothing answered him: a call where he has simply
+  // not talked yet is silence by agreement, not a fault, and must never put his raw
+  // microphone back on the cable in the middle of a pause.
+  spokeAt    = 0;
+  answeredAt = 0;
+
+  alive(graceSeconds: number): boolean {
+    if (this.answeredAt >= this.spokeAt) return true;
+    return Date.now() - this.spokeAt < graceSeconds * 1000;
+  }
 
   setVideoDelay(d: number) { this.videoDelay = d; }
 
@@ -440,16 +472,15 @@ class VoiceCloningEngine {
 
   async start(micStream: MediaStream) {
     if (this.running) return;
-    this.running  = true;
+    this.running   = true;
+    this.spokeAt   = 0;
+    this.answeredAt = 0;
     this.audioCtx = new AudioContext();
     // Constructed outside the click's user activation, so this context can come up
     // suspended. Left alone, every chunk decodes, every meter moves, and nothing
     // anywhere is audible — including the cable.
     if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
     this.outDest  = this.audioCtx.createMediaStreamDestination();
-    // Counted as playing from the moment it starts, so the first words of a call are not
-    // spent with his raw microphone on the cable before the cloned voice has had a chance.
-    this.lastPlayedAt = Date.now();
     this.nextPlayAt = this.audioCtx.currentTime + this.videoDelay + 0.1;
 
     // The meter reads the voice that is PLAYING, never the microphone that fed it. This
@@ -466,32 +497,107 @@ class VoiceCloningEngine {
     this.voiceBus.connect(this.outDest);
     this.voiceBus.connect(this.analyserNode);
 
+    // Watching his level, from the very microphone the recorder below is already carrying.
+    // Nothing audible hangs off this tap. It exists so the engine can tell his voice from
+    // his room, which is the only way to know when a sentence has ended - and the only way
+    // to know that an empty room is not a broken clone.
+    this.inSrc = this.audioCtx.createMediaStreamSource(micStream);
+    this.inAnalyser = this.audioCtx.createAnalyser();
+    this.inAnalyser.fftSize = 512;
+    this.inAnalyser.minDecibels = -90; this.inAnalyser.maxDecibels = -10;
+    this.inFreq = new Uint8Array(this.inAnalyser.frequencyBinCount);
+    this.inSrc.connect(this.inAnalyser);
+    this.gate.reset();
+
     const chunkMs = 2000;
     const chunks: Blob[] = [];
     this.recorder = new MediaRecorder(micStream, { mimeType: "audio/webm;codecs=opus" });
 
     this.recorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.push(ev.data); };
-    this.recorder.onstop = async () => {
+    this.recorder.onstop = () => {
       if (!this.running) return;
-      const blob = new Blob(chunks.splice(0), { type: "audio/webm" });
-      void this._process(blob);
-      if (this.running) {
-        this.recorder!.start(chunkMs);
-        setTimeout(() => { if (this.running && this.recorder?.state === "recording") this.recorder.requestData(); }, chunkMs);
-      }
+      const blob  = new Blob(chunks.splice(0), { type: "audio/webm" });
+      const worth = blob.size > 0 && this.speechMs >= CLONE_MIN_SPEECH_MS;
+      // A piece of nothing but his room never leaves the app: it would be billed as
+      // airtime and would come back as nothing to hear.
+      this.pieceMs = 0; this.speechMs = 0;
+      // The next piece starts gathering immediately, before this one has been answered, so
+      // nothing he says while the service is thinking is lost.
+      this.recorder!.start(chunkMs);
+      setTimeout(() => { if (this.running && this.recorder?.state === "recording") this.recorder.requestData(); }, chunkMs);
+      if (worth) void this._process(blob);
+      else this.busy = false;
     };
     this.recorder.start(chunkMs);
     setTimeout(() => { if (this.running && this.recorder?.state === "recording") this.recorder.requestData(); }, chunkMs);
+    this.pump = setInterval(() => this._pumpTick(PUMP_MS), PUMP_MS);
+  }
+
+  private _pumpTick(dtMs: number) {
+    if (!this.running || !this.inAnalyser) return;
+    this.inAnalyser.getByteFrequencyData(this.inFreq);
+    const level = voiceBandLevel(this.inFreq, this.audioCtx?.sampleRate ?? 48000);
+    this.gate.update(level, dtMs / 1000);
+    this.pieceMs += dtMs;
+    if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; }
+    // One answer at a time. While one is out there the piece simply keeps growing, which
+    // makes his words late rather than dropped - and a dropped word is a caller who heard
+    // half a sentence.
+    if (this.busy) return;
+    // His own detector decides when a sentence is over, so a word is never sliced by a
+    // stopwatch and a pause in the conversation is never read as a fault.
+    if (this.speechMs >= CLONE_MIN_SPEECH_MS &&
+        (!this.gate.talking || this.pieceMs >= CLONE_MAX_PIECE_MS)) { this._cut(); return; }
+    if (this.speechMs === 0 && this.pieceMs >= CLONE_IDLE_MS) this._cut();
+  }
+
+  // Close the piece. The stop handler restarts the recorder and does the sending.
+  private _cut() {
+    this.busy = true;
+    try { this.recorder?.stop(); } catch { this.busy = false; }
+  }
+
+  // The service answers faster on raw samples than on a compressed file, and it promises
+  // only the input formats it names, so the piece is rebuilt here as the raw 16-bit mono
+  // 16 kHz stream its reference describes rather than a browser recording container nobody
+  // has promised to read.
+  private async _toPcm16k(blob: Blob): Promise<ArrayBuffer | null> {
+    if (!this.audioCtx) return null;
+    const decoded = await this.audioCtx.decodeAudioData(await blob.arrayBuffer());
+    const rate = 16000;
+    const frames = Math.max(1, Math.ceil(decoded.duration * rate));
+    const off = new OfflineAudioContext(1, frames, rate);
+    const node = off.createBufferSource(); node.buffer = decoded; node.connect(off.destination); node.start();
+    const samples = (await off.startRendering()).getChannelData(0);
+    const out = new Int16Array(samples.length);
+    for (let i = 0; i < samples.length; i++) {
+      const v = Math.max(-1, Math.min(1, samples[i]));
+      out[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+    }
+    return out.buffer;
+  }
+
+  // One piece of his voice, handed to the service with a deadline on the answer. Without the
+  // deadline a single lost request on a flaky connection would keep the pipeline busy forever,
+  // which means no cloned voice for the rest of the call.
+  private async _send(form: FormData): Promise<Response> {
+    const call = this.call!(`/v1/speech-to-speech/${this.voiceId}/stream`, form);
+    const deadline = new Promise<never>((_, reject) => {
+      setTimeout(() => reject(new Error("the voice service took too long to answer")), CLONE_SEND_MS);
+    });
+    return Promise.race([call, deadline]);
   }
 
   private async _process(blob: Blob) {
-    if (!this.running || !this.audioCtx || !this.call || !this.voiceId) return;
-    try {
+    if (!this.running || !this.audioCtx || !this.call || !this.voiceId) { this.busy = false; return; }
+    try {      const pcm = await this._toPcm16k(blob);
+      if (!pcm || !this.running) return;
       const form = new FormData();
-      form.append("audio", blob, "chunk.webm");
+      form.append("audio", new Blob([pcm], { type: "application/octet-stream" }), "chunk.pcm");
+      form.append("file_format", "pcm_s16le_16");
       form.append("model_id", "eleven_multilingual_sts_v2");
       form.append("voice_settings", JSON.stringify({ stability: 0.5, similarity_boost: 0.8, style: 0.0, use_speaker_boost: true }));
-      const res = await this.call(`/v1/speech-to-speech/${this.voiceId}/stream`, form);
+      const res = await this._send(form);
       if (!res.ok) { console.warn(`[voice] engine returned HTTP ${res.status}`); this.onError?.(endReasonMessage("upstream_key")); return; }
       const buf = await res.arrayBuffer();
       if (!this.running || !this.audioCtx) return;
@@ -500,7 +606,9 @@ class VoiceCloningEngine {
       const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
       const src = this.audioCtx.createBufferSource();
       src.buffer = decoded; src.connect(this.voiceBus!); src.start(playAt);
-      this.lastPlayedAt = Date.now();
+      // Answered: the clock that decides whether his microphone has to come back to the
+      // cable is reset here, the moment real cloned audio is on its way to it.
+      this.answeredAt = Date.now();
       this.nextPlayAt = playAt + decoded.duration;
       // Level is read through the player, not off these samples. Measuring the audio
       // that merely arrived drew a dancing wave over total silence whenever the engine
@@ -512,6 +620,8 @@ class VoiceCloningEngine {
       this.onVu?.(Math.min(100, Math.sqrt(sum / data.length) * 300));
     } catch (e) {
       if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
+    } finally {
+      this.busy = false;
     }
   }
 
@@ -521,11 +631,15 @@ class VoiceCloningEngine {
 
   stop() {
     this.running = false;
+    if (this.pump) { clearInterval(this.pump); this.pump = null; }
+    this.busy = false;
     this.outDest = null;
     this.voiceBus = null;
     this.monitorGain = null; this.monitored = false;
     try { this.recorder?.stop(); } catch { /* ignore */ }
     this.recorder = null;
+    try { this.inSrc?.disconnect(); } catch { /* ignore */ }
+    this.inSrc = null; this.inAnalyser = null;
     try { this.audioCtx?.close(); } catch { /* ignore */ }
     this.audioCtx = null; this.analyserNode = null;
   }
@@ -1345,20 +1459,21 @@ export default function StreamPage() {
     if (v) v.muted = true;
   }, [connStatus]);
 
-  // With cloning on, the cable carries the persona voice — but only while it is really
-  // producing. A clone that goes quiet used to leave the cable carrying nothing at all,
-  // because this effect had taken the microphone off it for the whole call and never
-  // looked again. So the microphone stands down while the cloned voice is arriving, and
-  // comes straight back if it stops: sound out beats silence out, the same rule the
-  // automatic microphone now follows.
+  // With cloning on, the cable carries the persona voice — but only while the voice service
+  // is actually answering him. A clone that went quiet used to leave the cable carrying
+  // nothing at all, because this effect had taken the microphone off it for the whole call
+  // and never looked again. So the microphone stands down while his words are being
+  // answered, and comes straight back if an answer never lands: sound out beats silence out,
+  // the same rule the automatic microphone follows. A pause in the conversation is not a
+  // fault, so it does not move the microphone - only an unanswered send does.
   const [cloneAlive, setCloneAlive] = useState(false);
   useEffect(() => {
     if (!vcActive) { setCloneAlive(false); return; }
     const watch = setInterval(() => {
       const c = clonerRef.current;
-      setCloneAlive(!!c && Date.now() - c.lastPlayedAt < CLONE_ALIVE_SECONDS * 1000);
+      setCloneAlive(!!c && c.alive(CLONE_ALIVE_SECONDS));
     }, 1000);
-    setCloneAlive(!!clonerRef.current && Date.now() - clonerRef.current.lastPlayedAt < CLONE_ALIVE_SECONDS * 1000);
+    setCloneAlive(!!clonerRef.current && clonerRef.current.alive(CLONE_ALIVE_SECONDS));
     return () => clearInterval(watch);
   }, [vcActive]);
 
