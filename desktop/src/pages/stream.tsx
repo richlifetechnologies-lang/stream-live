@@ -395,6 +395,7 @@ class VoiceCloningEngine {
   private running    = false;
   private videoDelay = DEFAULT_DELAY;
   private analyserNode: AnalyserNode | null = null;
+  private voiceBus: GainNode | null = null;
   private outDest: MediaStreamAudioDestinationNode | null = null;
   private monitorGain: GainNode | null = null;
   private monitored = false;
@@ -423,11 +424,11 @@ class VoiceCloningEngine {
     // allowed to throw out of the call.
     try {
       if (on) {
-        if (!this.outDest) return;
+        if (!this.voiceBus) return;
         if (this.audioCtx.state === "suspended") void this.audioCtx.resume();
         if (!this.monitorGain) {
           this.monitorGain = this.audioCtx.createGain();
-          this.outDest.connect(this.monitorGain);
+          this.voiceBus.connect(this.monitorGain);
         }
         this.monitorGain.disconnect();
         this.monitorGain.connect(this.audioCtx.destination);
@@ -458,7 +459,12 @@ class VoiceCloningEngine {
     // and that the player uses, so it can never be asleep on its own.
     this.analyserNode = this.audioCtx.createAnalyser();
     this.analyserNode.fftSize = 256;
-    this.outDest.connect(this.analyserNode);   // measurement only; nothing plays through it
+    // The cable's destination node has zero outputs of its own, so tapping it directly
+    // throws and the call never starts. Everything the clone plays goes through this
+    // gain instead: one copy feeds the cable, another feeds the meter.
+    this.voiceBus = this.audioCtx.createGain();
+    this.voiceBus.connect(this.outDest);
+    this.voiceBus.connect(this.analyserNode);
 
     const chunkMs = 2000;
     const chunks: Blob[] = [];
@@ -493,7 +499,7 @@ class VoiceCloningEngine {
       const decoded = await this.audioCtx.decodeAudioData(buf);
       const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
       const src = this.audioCtx.createBufferSource();
-      src.buffer = decoded; src.connect(this.outDest!); src.start(playAt);
+      src.buffer = decoded; src.connect(this.voiceBus!); src.start(playAt);
       this.lastPlayedAt = Date.now();
       this.nextPlayAt = playAt + decoded.duration;
       // Level is read through the player, not off these samples. Measuring the audio
@@ -516,6 +522,7 @@ class VoiceCloningEngine {
   stop() {
     this.running = false;
     this.outDest = null;
+    this.voiceBus = null;
     this.monitorGain = null; this.monitored = false;
     try { this.recorder?.stop(); } catch { /* ignore */ }
     this.recorder = null;
