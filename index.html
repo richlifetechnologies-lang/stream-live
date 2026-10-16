@@ -168,11 +168,11 @@
     <div class="grid">
       <div class="card">
         <h3>Windows 10 or 11</h3>
-        <p><code>StreamLive-Setup-1.6.7.exe</code><br>
+        <p><code>StreamLive-Setup-1.6.8.exe</code><br>
           Double-click it and accept the security prompt. Part way through it asks to add one free audio
           driver — press <b>Yes</b>. When it finishes, <b>restart the computer</b>: the microphone does not
           work until you do. Nothing else to download.</p>
-        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.6.7/StreamLive-Setup-1.6.7.exe">Download for Windows</a></p>
+        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.6.8/StreamLive-Setup-1.6.8.exe">Download for Windows</a></p>
       </div>
       <div class="card">
         <h3>Mac with an Apple chip</h3>
@@ -225,7 +225,7 @@
     <p class="kicker">Mac install</p>
     <h2>Getting Stream Live onto a Mac</h2>
     <p class="sub">Five steps, about three minutes. Do them in order; steps 1 and 2 are one-time, and steps 4
-      and 5 are what make a call app see the AI picture and hear the AI voice.</p>
+      and 5 are what make a call app see the AI picture and hear your voice.</p>
     <ol class="steps">
       <li><b>Move the app into Applications.</b> Double-click the <code>.dmg</code> you downloaded, drag
         <i>Stream Live</i> onto <i>Applications</i>, then eject the disk. Keep it in Applications — running it
@@ -248,7 +248,7 @@
         one carries sound, one carries video.
         <ul class="plain" style="margin-top:10px">
           <li><a href="https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg" download>BlackHole 2ch</a> —
-            a silent virtual speaker; the AI voice goes in here. <b>Clicking it downloads the installer
+            a silent virtual speaker; your voice goes in here. <b>Clicking it downloads the installer
             straight into your Downloads folder</b>. It is free software and that link asks you for nothing —
             no sign-up, no email, no payment page. After installing it, <b>log out and back in</b>,
             and it appears under System Settings → Sound and in the app’s “Audio out” list. If the link ever
@@ -258,7 +258,8 @@
         </ul>
       </li>
       <li><b>Put the AI feed into your call.</b> On the stream screen, open the <b>OBS</b> window and turn
-        <b>Stream Live Microphone</b> on, so the cloned voice moves to BlackHole 2ch. Then:
+        <b>Stream Live Microphone</b> on, so your voice moves to BlackHole 2ch — or the
+        <b>cloned voice</b> on the tabs where cloning is switched on. Then:
         <ol style="margin:10px 0 0; padding-left:20px; color:var(--muted)">
           <li>In OBS: <b>Sources → + → Window Capture</b> → pick “Stream Live OBS”.</li>
           <li>In OBS: <b>Controls → Start Virtual Camera</b>.</li>
@@ -268,9 +269,10 @@
       </li>
     </ol>
     <div class="note" style="margin-top:22px">
-      <b>Want to be heard next to the AI voice?</b> Open <i>Audio MIDI Setup</i>, create a
-      <b>Multi-Output Device</b> that combines your own microphone with BlackHole 2ch, and pick that as the
-      call app’s input. OBS carries picture only, which is why the call app takes its microphone from
+      <b>Wear headphones.</b> Your voice now travels through BlackHole 2ch while your real microphone is still
+      open, so loudspeakers send the call straight back into it and everyone hears echo. Do <b>not</b> add your
+      own microphone as a second input in the call app either — your voice is already on that device, and two
+      copies of it arrive as echo. OBS carries picture only, which is why the call app takes its microphone from
       BlackHole rather than from OBS.
     </div>
     <p class="sub" style="margin:18px 0 0">macOS only accepts a system webcam from software Apple has approved

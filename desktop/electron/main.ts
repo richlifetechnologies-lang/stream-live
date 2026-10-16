@@ -9,6 +9,11 @@ import { initVirtualCameraIpc, shutdownVirtualCamera } from "./virtual-camera";
 
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
+// The app must be able to start producing sound on its own: a call is resumed after
+// several awaits, so Chromium's default autoplay policy can leave the voice-cloning
+// audio engine asleep and the cable silent while every meter on screen still moves.
+app.commandLine.appendSwitch("autoplay-policy", "no-user-gesture-required");
+
 let mainWindow: BrowserWindow | null = null;
 
 const GITHUB_OWNER = "richlifetechnologies-lang";
@@ -124,6 +129,16 @@ function downloadFile(
           return;
         }
         const partial = resp.statusCode === 206;
+        if (resp.statusCode === 416 && start > 0) {
+          // The leftover is already at or past the end of the asset, so the range
+          // asking for "the rest" cannot be satisfied — and every retry asks the
+          // same impossible one. Drop the leftover and download whole again.
+          resp.destroy();
+          try { fs.rmSync(destPath, { force: true }); } catch { /* ignore */ }
+          logUpdate("server refused the resume range — restarting the download from zero");
+          fetchOnce(u, 0).then(res, rej);
+          return;
+        }
         if (resp.statusCode !== 200 && !partial) {
           resp.destroy(); rej(new Error(`Download failed with status ${resp.statusCode}`)); return;
         }
@@ -368,6 +383,18 @@ async function startInAppDownload(win: BrowserWindow, overrideUrl?: string) {
     // Infer a filename from the URL
     const filename    = decodeURIComponent(path.basename(new URL(downloadUrl).pathname));
     const destPath    = path.join(os.tmpdir(), filename);
+
+    // A leftover from an earlier attempt is only worth resuming if it is genuinely
+    // shorter than the real installer. An abandoned-but-complete file would make the
+    // first request an unsatisfiable range, which is the "416" dead end.
+    const knownSize = pendingVerification?.size ?? 0;
+    if (knownSize > 0 && fs.existsSync(destPath)) {
+      const have = fs.statSync(destPath).size;
+      if (have >= knownSize) {
+        logUpdate(`discarding leftover ${filename} (${have} of ${knownSize} bytes) — downloading fresh`);
+        fs.rmSync(destPath, { force: true });
+      }
+    }
 
     await downloadFile(
       downloadUrl,

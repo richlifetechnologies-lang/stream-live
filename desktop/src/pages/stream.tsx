@@ -158,26 +158,44 @@ class AudioSyncPipeline {
   private timer:      ReturnType<typeof setInterval> | null = null;
   private videoEl:    HTMLVideoElement | null = null;
   private micStream:  MediaStream | null = null;
+  private micDeviceId?: string;
 
   detectedDelay = 0.8;
   vuLevel = 0;
   onUpdate?: (delay: number, vu: number) => void;
 
+  // Flipping noise cancellation mid-call has to change the live microphone, not the
+  // next call's — otherwise the switch looks dead exactly when someone tests it.
+  async setNoiseCancel(on: boolean) {
+    const track = this.micStream?.getAudioTracks()[0];
+    if (!track) return;
+    try { await track.applyConstraints(micAudioConstraints(this.micDeviceId, on, 48000)); } catch { /* device refused it */ }
+  }
+
   async start(videoEl: HTMLVideoElement, micDeviceId?: string, noiseCancel = true): Promise<MediaStreamAudioDestinationNode | null> {
     this.videoEl = videoEl;
+    this.micDeviceId = micDeviceId;
     try {
       this.micStream = await navigator.mediaDevices.getUserMedia({
         audio: micAudioConstraints(micDeviceId, noiseCancel, 48000),
         video: false,
       });
       const ctx = new AudioContext({ sampleRate: 48000 });
+      // Left suspended, this context would starve the cable of voice while the meters
+      // on screen kept moving — silence that looks like success.
+      if (ctx.state !== "running") { try { await ctx.resume(); } catch { /* ignore */ } }
       const src = ctx.createMediaStreamSource(this.micStream);
+      // Rumble, fans, traffic and air-conditioning all sit below the voice. Taking them
+      // out here removes them from both the AI's input and the cable, on top of the
+      // browser's own suppression.
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = "highpass"; highpass.frequency.value = 90; highpass.Q.value = 0.7;
       const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
       this.freqData = new Uint8Array(analyser.frequencyBinCount);
       const delay = ctx.createDelay(MAX_DELAY + 0.5); delay.delayTime.value = this.detectedDelay;
       const gain = ctx.createGain(); gain.gain.value = 1.0;
       const dest = ctx.createMediaStreamDestination();
-      src.connect(analyser); analyser.connect(delay); delay.connect(gain); gain.connect(dest);
+      src.connect(highpass); highpass.connect(analyser); analyser.connect(delay); delay.connect(gain); gain.connect(dest);
       this.audioCtx = ctx; this.analyser = analyser; this.delayNode = delay; this.dest = dest;
       this.offCanvas = new OffscreenCanvas(80, 45);
       this.offCtx = this.offCanvas.getContext("2d")!;
@@ -253,10 +271,13 @@ class VoiceCloningEngine {
   private monitorGain: GainNode | null = null;
   private monitored = false;
 
-  call    = null as null | ((path: string, body: FormData) => Promise<Response>);
-  voiceId = BUILTIN_VOICES[0].id;
-  onVu?:   (level: number) => void;
-  onError?: (msg: string) => void;
+  call       = null as null | ((path: string, body: FormData) => Promise<Response>);
+  voiceId    = BUILTIN_VOICES[0].id;
+  onVu?:     (level: number) => void;
+  onError?:  (msg: string) => void;
+  // Reports whether the player that carries the cloned voice is actually running. The
+  // meter below the panel reads through this, so silence can never look like sound.
+  playerLive?: () => boolean;
 
   setVideoDelay(d: number) { this.videoDelay = d; }
 
@@ -266,27 +287,38 @@ class VoiceCloningEngine {
     if (on === this.monitored) return;
     this.monitored = on;
     if (!this.audioCtx) return;
-    if (on) {
-      if (!this.outDest) return;
-      if (!this.monitorGain) {
-        this.monitorGain = this.audioCtx.createGain();
-        this.outDest.connect(this.monitorGain);
+    // A fault here used to take the whole window down, so nothing in this path is
+    // allowed to throw out of the call.
+    try {
+      if (on) {
+        if (!this.outDest) return;
+        if (this.audioCtx.state === "suspended") void this.audioCtx.resume();
+        if (!this.monitorGain) {
+          this.monitorGain = this.audioCtx.createGain();
+          this.outDest.connect(this.monitorGain);
+        }
+        this.monitorGain.disconnect();
+        this.monitorGain.connect(this.audioCtx.destination);
+      } else if (this.monitorGain) {
+        this.monitorGain.disconnect();
       }
-      this.monitorGain.connect(this.audioCtx.destination);
-    } else if (this.monitorGain) {
-      this.monitorGain.disconnect(this.audioCtx.destination);
-    }
+    } catch { /* monitor is a nicety; the call is not */ }
   }
 
   async start(micStream: MediaStream) {
     if (this.running) return;
     this.running  = true;
     this.audioCtx = new AudioContext();
+    // Constructed outside the click's user activation, so this context can come up
+    // suspended. Left alone, every chunk decodes, every meter moves, and nothing
+    // anywhere is audible — including the cable.
+    if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
     this.outDest  = this.audioCtx.createMediaStreamDestination();
     this.nextPlayAt = this.audioCtx.currentTime + this.videoDelay + 0.1;
 
     // Analyser for waveform — uses the same mic stream
     this.analyserCtx = new AudioContext();
+    if (this.analyserCtx.state !== "running") { try { await this.analyserCtx.resume(); } catch { /* ignore */ } }
     const src = this.analyserCtx.createMediaStreamSource(micStream);
     this.analyserNode = this.analyserCtx.createAnalyser();
     this.analyserNode.fftSize = 256;
@@ -321,11 +353,17 @@ class VoiceCloningEngine {
       if (!res.ok) { console.warn(`[voice] engine returned HTTP ${res.status}`); this.onError?.(endReasonMessage("upstream_key")); return; }
       const buf = await res.arrayBuffer();
       if (!this.running || !this.audioCtx) return;
+      if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
       const decoded = await this.audioCtx.decodeAudioData(buf);
       const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
       const src = this.audioCtx.createBufferSource();
       src.buffer = decoded; src.connect(this.outDest!); src.start(playAt);
       this.nextPlayAt = playAt + decoded.duration;
+      // Level is read through the player, not off these samples. Measuring the audio
+      // that merely arrived drew a dancing wave over total silence whenever the engine
+      // was asleep, which is how a dead cable got mistaken for a working one.
+      const live = this.playerLive ? this.playerLive() : true;
+      if (!live) { this.onVu?.(0); return; }
       const data = decoded.getChannelData(0);
       let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
       this.onVu?.(Math.min(100, Math.sqrt(sum / data.length) * 300));
@@ -498,63 +536,6 @@ async function _startVideoSession(token: string, localStream: MediaStream, onRem
       else if (ev.code !== 1000) onDisconnect();
     };
   });
-}
-
-// ─── Cable discovery by acoustic loopback (label-free, groupId-free) ────────
-// Chromium hides the VB-Cable render endpoint's label and gives its input and
-// output different groupIds, so neither names nor groups identify it. But the
-// cable is a loopback pair: audio played INTO its render endpoint comes OUT of
-// its capture endpoint. So we play a probe tone into each unlabeled output and
-// watch the cable capture inputs for level; the output that is heard is the
-// cable. This needs no labels and cannot pick the wrong device.
-async function _measurePeak(an: AnalyserNode, ms: number): Promise<number> {
-  const buf = new Uint8Array(an.fftSize);
-  let mx = 0;
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) {
-    an.getByteTimeDomainData(buf as Uint8Array<ArrayBuffer>);
-    for (let i = 0; i < buf.length; i++) { const d = Math.abs(buf[i] - 128); if (d > mx) mx = d; }
-    await new Promise(r => setTimeout(r, 40));
-  }
-  return mx;
-}
-
-async function _loopbackPick(cands: MediaDeviceInfo[], inputs: MediaDeviceInfo[]): Promise<MediaDeviceInfo | null> {
-  if (!cands.length) return null;
-  type Tap = { an: AnalyserNode; ctx: AudioContext };
-  const taps: Tap[] = [];
-  for (const inp of inputs.slice(0, 4)) {
-    try {
-      const s = await navigator.mediaDevices.getUserMedia({ audio: { deviceId: { exact: inp.deviceId } } });
-      const ctx = new AudioContext();
-      const an = ctx.createAnalyser(); an.fftSize = 1024;
-      ctx.createMediaStreamSource(s).connect(an);
-      taps.push({ an, ctx });
-    } catch { /* skip unusable input */ }
-  }
-  if (!taps.length) return null;
-  let winner: MediaDeviceInfo | null = null;
-  for (const c of cands) {
-    let ctx: AudioContext | null = null;
-    let osc: OscillatorNode | null = null;
-    try {
-      ctx = new AudioContext();
-      const sink = ctx as AudioContext & { setSinkId?: (id: string) => Promise<void> };
-      if (typeof sink.setSinkId !== "function") break;
-      await sink.setSinkId(c.deviceId);
-      osc = ctx.createOscillator(); osc.frequency.value = 440;
-      const g = ctx.createGain(); g.gain.value = 0.6;
-      osc.connect(g); g.connect(ctx.destination);
-      const base = await Promise.all(taps.map(t => _measurePeak(t.an, 150)));
-      osc.start();
-      const live = await Promise.all(taps.map(t => _measurePeak(t.an, 500)));
-      osc.stop(); osc = null;
-      if (live.some((v, i) => v > 24 && v > base[i] + 12)) { winner = c; break; }
-    } catch { /* candidate unusable; try next */ }
-    finally { try { osc?.stop(); } catch { /**/ } try { void ctx?.close(); } catch { /**/ } }
-  }
-  taps.forEach(t => { try { void t.ctx.close(); } catch { /**/ } });
-  return winner;
 }
 
 // ─── Second video pipeline (trial accounts) ─────────────────────────────────
@@ -779,8 +760,14 @@ export default function StreamPage() {
   // portrait mode, so this is what keeps the camera stream presenting frames for
   // the readout to count.
   const camCountRef     = useRef<HTMLVideoElement | null>(null);
-  // Plays the cloned voice; routed to the same output as the AI video.
+  // Plays the cloned voice; routed to the cable alongside the microphone.
   const cloneAudioRef   = useRef<HTMLAudioElement | null>(null);
+  // Plays the microphone (or its delayed twin) so the cable can carry it. Silent on
+  // the speakers: it only ever holds a stream while routing is on.
+  const micRouteRef     = useRef<HTMLAudioElement | null>(null);
+  // The mic stream handed to the cable while a call runs, kept so a toggle mid-call
+  // can re-attach it without opening a second microphone.
+  const micRouteStreamRef = useRef<MediaStream | null>(null);
   const localStreamRef  = useRef<MediaStream|null>(null);
   const videoSessionRef = useRef<VideoSession|null>(null);
   // Open lease id: heartbeat/endCall live on the gateway, this mirrors it for cleanup.
@@ -811,6 +798,8 @@ export default function StreamPage() {
   const micOnlyAudioCtxRef  = useRef<AudioContext|null>(null);
   const micOnlyAnalyserRef  = useRef<AnalyserNode|null>(null);
   const micOnlyStreamRef    = useRef<MediaStream|null>(null);
+  // Same microphone, rumble-filtered — what the cable carries on the Audio Call tab.
+  const micOnlyRouteStreamRef = useRef<MediaStream|null>(null);
 
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
   const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
@@ -1048,7 +1037,7 @@ export default function StreamPage() {
   // Always tear the feeder down on unmount.
   useEffect(() => () => { stopVCamPump(); getElectronAPI()?.vcamStop?.(); }, [stopVCamPump]);
 
-  // ─── Virtual microphone: route AI audio to the VB-Cable sink ────────────────
+  // ─── Virtual microphone: route your own voice to the VB-Cable sink ──────────
   // Output-device labels are blank until the page holds a media permission, so we
   // request one (and immediately release it) before scanning for the cable.
   const ensureMediaPermission = useCallback(async (): Promise<boolean> => {
@@ -1104,18 +1093,13 @@ export default function StreamPage() {
         devs = await scan();
         hit = byLabel(outsOf(devs)) || byGroup(devs);
       }
-      // Definitive, label-free fallback: probe unlabeled outputs acoustically.
-      // The cable is a loopback pair, so the output whose probe tone is heard on
-      // the cable capture input IS the cable. Cannot pick the wrong device.
+      // Windows hides the cable output's label, so a machine with exactly one
+      // unnamed output has only one candidate. Anything less certain is left to the
+      // "Audio out" dropdown: guessing by playing probe tones meant opening the live
+      // call's own microphone and beeping into the customer's speakers mid-call.
       if (!hit) {
         const cands = outsOf(devs).filter(d => !d.label);
-        if (cands.length) {
-          const cableIns = devs.filter(d => d.kind === "audioinput" && CABLE_ANY_RE.test(d.label));
-          const targetIns = cableIns.length ? cableIns : devs.filter(d => d.kind === "audioinput" && !d.label);
-          const verified = await _loopbackPick(cands, targetIns);
-          if (verified) hit = verified;
-          else if (cands.length === 1 && targetIns.length === 0) hit = cands[0];
-        }
+        if (cands.length === 1) hit = cands[0];
       }
       return hit ? { id: hit.deviceId, label: hit.label || `${CABLE_NAME} (auto-detected)` } : null;
     } catch { return null; }
@@ -1123,7 +1107,22 @@ export default function StreamPage() {
 
   const applyAudioRoute = useCallback(async (on: boolean) => {
     type SinkEl = HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
-    const els = [remoteVideoRef.current, cloneAudioRef.current].filter(Boolean) as SinkEl[];
+    // The cable carries sound the app holds itself: the microphone, or the cloned
+    // voice. Never whatever the video engine returns — the model is video-to-video
+    // and may hand back no audio at all, which left callers hearing total silence.
+    const micEl = micRouteRef.current;
+    if (micEl) {
+      if (on) {
+        if (micRouteStreamRef.current && micEl.srcObject !== micRouteStreamRef.current) {
+          micEl.srcObject = micRouteStreamRef.current;
+        }
+        void micEl.play().catch(() => { /* no stream to play yet */ });
+      } else {
+        try { micEl.pause(); } catch { /* ignore */ }
+        micEl.srcObject = null;
+      }
+    }
+    const els = [micEl, cloneAudioRef.current].filter(Boolean) as SinkEl[];
     if (!els.length) return;
     const setSinks = async (id: string) => { for (const el of els) await el.setSinkId!(id); };
     if (!on) { for (const el of els) { try { await el.setSinkId?.(""); } catch { /* ignore */ } } setCableSinkLabel(""); return; }
@@ -1184,12 +1183,23 @@ export default function StreamPage() {
     if (audioRouteOn && connStatus === "connected") applyAudioRoute(true);
   }, [connStatus, audioRouteOn, applyAudioRoute, vcActive]);
 
-  // While cloning, the cable must carry the persona voice only — the raw voice
-  // round-tripped through the AI session is silenced on the clone tabs.
+  // The AI element is a picture source and nothing more. The engine is video-to-video,
+  // so any audio that ever comes back on it is at best a delayed copy of the microphone
+  // we already send to the cable — muted always, so the voice can never be doubled or
+  // howl back into the open mic.
   useEffect(() => {
     const v = remoteVideoRef.current;
-    if (v) v.muted = vcActive;
-  }, [vcActive, connStatus]);
+    if (v) v.muted = true;
+  }, [connStatus]);
+
+  // With cloning on, the cable carries the persona voice alone, so the microphone's own
+  // route stands down for the duration and returns when cloning stops.
+  useEffect(() => {
+    const el = micRouteRef.current;
+    if (!el) return;
+    if (vcActive) { try { el.pause(); } catch { /* ignore */ } }
+    else if (audioRouteOn) void el.play().catch(() => { /* nothing attached yet */ });
+  }, [vcActive, audioRouteOn, connStatus]);
 
   // With routing OFF the clone already reaches your speakers through the audio
   // element; monitor mode only adds local playback when the clone is on the cable.
@@ -1207,14 +1217,29 @@ export default function StreamPage() {
       micOnlyStreamRef.current = stream;
       micOnlyAudioCtxRef.current?.close().catch(() => {});
       const ctx = new AudioContext();
+      if (ctx.state !== "running") { try { await ctx.resume(); } catch { /* ignore */ } }
       const src = ctx.createMediaStreamSource(stream);
+      const highpass = ctx.createBiquadFilter();
+      highpass.type = "highpass"; highpass.frequency.value = 90; highpass.Q.value = 0.7;
       const an = ctx.createAnalyser(); an.fftSize = 256;
-      src.connect(an);
+      // The cable on this tab carries the filtered voice, not the raw one, so a call on
+      // the Audio Call tab is as clean as one on the video tabs.
+      const route = ctx.createMediaStreamDestination();
+      src.connect(highpass); highpass.connect(an); highpass.connect(route);
       micOnlyAudioCtxRef.current = ctx;
       micOnlyAnalyserRef.current = an;
+      micOnlyRouteStreamRef.current = route.stream;
       setMicAnalyser(an);
     } catch { /* ignore */ }
   }, [selectedMicId, noiseCancel]);
+
+  // Turning noise cancellation off (or on) mid-call must reach the microphone that is
+  // already open, not wait for the next call.
+  useEffect(() => {
+    void syncPipeRef.current?.setNoiseCancel(noiseCancel);
+    const t = micOnlyStreamRef.current?.getAudioTracks()[0];
+    if (t) { try { void t.applyConstraints(micAudioConstraints(selectedMicId || undefined, noiseCancel)); } catch { /* ignore */ } }
+  }, [noiseCancel, selectedMicId]);
 
   useEffect(() => {
     if (activeTab === "audio-only") { startMicPreview(); }
@@ -1222,6 +1247,7 @@ export default function StreamPage() {
       micOnlyStreamRef.current?.getTracks().forEach(t => t.stop());
       micOnlyAudioCtxRef.current?.close().catch(() => {});
       micOnlyStreamRef.current = null; micOnlyAnalyserRef.current = null;
+      micOnlyRouteStreamRef.current = null;
       setMicAnalyser(null);
     }
   }, [activeTab, startMicPreview]);
@@ -1238,6 +1264,10 @@ export default function StreamPage() {
       videoSessionRef.current?.close(); videoSessionRef.current = null;
       clonerRef.current?.stop(); clonerRef.current = null;
       if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
+      // The cable loses the microphone the moment the call is over, so a second call
+      // never starts with two voices on it.
+      if (micRouteRef.current) { try { micRouteRef.current.pause(); } catch { /**/ } micRouteRef.current.srcObject = null; }
+      micRouteStreamRef.current = null;
       syncPipeRef.current?.stop(); syncPipeRef.current = null;
       if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
       remoteStreamRef.current = null; window.__slRemoteStream = null;
@@ -1333,6 +1363,9 @@ export default function StreamPage() {
         if (dest) {
           const track = dest.stream.getAudioTracks()[0];
           if (track) { sendStream = new MediaStream([...(localStreamRef.current?.getVideoTracks() ?? []), track]); setAudioActive(true); }
+          // The same delay-matched voice the AI receives is what the cable carries,
+          // so what callers hear lands on the AI picture's mouth movement.
+          micRouteStreamRef.current = dest.stream;
         }
         micStreamForCloner = pipe.getMicStream();
       }
@@ -1389,6 +1422,7 @@ export default function StreamPage() {
       } else {
         // Audio-only: start mic preview
         micStreamForCloner = micOnlyStreamRef.current;
+        micRouteStreamRef.current = micOnlyRouteStreamRef.current ?? micOnlyStreamRef.current;
         setConnStatus("connected");
       }
 
@@ -1399,6 +1433,10 @@ export default function StreamPage() {
         cloner.voiceId = vcVoiceId;
         cloner.setVideoDelay(syncPipeRef.current?.detectedDelay ?? 0.3);
         cloner.onVu    = v => setVcVu(v);
+        cloner.playerLive = () => {
+          const el = cloneAudioRef.current;
+          return !!el && !el.paused && el.readyState >= 2;
+        };
         cloner.onError = msg => toast({ title: "Voice engine problem", description: toUserMessage(msg, "The voice service had trouble. Try again."), variant: "destructive" });
         await cloner.start(micStreamForCloner ?? micOnlyStreamRef.current!);
         clonerRef.current = cloner;
@@ -1608,7 +1646,7 @@ export default function StreamPage() {
         <video
           ref={el => { remoteVideoRef.current = el; if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) el.srcObject = remoteStreamRef.current; }}
           onPlaying={markMedia}
-          autoPlay playsInline
+          autoPlay playsInline muted
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }} />
 
         {/* Idle placeholder */}
@@ -1643,7 +1681,7 @@ export default function StreamPage() {
                     <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "monospace" }}>● OBS WINDOW OPEN</span>
                     <button onClick={() => setObsInstructions(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16 }}>×</button>
                   </div>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS". For AI audio add Sources → + → Audio Input Capture → "{IS_MAC ? CABLE_NAME : "CABLE Output (VB-Audio Virtual Cable)"}".{IS_MAC ? " Then click Start Virtual Camera in OBS and pick “OBS Virtual Camera” in your call app." : ""}</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS". For your voice add Sources → + → Audio Input Capture → "{IS_MAC ? CABLE_NAME : "CABLE Output (VB-Audio Virtual Cable)"}".{IS_MAC ? " Then click Start Virtual Camera in OBS and pick “OBS Virtual Camera” in your call app." : ""}</p>
                 </div>
               )}
             </div>
@@ -2028,7 +2066,7 @@ export default function StreamPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Microphone</p>
               <p style={{ fontSize: 10, color: audioRouteOn ? VC : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {audioRouteOn ? (cableSinkLabel ? `Routing → ${cableSinkLabel}` : "Routing AI audio to cable") : "Off — AI audio plays to speakers"}
+                {audioRouteOn ? (cableSinkLabel ? `Routing → ${cableSinkLabel}` : "Routing your voice to cable") : "Off — nothing reaches the cable"}
               </p>
             </div>
             {toggleBtn(audioRouteOn, toggleAudioRoute, false, "Toggle Stream Live Microphone")}
@@ -2039,7 +2077,7 @@ export default function StreamPage() {
             <select
               value={manualSinkId}
               onChange={e => chooseManualSink(e.target.value)}
-              title={`Which output the AI audio is sent to. Pick the ${CABLE_NAME} entry if auto-detect fails.`}
+              title={`Which output your voice is sent to. Pick the ${CABLE_NAME} entry if auto-detect fails.`}
               style={{ flex: 1, minWidth: 0, background: "hsl(222 40% 8%)", color: "hsl(190 80% 90%)", border: "1px solid hsl(222 40% 16%)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontFamily: "'Rajdhani',sans-serif" }}>
               <option value="">Auto-detect ({IS_MAC ? "BlackHole" : "VB-Cable"})</option>
               {audioOutputs.map((d, i) => (
@@ -2054,16 +2092,17 @@ export default function StreamPage() {
           {IS_MAC ? (
             <>
               <p>• VIDEO → <span style={{ color: C }}>OBS Virtual Camera</span>, once OBS is capturing the “Stream Live OBS” window and Start Virtual Camera is on.</p>
-              <p>• AUDIO (AI voice) → <span style={{ color: VC }}>{CABLE_NAME}</span> as the microphone. Your real mic is a separate entry — pick it only if you want yourself heard too.</p>
-              <p>• A Mac cannot host a system webcam without an Apple-approved extension, so video always goes through OBS here. Turn on “Stream Live Microphone” above and BlackHole carries the <span style={{ color: VC }}>cloned voice</span>.</p>
+              <p>• AUDIO (your voice) → <span style={{ color: VC }}>{CABLE_NAME}</span> as the microphone. The app puts your voice in there itself — your physical mic is not needed as a second source.</p>
+              <p>• A Mac cannot host a system webcam without an Apple-approved extension, so video always goes through OBS here. Turn on “Stream Live Microphone” above and BlackHole carries your voice — or the <span style={{ color: VC }}>cloned voice</span> on the tabs where cloning is on.</p>
               <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Window Capture → “Stream Live OBS”; then Sources → + → Audio Input Capture → “{CABLE_NAME}”. If you hear echo, mute OBS “Desktop Audio”. Full steps: Settings → Mac Setup.</p>
             </>
           ) : (
             <>
               <p>• VIDEO → <span style={{ color: C }}>Stream Live Camera</span> = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.</p>
-              <p>• AUDIO (AI voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Live Microphone</span> — same device, two possible names.</p>
-              <p>• AUDIO (your own voice) → your Realtek / USB mic. Add it only if you want yourself heard as well.</p>
-              <p>• On “Video + Audio” and “Audio Call”, with voice cloning on the cable carries the <span style={{ color: VC }}>cloned voice</span>; your raw voice is muted on the outgoing side. “Video Call” always sends your real voice.</p>
+              <p>• AUDIO (your voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Live Microphone</span> — same device, two possible names.</p>
+              <p>• Do <span style={{ color: VC }}>not</span> also add your Realtek / USB microphone as a second source. Your voice is already on that cable, and two copies of it arrive as echo.</p>
+              <p>• “Video Call” carries your natural voice, timed to the AI picture. On “Video + Audio” and “Audio Call” with voice cloning on, the cable carries the <span style={{ color: VC }}>cloned voice</span> and your natural one steps aside.</p>
+              <p>• Wear headphones. Your microphone stays open while the cable is playing, and loudspeakers feed it back into the call.</p>
               <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Video Capture Device → “Stream Live Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.</p>
             </>
           )}
@@ -2112,6 +2151,10 @@ export default function StreamPage() {
       {/* Cloned voice playback — routed to the virtual microphone so calling
           apps and OBS hear the persona voice instead of the raw mic. */}
       <audio ref={cloneAudioRef} autoPlay style={{ display: "none" }} />
+      {/* Microphone playback into the same sink: this is what puts the streamer's own
+          voice on the cable. It only ever holds a stream while routing is on, so the
+          speakers never feed it back into the call. */}
+      <audio ref={micRouteRef} autoPlay style={{ display: "none" }} />
 
       {/* Trial spent: say what the mark on the picture was, and where it ends. */}
       {account.signedIn && (

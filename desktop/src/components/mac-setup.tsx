@@ -57,7 +57,7 @@ function GetApp({ name, href, why }: { name: string; href: string; why: string }
 }
 
 /**
- * The Mac route to a call app: BlackHole carries the AI voice, OBS carries the
+ * The Mac route to a call app: BlackHole carries your voice, OBS carries the
  * AI picture. Windows bundles both as drivers; macOS refuses an unapproved
  * system camera extension, so the two helpers are installed by the user.
  */
@@ -97,7 +97,7 @@ export function MacSetupCard() {
             They do the job the bundled Windows drivers do: one carries sound, one carries video.
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            <GetApp href="https://existential.audio/blackhole/" name="BlackHole 2ch" why="A silent virtual speaker — the AI voice goes in here" />
+            <GetApp href="https://existential.audio/blackhole/" name="BlackHole 2ch" why="A silent virtual speaker — your voice goes in here" />
             <GetApp href="https://obsproject.com/" name="OBS Studio" why="Turns the Stream Live window into a webcam" />
           </div>
           <p style={{ marginTop: 8 }}>
@@ -117,8 +117,8 @@ export function MacSetupCard() {
             <li>In Zoom / Teams / Meet: Camera → <b style={{ color: C }}>OBS Virtual Camera</b>, Microphone → <b style={{ color: VC }}>{CABLE_NAME}</b>.</li>
           </ol>
           <p style={{ marginTop: 6 }}>
-            To be heard alongside the AI voice, create a Multi-Output Device in Audio MIDI Setup that combines
-            your microphone with {CABLE_NAME}, and pick that as the call app's input.
+            The app puts your voice into {CABLE_NAME} itself, so the call app hears you as well as seeing the
+            picture. Wear headphones: with loudspeakers the call comes straight back out of your microphone.
           </p>
         </Step>
       </div>
