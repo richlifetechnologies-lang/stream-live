@@ -120,14 +120,16 @@ function isVirtualMicLabel(label: string) {
 }
 
 // ─── Audio sync pipeline ──────────────────────────────────────────────────────
-// Captures the selected mic, applies a cross-correlation delay to match
-// AI video output latency, and returns a delayed audio destination node.
+// Captures the selected mic and splits it in two: the AI is fed your voice the
+// instant you make it, and the copy that goes to the virtual microphone is held
+// back until the avatar's lips have actually moved. Those are different amounts on
+// purpose. One shared delay could never line the two up, because the picture lags
+// the sound by however long the engine takes to render - delaying both by the same
+// number shifts the whole call later and leaves the gap exactly as wide as it was.
 
-const WINDOW_MS = 60;
-const BUF_SECS  = 6;
-const BUF_LEN   = Math.round((BUF_SECS * 1000) / WINDOW_MS);
-const MAX_DELAY = 4.0;
-const MIN_DELAY = 0.0;
+const WINDOW_MS  = 60;
+const MAX_DELAY  = 3.5;      // the most the cable will ever hold your voice back
+const DEFAULT_DELAY = 0.8;
 
 // ─── Microphone capture constraints ──────────────────────────────────────────
 // Browser-native noise cancellation: suppresses background/external noise,
@@ -144,14 +146,30 @@ function micAudioConstraints(deviceId: string | undefined, noiseCancel: boolean,
   return c;
 }
 
+// The face band of the AI picture, as fractions of the small frame we sample.
+// Whole-frame movement is useless for timing lips: shoulders, background flicker and
+// gesture all move at once, and a search over that smears every speech onset into a
+// match. The mouth sits in the middle-upper part of the frame.
+const OFF_W = 80, OFF_H = 45;
+const FACE = {
+  x0: Math.round(OFF_W * 0.25), x1: Math.round(OFF_W * 0.80),
+  y0: Math.round(OFF_H * 0.12), y1: Math.round(OFF_H * 0.72),
+};
+
+// How long the pipeline keeps collecting before it stops re-deciding. Once real
+// measurements are in they beat the default, and the figure is then held - a number
+// that wanders every second is how callers end up hearing your voice before the
+// mouth makes it.
+const COLLECT_TICKS = Math.round((20 * 1000) / WINDOW_MS);
+const HIST_TICKS    = Math.round((6 * 1000) / WINDOW_MS);
+
 class AudioSyncPipeline {
   private audioCtx:   AudioContext | null = null;
-  private analyser:   AnalyserNode  | null = null;
+  private analyser:   AnalyserNode  = null!;
   private delayNode:  DelayNode     | null = null;
-  private dest:       MediaStreamAudioDestinationNode | null = null;
+  private engineDest: MediaStreamAudioDestinationNode | null = null;
+  private cableDest:  MediaStreamAudioDestinationNode | null = null;
   private freqData:   Uint8Array<ArrayBuffer> = new Uint8Array(0);
-  private audioSig:   number[]      = [];
-  private videoSig:   number[]      = [];
   private offCanvas:  OffscreenCanvas | null = null;
   private offCtx:     OffscreenCanvasRenderingContext2D | null = null;
   private prevPixels: Uint8ClampedArray | null = null;
@@ -160,9 +178,23 @@ class AudioSyncPipeline {
   private micStream:  MediaStream | null = null;
   private micDeviceId?: string;
 
-  detectedDelay = 0.8;
+  // Level history, and the quiet-room baseline rebuilt from it.
+  private levels:     number[] = [];
+  private motion:     number[] = [];
+  // Set when you start speaking: wait for the first real movement after it.
+  private onsetAt:    number | null = null;
+  // Every valid gap between a word and the picture answering it.
+  private lags:       number[] = [];
+  private tickCount  = 0;
+  private wasTalking = false;
+  // Samples of silence since speech, so one long sentence is not read as word after
+  // word. An onset only counts after a clear pause.
+  private quietFor   = 99;
+
+  detectedDelay = DEFAULT_DELAY;
+  measured = false;
   vuLevel = 0;
-  onUpdate?: (delay: number, vu: number) => void;
+  onUpdate?: (delay: number, vu: number, measured: boolean) => void;
 
   // Flipping noise cancellation mid-call has to change the live microphone, not the
   // next call's — otherwise the switch looks dead exactly when someone tests it.
@@ -172,7 +204,7 @@ class AudioSyncPipeline {
     try { await track.applyConstraints(micAudioConstraints(this.micDeviceId, on, 48000)); } catch { /* device refused it */ }
   }
 
-  async start(videoEl: HTMLVideoElement, micDeviceId?: string, noiseCancel = true): Promise<MediaStreamAudioDestinationNode | null> {
+  async start(videoEl: HTMLVideoElement, micDeviceId?: string, noiseCancel = true): Promise<{ engine: MediaStream; cable: MediaStream } | null> {
     this.videoEl = videoEl;
     this.micDeviceId = micDeviceId;
     try {
@@ -186,62 +218,129 @@ class AudioSyncPipeline {
       if (ctx.state !== "running") { try { await ctx.resume(); } catch { /* ignore */ } }
       const src = ctx.createMediaStreamSource(this.micStream);
       // Rumble, fans, traffic and air-conditioning all sit below the voice. Taking them
-      // out here removes them from both the AI's input and the cable, on top of the
-      // browser's own suppression.
+      // out here cleans both the AI's input and the cable, on top of the browser's own
+      // suppression — and it matters to the timing, because a low-frequency hum looks
+      // like speech starting on every single sample.
       const highpass = ctx.createBiquadFilter();
       highpass.type = "highpass"; highpass.frequency.value = 90; highpass.Q.value = 0.7;
       const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
       this.freqData = new Uint8Array(analyser.frequencyBinCount);
+      // Your voice, undelayed, to the AI: it starts reacting as you speak instead of
+      // after the hold, which is what made the avatar seem slow to answer.
+      const engineDest = ctx.createMediaStreamDestination();
+      // The same voice held back, to the virtual microphone: the copy callers and OBS
+      // hear, and the only thing the measured delay is applied to.
       const delay = ctx.createDelay(MAX_DELAY + 0.5); delay.delayTime.value = this.detectedDelay;
-      const gain = ctx.createGain(); gain.gain.value = 1.0;
-      const dest = ctx.createMediaStreamDestination();
-      src.connect(highpass); highpass.connect(analyser); analyser.connect(delay); delay.connect(gain); gain.connect(dest);
-      this.audioCtx = ctx; this.analyser = analyser; this.delayNode = delay; this.dest = dest;
-      this.offCanvas = new OffscreenCanvas(80, 45);
+      const cableDest = ctx.createMediaStreamDestination();
+      src.connect(highpass);
+      highpass.connect(analyser);
+      highpass.connect(engineDest);
+      analyser.connect(delay); delay.connect(cableDest);
+      this.audioCtx = ctx; this.analyser = analyser; this.delayNode = delay;
+      this.engineDest = engineDest; this.cableDest = cableDest;
+      this.offCanvas = new OffscreenCanvas(OFF_W, OFF_H);
       this.offCtx = this.offCanvas.getContext("2d")!;
       this.timer = setInterval(() => this._tick(), WINDOW_MS);
-      return dest;
+      return { engine: engineDest.stream, cable: cableDest.stream };
     } catch { return null; }
+  }
+
+  // Movement inside the face band only: how much the picture changed since the
+  // previous sample, as 0..1.
+  private _faceMotion(): number {
+    if (!this.offCtx || !this.videoEl || this.videoEl.paused || this.videoEl.readyState < 2) return 0;
+    try {
+      this.offCtx.drawImage(this.videoEl, 0, 0, OFF_W, OFF_H);
+      const frame = this.offCtx.getImageData(0, 0, OFF_W, OFF_H);
+      const prev = this.prevPixels;
+      this.prevPixels = new Uint8ClampedArray(frame.data);
+      if (!prev) return 0;
+      let sum = 0, n = 0;
+      for (let y = FACE.y0; y < FACE.y1; y++) {
+        for (let x = FACE.x0; x < FACE.x1; x++) {
+          const i = (y * OFF_W + x) * 4;
+          sum += Math.abs(frame.data[i] - prev[i])
+               + Math.abs(frame.data[i+1] - prev[i+1])
+               + Math.abs(frame.data[i+2] - prev[i+2]);
+          n++;
+        }
+      }
+      return n ? sum / (n * 3 * 255) : 0;
+    } catch { return 0; }
+  }
+
+  private _push(hist: number[], v: number) {
+    hist.push(v);
+    if (hist.length > HIST_TICKS) hist.shift();
+  }
+
+  // The quietest recent sample: what your room sounds like when you are not talking.
+  // Speech is anything clearly above it, so a noisy office and a quiet bedroom are
+  // measured the same way.
+  private _floorOf(hist: number[]): number {
+    let lo = 1;
+    for (const v of hist) if (v < lo) lo = v;
+    return lo;
+  }
+
+  private _median(xs: number[]): number {
+    if (!xs.length) return 0;
+    const s = [...xs].sort((a, b) => a - b);
+    return s[Math.floor(s.length / 2)];
   }
 
   private _tick() {
     if (!this.analyser || !this.videoEl) return;
+    this.tickCount++;
     this.analyser.getByteFrequencyData(this.freqData);
     const rms = Math.sqrt(this.freqData.reduce((s, v) => s + v * v, 0) / this.freqData.length) / 128;
     this.vuLevel = Math.min(100, rms * 100);
-    let vDelta = 0;
-    if (this.offCtx && !this.videoEl.paused && this.videoEl.readyState >= 2) {
-      try {
-        this.offCtx.drawImage(this.videoEl, 0, 0, 80, 45);
-        const frame = this.offCtx.getImageData(0, 0, 80, 45);
-        if (this.prevPixels) {
-          let sum = 0;
-          for (let i = 0; i < frame.data.length; i += 4) {
-            sum += Math.abs(frame.data[i] - this.prevPixels[i])
-                 + Math.abs(frame.data[i+1] - this.prevPixels[i+1])
-                 + Math.abs(frame.data[i+2] - this.prevPixels[i+2]);
-          }
-          vDelta = sum / (frame.data.length * 0.75 * 255);
-        }
-        this.prevPixels = new Uint8ClampedArray(frame.data);
-      } catch { /* ignore */ }
+    const move = this._faceMotion();
+    this._push(this.levels, rms);
+    this._push(this.motion, move);
+
+    // The first couple of samples have no baseline and no previous frame to compare.
+    if (this.tickCount <= 2) { this.onUpdate?.(this.detectedDelay, this.vuLevel, this.measured); return; }
+
+    // The current sample is an answer to something said earlier, so it is excluded
+    // from the baseline it is compared against.
+    const mFloor = this._floorOf(this.motion.slice(1));
+    const aFloor = this._floorOf(this.levels);
+    const talkAt = Math.max(aFloor + 0.03, aFloor * 3);
+    const moveAt = Math.max(mFloor + 0.004, mFloor * 2.2);
+    const talking = rms > talkAt;
+    const now = (this.tickCount * WINDOW_MS) / 1000;
+
+    // A word starts when the level crosses over after a clear pause. The pause is
+    // what makes it a start: without it one long sentence looks like a single onset
+    // and there is nothing to time.
+    if (talking && !this.wasTalking && this.quietFor >= 2) {
+      this.onsetAt = now;
+      this.quietFor = 0;
     }
-    this.audioSig.push(rms); this.videoSig.push(vDelta);
-    if (this.audioSig.length > BUF_LEN) this.audioSig.shift();
-    if (this.videoSig.length > BUF_LEN) this.videoSig.shift();
-    if (this.audioSig.length === BUF_LEN && this.audioSig.length % 50 === 0) {
-      const maxLag = Math.round((MAX_DELAY * 1000) / WINDOW_MS);
-      let bestLag = 0, bestCorr = -Infinity;
-      for (let lag = 1; lag <= maxLag; lag++) {
-        let corr = 0;
-        for (let i = 0; i < BUF_LEN - lag; i++) corr += this.audioSig[i] * this.videoSig[i + lag];
-        if (corr > bestCorr) { bestCorr = corr; bestLag = lag; }
+    this.wasTalking = talking;
+    this.quietFor = talking ? 0 : this.quietFor + 1;
+
+    if (this.onsetAt !== null && move > moveAt) {
+      const lag = now - this.onsetAt;
+      // That small is the same frame flickering, not lips moving; that large is the
+      // next sentence rather than the one being answered.
+      if (lag >= 0.12 && lag <= MAX_DELAY) this.lags.push(lag);
+      this.onsetAt = null;
+      if (this.lags.length) {
+        this.detectedDelay = Math.max(0.1, Math.min(MAX_DELAY, this._median(this.lags)));
+        this.measured = true;
+        if (this.delayNode) this.delayNode.delayTime.value = this.detectedDelay;
       }
-      const nd = Math.max(MIN_DELAY, Math.min(MAX_DELAY, bestLag * WINDOW_MS / 1000));
-      this.detectedDelay = 0.85 * this.detectedDelay + 0.15 * nd;
-      if (this.delayNode) this.delayNode.delayTime.value = this.detectedDelay;
+    } else if (this.onsetAt !== null && now - this.onsetAt > MAX_DELAY) {
+      this.onsetAt = null;   // nothing answered that word; wait for the next one
     }
-    this.onUpdate?.(this.detectedDelay, this.vuLevel);
+
+    // After the collecting window the figure holds, measured or not.
+    if (this.tickCount <= COLLECT_TICKS && this.delayNode) {
+      this.delayNode.delayTime.value = this.detectedDelay;
+    }
+    this.onUpdate?.(this.detectedDelay, this.vuLevel, this.measured);
   }
 
   getMicStream() { return this.micStream; }
@@ -250,8 +349,10 @@ class AudioSyncPipeline {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null; }
     this.micStream?.getTracks().forEach(t => t.stop()); this.micStream = null;
-    this.dest = null; this.delayNode = null; this.analyser = null;
-    this.audioSig = []; this.videoSig = []; this.prevPixels = null;
+    this.engineDest = null; this.cableDest = null; this.delayNode = null; this.analyser = null!;
+    this.levels = []; this.motion = []; this.lags = []; this.prevPixels = null;
+    this.onsetAt = null; this.wasTalking = false; this.quietFor = 99;
+    this.tickCount = 0; this.measured = false; this.detectedDelay = DEFAULT_DELAY;
   }
 }
 
@@ -264,7 +365,7 @@ class VoiceCloningEngine {
   private audioCtx:   AudioContext  | null = null;
   private nextPlayAt = 0;
   private running    = false;
-  private videoDelay = 0.8;
+  private videoDelay = DEFAULT_DELAY;
   private analyserCtx: AudioContext | null = null;
   private analyserNode: AnalyserNode | null = null;
   private outDest: MediaStreamAudioDestinationNode | null = null;
@@ -686,7 +787,8 @@ export default function StreamPage() {
   const [refImagePreview, setRefImagePreview] = usePerTabState<string|null>(activeTab, null);
 
   // ── Audio sync ────────────────────────────────────────────────────────────
-  const [syncDelay, setSyncDelay]     = useState(0.8);
+  const [syncDelay, setSyncDelay]     = useState(DEFAULT_DELAY);
+  const [syncMeasured, setSyncMeasured] = useState(false);
   const [vuLevel, setVuLevel]         = useState(0);
   const [audioActive, setAudioActive] = useState(false);
 
@@ -1275,7 +1377,7 @@ export default function StreamPage() {
         if (r.current && !r.current.closed) try { r.current.postMessage("stream-live-clear", "*"); } catch { /**/ }
       });
       setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
-      setAudioActive(false); setSyncDelay(0.8); setVuLevel(0);
+      setAudioActive(false); setSyncDelay(DEFAULT_DELAY); setSyncMeasured(false); setVuLevel(0);
       setVcActive(false); setVcVu(0); setVcAnalyser(null);
       // Refund the prepaid chunk only after the call is locally dead. Waiting for
       // that round-trip first left Stop unresponsive — and an unreached one is
@@ -1354,18 +1456,21 @@ export default function StreamPage() {
 
       if (needsVideo) {
         const pipe = new AudioSyncPipeline();
-        pipe.onUpdate = (delay, vu) => {
-          setSyncDelay(delay); setVuLevel(vu);
+        pipe.onUpdate = (delay, vu, measured) => {
+          setSyncDelay(delay); setVuLevel(vu); setSyncMeasured(measured);
           clonerRef.current?.setVideoDelay(delay);
         };
-        const dest = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined, noiseCancel);
+        const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined, noiseCancel);
         syncPipeRef.current = pipe;
-        if (dest) {
-          const track = dest.stream.getAudioTracks()[0];
-          if (track) { sendStream = new MediaStream([...(localStreamRef.current?.getVideoTracks() ?? []), track]); setAudioActive(true); }
-          // The same delay-matched voice the AI receives is what the cable carries,
-          // so what callers hear lands on the AI picture's mouth movement.
-          micRouteStreamRef.current = dest.stream;
+        if (streams) {
+          // The AI hears you the instant you speak. Holding it back can never line the
+          // avatar's mouth up with its own picture, because the engine renders the
+          // mouth some fraction of a second *after* it receives the word.
+          const engineTrack = streams.engine.getAudioTracks()[0];
+          if (engineTrack) { sendStream = new MediaStream([...(localStreamRef.current?.getVideoTracks() ?? []), engineTrack]); setAudioActive(true); }
+          // Only the virtual microphone is delayed, so callers hear your word at the
+          // moment the avatar's mouth makes it on the picture they are watching.
+          micRouteStreamRef.current = streams.cable;
         }
         micStreamForCloner = pipe.getMicStream();
       }
@@ -1431,7 +1536,7 @@ export default function StreamPage() {
         const cloner = new VoiceCloningEngine();
         cloner.call    = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
         cloner.voiceId = vcVoiceId;
-        cloner.setVideoDelay(syncPipeRef.current?.detectedDelay ?? 0.3);
+        cloner.setVideoDelay(syncPipeRef.current?.detectedDelay ?? DEFAULT_DELAY);
         cloner.onVu    = v => setVcVu(v);
         cloner.playerLive = () => {
           const el = cloneAudioRef.current;
@@ -2133,13 +2238,14 @@ export default function StreamPage() {
             </div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)" }}>
-            <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>Auto-sync delay</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace" }}>{syncDelay.toFixed(2)}s</span>
+            <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>Lip-sync delay</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace" }}>{syncDelay.toFixed(2)}s{syncMeasured ? "" : " est."}</span>
           </div>
         </div>
       ) : (
         <p style={{ fontSize: 12, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-          Mic audio is auto-delayed to match AI video lip movements when streaming starts.
+          The AI hears you the moment you speak. The voice your callers hear is timed to
+          the avatar&apos;s mouth when streaming starts.
         </p>
       )}
     </div>
