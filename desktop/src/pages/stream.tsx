@@ -13,6 +13,7 @@ import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platfo
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
 import { drawOutputFrame } from "../lib/vcam-frame";
+import { VoiceGate, voiceBandLevel } from "../lib/voicegate";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
@@ -130,16 +131,20 @@ function isVirtualMicLabel(label: string) {
 const WINDOW_MS  = 60;
 const MAX_DELAY  = 3.5;      // the most the cable will ever hold your voice back
 const DEFAULT_DELAY = 0.8;
+// How fast the gate fades rather than snaps. A hard switch on and off at the sample rate
+// clicks on every word, and a click inside a call is a complaint.
+const GATE_RAMP  = 0.015;
 
 // ─── Microphone capture constraints ──────────────────────────────────────────
 // Browser-native noise cancellation: suppresses background/external noise,
-// removes echo and normalises level. When the user turns it off we request the
-// raw mic signal instead (all three processing flags disabled).
-function micAudioConstraints(deviceId: string | undefined, noiseCancel: boolean, sampleRate?: number): MediaTrackConstraints {
+// removes echo and normalises level. Always requested, with no switch - every
+// customer would have had to understand it before turning it on, and most never do.
+// What it used to be switched off for is now done by the gate, which is automatic.
+function micAudioConstraints(deviceId: string | undefined, sampleRate?: number): MediaTrackConstraints {
   const c: MediaTrackConstraints = {
-    echoCancellation: noiseCancel,
-    noiseSuppression: noiseCancel,
-    autoGainControl: noiseCancel,
+    echoCancellation: true,
+    noiseSuppression: true,
+    autoGainControl: true,
   };
   if (sampleRate) c.sampleRate = sampleRate;
   if (deviceId) c.deviceId = { exact: deviceId };
@@ -166,6 +171,7 @@ const HIST_TICKS    = Math.round((6 * 1000) / WINDOW_MS);
 class AudioSyncPipeline {
   private audioCtx:   AudioContext | null = null;
   private analyser:   AnalyserNode  = null!;
+  private gateNode:   GainNode      | null = null;
   private delayNode:  DelayNode     | null = null;
   private engineDest: MediaStreamAudioDestinationNode | null = null;
   private cableDest:  MediaStreamAudioDestinationNode | null = null;
@@ -176,40 +182,30 @@ class AudioSyncPipeline {
   private timer:      ReturnType<typeof setInterval> | null = null;
   private videoEl:    HTMLVideoElement | null = null;
   private micStream:  MediaStream | null = null;
-  private micDeviceId?: string;
 
-  // Level history, and the quiet-room baseline rebuilt from it.
-  private levels:     number[] = [];
+  // One self-calibrating figure - this room's silence and this customer's own loudness -
+  // drives the meter, the gate and the speech detector. Nothing here needs a switch, and
+  // nothing here depends on anyone understanding what a switch does.
+  private gate = new VoiceGate();
+
+  // Face-movement history, the quiet-room baseline rebuilt from it, and the gap between
+  // a word and the picture that answered it.
   private motion:     number[] = [];
-  // Set when you start speaking: wait for the first real movement after it.
   private onsetAt:    number | null = null;
-  // Every valid gap between a word and the picture answering it.
   private lags:       number[] = [];
   private tickCount  = 0;
   private wasTalking = false;
-  // Samples of silence since speech, so one long sentence is not read as word after
-  // word. An onset only counts after a clear pause.
-  private quietFor   = 99;
 
   detectedDelay = DEFAULT_DELAY;
   measured = false;
   vuLevel = 0;
   onUpdate?: (delay: number, vu: number, measured: boolean) => void;
 
-  // Flipping noise cancellation mid-call has to change the live microphone, not the
-  // next call's — otherwise the switch looks dead exactly when someone tests it.
-  async setNoiseCancel(on: boolean) {
-    const track = this.micStream?.getAudioTracks()[0];
-    if (!track) return;
-    try { await track.applyConstraints(micAudioConstraints(this.micDeviceId, on, 48000)); } catch { /* device refused it */ }
-  }
-
-  async start(videoEl: HTMLVideoElement, micDeviceId?: string, noiseCancel = true): Promise<{ engine: MediaStream; cable: MediaStream } | null> {
+  async start(videoEl: HTMLVideoElement, micDeviceId?: string): Promise<{ engine: MediaStream; cable: MediaStream } | null> {
     this.videoEl = videoEl;
-    this.micDeviceId = micDeviceId;
     try {
       this.micStream = await navigator.mediaDevices.getUserMedia({
-        audio: micAudioConstraints(micDeviceId, noiseCancel, 48000),
+        audio: micAudioConstraints(micDeviceId, 48000),
         video: false,
       });
       const ctx = new AudioContext({ sampleRate: 48000 });
@@ -224,7 +220,16 @@ class AudioSyncPipeline {
       const highpass = ctx.createBiquadFilter();
       highpass.type = "highpass"; highpass.frequency.value = 90; highpass.Q.value = 0.7;
       const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
+      // The default scale tops out at -30 dB, which ordinary speaking level goes past on
+      // a normal microphone. Everything above it then reads the same number, so the bar
+      // pins at 100% the moment you open your mouth and the gate loses the one thing it
+      // needs to tell a quiet word from a shout.
+      analyser.minDecibels = -90; analyser.maxDecibels = -10;
       this.freqData = new Uint8Array(analyser.frequencyBinCount);
+      // The gate sits BEFORE the hold, so it opens and closes on the same copy of your
+      // voice the delay then moves. Deciding after the delay would clip a word at one
+      // end and hand the callers the hole at the other.
+      const gateNode = ctx.createGain(); gateNode.gain.value = 1;
       // Your voice, undelayed, to the AI: it starts reacting as you speak instead of
       // after the hold, which is what made the avatar seem slow to answer.
       const engineDest = ctx.createMediaStreamDestination();
@@ -233,10 +238,11 @@ class AudioSyncPipeline {
       const delay = ctx.createDelay(MAX_DELAY + 0.5); delay.delayTime.value = this.detectedDelay;
       const cableDest = ctx.createMediaStreamDestination();
       src.connect(highpass);
-      highpass.connect(analyser);
-      highpass.connect(engineDest);
-      analyser.connect(delay); delay.connect(cableDest);
-      this.audioCtx = ctx; this.analyser = analyser; this.delayNode = delay;
+      highpass.connect(analyser);          // measurement only - it feeds nothing that plays
+      highpass.connect(gateNode);
+      gateNode.connect(engineDest);
+      gateNode.connect(delay); delay.connect(cableDest);
+      this.audioCtx = ctx; this.analyser = analyser; this.gateNode = gateNode; this.delayNode = delay;
       this.engineDest = engineDest; this.cableDest = cableDest;
       this.offCanvas = new OffscreenCanvas(OFF_W, OFF_H);
       this.offCtx = this.offCanvas.getContext("2d")!;
@@ -274,9 +280,9 @@ class AudioSyncPipeline {
     if (hist.length > HIST_TICKS) hist.shift();
   }
 
-  // The quietest recent sample: what your room sounds like when you are not talking.
-  // Speech is anything clearly above it, so a noisy office and a quiet bedroom are
-  // measured the same way.
+  // The quietest recent movement: what the picture does when nobody is talking. A
+  // flickering background or a moving shoulder is not lip movement, so an answer is
+  // only an answer if it beats this.
   private _floorOf(hist: number[]): number {
     let lo = 1;
     for (const v of hist) if (v < lo) lo = v;
@@ -293,33 +299,32 @@ class AudioSyncPipeline {
     if (!this.analyser || !this.videoEl) return;
     this.tickCount++;
     this.analyser.getByteFrequencyData(this.freqData);
-    const rms = Math.sqrt(this.freqData.reduce((s, v) => s + v * v, 0) / this.freqData.length) / 128;
-    this.vuLevel = Math.min(100, rms * 100);
+    // Only the band a voice lives in. Room noise is broadband, and mixing it with the
+    // voice leaves almost nothing to tell your words apart from an empty room.
+    const level = voiceBandLevel(this.freqData, 48000);
+    this.gate.update(level, WINDOW_MS / 1000);
+    this.vuLevel = this.gate.vu(level);
+    if (this.gateNode && this.audioCtx) {
+      this.gateNode.gain.setTargetAtTime(this.gate.muted ? 0 : 1, this.audioCtx.currentTime, GATE_RAMP);
+    }
     const move = this._faceMotion();
-    this._push(this.levels, rms);
     this._push(this.motion, move);
 
-    // The first couple of samples have no baseline and no previous frame to compare.
+    // The first couple of samples have no previous frame to compare.
     if (this.tickCount <= 2) { this.onUpdate?.(this.detectedDelay, this.vuLevel, this.measured); return; }
 
     // The current sample is an answer to something said earlier, so it is excluded
     // from the baseline it is compared against.
     const mFloor = this._floorOf(this.motion.slice(1));
-    const aFloor = this._floorOf(this.levels);
-    const talkAt = Math.max(aFloor + 0.03, aFloor * 3);
     const moveAt = Math.max(mFloor + 0.004, mFloor * 2.2);
-    const talking = rms > talkAt;
     const now = (this.tickCount * WINDOW_MS) / 1000;
 
-    // A word starts when the level crosses over after a clear pause. The pause is
-    // what makes it a start: without it one long sentence looks like a single onset
-    // and there is nothing to time.
-    if (talking && !this.wasTalking && this.quietFor >= 2) {
-      this.onsetAt = now;
-      this.quietFor = 0;
-    }
-    this.wasTalking = talking;
-    this.quietFor = talking ? 0 : this.quietFor + 1;
+    // The gate holds itself open for a beat after your voice drops, so a word cannot
+    // start until there has genuinely been a pause. That is what makes this a start
+    // rather than the middle of a sentence, and it is why there is nothing to time
+    // twice.
+    if (this.gate.talking && !this.wasTalking) this.onsetAt = now;
+    this.wasTalking = this.gate.talking;
 
     if (this.onsetAt !== null && move > moveAt) {
       const lag = now - this.onsetAt;
@@ -343,16 +348,22 @@ class AudioSyncPipeline {
     this.onUpdate?.(this.detectedDelay, this.vuLevel, this.measured);
   }
 
-  getMicStream() { return this.micStream; }
+  // What the cloned voice records. Not the raw microphone: a clone built from a room
+  // full of television and traffic comes out carrying that noise, and there is no
+  // switch anywhere that would explain it to the customer afterwards.
+  getMicStream() { return this.engineDest?.stream ?? this.micStream; }
 
   stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null; }
     this.micStream?.getTracks().forEach(t => t.stop()); this.micStream = null;
-    this.engineDest = null; this.cableDest = null; this.delayNode = null; this.analyser = null!;
-    this.levels = []; this.motion = []; this.lags = []; this.prevPixels = null;
-    this.onsetAt = null; this.wasTalking = false; this.quietFor = 99;
+    this.engineDest = null; this.cableDest = null; this.gateNode = null;
+    this.delayNode = null; this.analyser = null!;
+    this.gate.reset();
+    this.motion = []; this.lags = []; this.prevPixels = null;
+    this.onsetAt = null; this.wasTalking = false;
     this.tickCount = 0; this.measured = false; this.detectedDelay = DEFAULT_DELAY;
+    this.vuLevel = 0;
   }
 }
 
@@ -792,13 +803,10 @@ export default function StreamPage() {
   const [vuLevel, setVuLevel]         = useState(0);
   const [audioActive, setAudioActive] = useState(false);
 
-  // ── Noise cancellation (persisted, default ON) ────────────────────────────
-  const [noiseCancel, setNoiseCancel] = useState<boolean>(() => {
-    try { return localStorage.getItem("ss_noise_cancel") !== "0"; } catch { return true; }
-  });
-  const toggleNoiseCancel = useCallback(() => {
-    setNoiseCancel(v => { const next = !v; try { localStorage.setItem("ss_noise_cancel", next ? "1" : "0"); } catch { /**/ } return next; });
-  }, []);
+  // ── Noise cancellation ────────────────────────────────────────────────────
+  // There is deliberately no switch here. Most customers never look for one, never
+  // understand it and never turn it on, so the app now works out this room's silence
+  // and this person's own loudness by itself and holds the microphone to that.
 
   // ── Voice cloning ─────────────────────────────────────────────────────────
   // Per-tab: voice-clone toggle/voice chosen in the Audio Call tab must not leak
@@ -1313,7 +1321,7 @@ export default function StreamPage() {
   const startMicPreview = useCallback(async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: micAudioConstraints(selectedMicId || undefined, noiseCancel), video: false,
+        audio: micAudioConstraints(selectedMicId || undefined), video: false,
       });
       micOnlyStreamRef.current?.getTracks().forEach(t => t.stop());
       micOnlyStreamRef.current = stream;
@@ -1333,15 +1341,7 @@ export default function StreamPage() {
       micOnlyRouteStreamRef.current = route.stream;
       setMicAnalyser(an);
     } catch { /* ignore */ }
-  }, [selectedMicId, noiseCancel]);
-
-  // Turning noise cancellation off (or on) mid-call must reach the microphone that is
-  // already open, not wait for the next call.
-  useEffect(() => {
-    void syncPipeRef.current?.setNoiseCancel(noiseCancel);
-    const t = micOnlyStreamRef.current?.getAudioTracks()[0];
-    if (t) { try { void t.applyConstraints(micAudioConstraints(selectedMicId || undefined, noiseCancel)); } catch { /* ignore */ } }
-  }, [noiseCancel, selectedMicId]);
+  }, [selectedMicId]);
 
   useEffect(() => {
     if (activeTab === "audio-only") { startMicPreview(); }
@@ -1460,7 +1460,7 @@ export default function StreamPage() {
           setSyncDelay(delay); setVuLevel(vu); setSyncMeasured(measured);
           clonerRef.current?.setVideoDelay(delay);
         };
-        const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined, noiseCancel);
+        const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined);
         syncPipeRef.current = pipe;
         if (streams) {
           // The AI hears you the instant you speak. Holding it back can never line the
@@ -1591,7 +1591,7 @@ export default function StreamPage() {
       }
     } finally { isStartingRef.current = false; setIsStarting(false); }
   }, [isStreaming, credsMissing, cameraReady, activeTab, selectedStyle, customPrompt, refImageB64,
-      selectedMicId, vcEnabled, vcVoiceId, noiseCancel, teardownStream, toast, setLocation]);
+      selectedMicId, vcEnabled, vcVoiceId, teardownStream, toast, setLocation]);
 
   const handleStop = useCallback(() => teardownStream(), [teardownStream]);
 
@@ -2094,21 +2094,19 @@ export default function StreamPage() {
         <button onClick={enumerateDevices} style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(222 25% 50%)", padding: 4 }}><RefreshCw style={{ width: 13, height: 13 }} /></button>
       </div>
 
-      {/* Noise cancellation */}
-      <div style={{ background: "hsl(222 44% 6%)", border: `1px solid ${noiseCancel ? "hsl(187 100% 52% / 0.35)" : "hsl(222 40% 11%)"}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: noiseCancel ? "hsl(187 100% 52% / 0.15)" : "hsl(222 40% 10%)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Mic style={{ width: 15, height: 15, color: noiseCancel ? C : "hsl(222 25% 45%)" }} />
+      {/* Microphone handling — automatic, nothing to switch on */}
+      <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(187 100% 52% / 0.35)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Mic style={{ width: 15, height: 15, color: C }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", marginBottom: 3 }}>Noise Cancellation</p>
+          <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", marginBottom: 3 }}>Microphone Handled Automatically</p>
           <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4 }}>
-            {noiseCancel ? "Filtering background & external noise from your mic." : "Off — raw microphone audio. Applies when you next start."}
+            The app learns how your room sounds while you are quiet, and keeps your
+            microphone closed until your own voice rises above it. Background noise is
+            filtered at the same time. Nothing to switch on, and nothing to set.
           </p>
         </div>
-        <button onClick={toggleNoiseCancel} aria-pressed={noiseCancel} title="Toggle noise cancellation"
-          style={{ flexShrink: 0, width: 46, height: 24, borderRadius: 14, border: "none", cursor: "pointer", background: noiseCancel ? C : "hsl(222 30% 20%)", position: "relative", transition: "background 0.15s" }}>
-          <span style={{ position: "absolute", top: 3, left: noiseCancel ? 25 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
-        </button>
       </div>
     </>
   );
@@ -2233,8 +2231,11 @@ export default function StreamPage() {
               <Mic style={{ width: 11, height: 11, color: C }} />
               <span style={{ fontSize: 11, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>{mics.find(m => m.deviceId === selectedMicId)?.label || "Microphone"}</span>
             </div>
+            {/* The bar is your voice measured against your own silence, so it can never
+                pin at the top the way a fixed scale did. Top of the bar means this is the
+                loudest you have been, not that something is wrong - so no red here. */}
             <div style={{ height: 6, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ height: "100%", borderRadius: 3, transition: "width 0.05s", width: `${vuLevel}%`, background: vuLevel > 80 ? "hsl(0 85% 55%)" : vuLevel > 50 ? "hsl(40 100% 55%)" : C }} />
+              <div style={{ height: "100%", borderRadius: 3, transition: "width 0.05s", width: `${vuLevel}%`, background: vuLevel > 85 ? "hsl(40 100% 55%)" : C }} />
             </div>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)" }}>
