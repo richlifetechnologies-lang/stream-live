@@ -1806,6 +1806,15 @@
     return s.length > 160 ? esc(s.slice(0, 160)) + "…" : esc(s);
   }
 
+  // The same cell on two tabs: the Key pool tab and the DeCart keys tab read one shared
+  // complaint field per key pair, so they must explain it the same way or disagree.
+  function errCell(text) {
+    if (!text) return "—";
+    const why = plainErr(text);
+    if (!why) return esc(text);
+    return `<div style="color:#facc15">${why}</div><div style="font-size:11px;margin-top:3px" title="${esc(text)}">${shortErr(text)}</div>`;
+  }
+
   function poolAlert() {
     const live = KEY_ROWS.filter((k) => k.enabled !== false);
     let line = "";
@@ -1860,7 +1869,6 @@
 
     $("keysTable").querySelector("tbody").innerHTML = KEY_ROWS.map((k) => {
       const used = N(k.minutes_today), cap = k.daily_minute_cap;
-      const why = plainErr(k.last_error);
       const tRow = `<td>${cell(k, "decart", k.trial_key_tail)}</td>`;
       const tLeft = k.trial_key_tail
         ? (k.trial_minutes_budget == null
@@ -1877,7 +1885,7 @@
         <td class="mono">${N(k.priority, 100)}</td>
         <td class="mono" data-usage="${k.id}">${cap == null ? "uncapped" : mins(used) + " / " + mins(cap)}${cap != null && used >= N(cap) ? ' <span class="pill warn">capped</span>' : ""}</td>
         <td class="mono">${N(k.recent_failures) ? `<span class="pill fail">${k.recent_failures}</span>` : '<span class="pill ok">0</span>'}</td>
-        <td class="muted">${why ? `<div style="color:#facc15">${why}</div><div style="font-size:11px;margin-top:3px" title="${esc(k.last_error)}">${shortErr(k.last_error)}</div>` : esc(k.last_error || "—")}${k.last_error_at ? `<div class="muted">${when(k.last_error_at)}</div>` : ""}</td>
+        <td class="muted">${errCell(k.last_error)}${k.last_error_at ? `<div class="muted">${when(k.last_error_at)}</div>` : ""}</td>
         <td style="white-space:nowrap">
           <button data-act="edit" data-id="${k.id}">Edit</button>
           <button data-act="del" data-id="${k.id}" class="danger">Delete</button>
@@ -2087,7 +2095,7 @@
         <td class="mono">${N(k.priority, 100)}</td>
         <td style="white-space:nowrap">${k.enabled === false ? '<span class="pill no">disabled</span>' : '<span class="pill yes">enabled</span>'} <button data-act="tk-toggle" data-id="${k.id}">${k.enabled === false ? "enable" : "disable"}</button></td>
         <td class="mono">${N(k.recent_failures) ? `<span class="pill fail">${k.recent_failures}</span>` : '<span class="pill ok">0</span>'}</td>
-        <td class="muted">${esc(k.last_error || "—")}${k.last_error_at ? `<div class="muted">${when(k.last_error_at)}</div>` : ""}</td>
+        <td class="muted">${errCell(k.last_error)}${k.last_error_at ? `<div class="muted">${when(k.last_error_at)}</div>` : ""}</td>
         <td style="white-space:nowrap">
           <button data-act="tk-edit" data-id="${k.id}">Edit</button>
           <button data-act="tk-del" data-id="${k.id}" class="danger">Delete</button>
