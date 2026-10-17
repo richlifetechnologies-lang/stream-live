@@ -22,7 +22,7 @@ is a 401 — sign in first. Errors come back as
 ## 1. Sign in
 
 ```ts
-const client = new StreamLiveClient({ supabaseUrl, supabaseAnonKey, falAppId: "lucy-2-5", appVersion });
+const client = new StreamLiveClient({ supabaseUrl, supabaseAnonKey, falAppId: "decart/lucy-2-5", appVersion });
 await client.signUp(email, password, displayName, deviceId); // see §1.1
 await client.signIn(email, password);
 await client.restoreSession();

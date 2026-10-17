@@ -41,10 +41,13 @@ export async function verifyKey(provider: Provider, secret: string): Promise<Ver
       };
     }
 
+    // Ask for the app this product actually opens. Minting against the bare name the
+    // desktop used to send proved only that the key authenticates, which is why a key
+    // that could never serve a call still read as live on the panel.
     const res = await call("https://rest.fal.ai/tokens/", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Key ${key}` },
-      body: JSON.stringify({ allowed_apps: ["lucy-2-5"], token_expiration: 120 }),
+      body: JSON.stringify({ allowed_apps: ["decart/lucy-2-5"], token_expiration: 120 }),
     });
     if (typeof res === "string") return { ok: false, status: null, detail: res };
     if (!res.ok) {
@@ -60,7 +63,7 @@ export async function verifyKey(provider: Provider, secret: string): Promise<Ver
         detail: `fal.ai answered ${res.status}${why ? `: ${why}` : ""}. Sent ${shape}.`,
       };
     }
-    return { ok: true, status: 200, detail: "Accepted — fal.ai minted a call token for lucy-2-5." };
+    return { ok: true, status: 200, detail: "Accepted — fal.ai minted a call token for decart/lucy-2-5, the app this product runs." };
   }
 
   if (provider === "decart") {

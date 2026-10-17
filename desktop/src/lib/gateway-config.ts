@@ -13,7 +13,11 @@ const PLACEHOLDER_ANON_KEY = "YOUR-ANON-KEY";
 export const GATEWAY_CONFIG: GatewayConfig = {
   supabaseUrl: import.meta.env.VITE_SUPABASE_URL ?? PLACEHOLDER_SUPABASE_URL,
   supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY ?? PLACEHOLDER_ANON_KEY,
-  falAppId: "lucy-2-5",
+  // fal names an app owner/name, and the stream page opens decart/lucy-2-5/realtime, so
+  // the call token has to be allowed for decart/lucy-2-5. The bare "lucy-2-5" this used to
+  // send is not an app fal knows: the mint still answered, and the call then died a few
+  // seconds in without a picture.
+  falAppId: "decart/lucy-2-5",
   appVersion: pkg.version,
 };
 

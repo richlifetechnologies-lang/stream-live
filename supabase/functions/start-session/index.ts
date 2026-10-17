@@ -34,13 +34,26 @@ const STATUS_BY_REASON: Record<string, number> = {
   maintenance: 503,
 };
 
+// The video app this product sells, in the spelling fal.ai documents for an app id:
+// owner/name. The desktop opens wss://fal.run/decart/lucy-2-5/realtime, so this is the
+// app that call has to be allowed for.
+const REALTIME_APP = "decart/lucy-2-5";
+
 async function mintFalToken(userId: string, appId: string, ttlSeconds: number) {
   const expiration = Math.max(DEFAULT_TOKEN_TTL_SECONDS, ttlSeconds);
+  // Builds up to 1.8.6 name this app as the bare "lucy-2-5", which is not an app id
+  // fal's own documentation recognises, and a token minted for it still comes back 200.
+  // The paid path then dies a few seconds into the connection — 72 of its last 84 calls
+  // on this gateway closed without ever sending a picture, while every trial call on the
+  // other pipeline worked. Carrying both spellings fixes the installed builds as soon as
+  // this function is redeployed, and cannot take away anything that works today: fal has
+  // never refused either name at mint time, it only decides at connect time.
+  const allowedApps = Array.from(new Set([appId, REALTIME_APP].filter(Boolean)));
   return runWithKeys<{ token: string; expiresAt: string }>(userId, "fal", async (key) => {
     const res = await fetch("https://rest.fal.ai/tokens/", {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Key ${key.secret}` },
-      body: JSON.stringify({ allowed_apps: [appId], token_expiration: expiration }),
+      body: JSON.stringify({ allowed_apps: allowedApps, token_expiration: expiration }),
     });
     if (!res.ok) {
       return { ok: false, status: res.status, detail: `fal token error (${res.status}) ${(await res.text().catch(() => "")).slice(0, 200)}` };
