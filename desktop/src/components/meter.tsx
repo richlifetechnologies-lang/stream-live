@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Hourglass, TriangleAlert } from "lucide-react";
-import { bucketFor, useAccount, useLease } from "../lib/gateway";
+import { bucketFor, refreshBalances, useAccount, useLease } from "../lib/gateway";
 import { countdown, drainOf, MOD_LABELS } from "../lib/minutes";
 import type { Modality } from "@stream-live/client";
 
@@ -40,6 +40,9 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
   // seconds left can still start a video call, and telling him otherwise on the
   // clock makes a working account look dead.
   const empty = !unlimited && remaining !== null && remaining <= 0;
+  // When the read itself failed the numbers on screen are the last ones that were true,
+  // so the red "no minutes" alarm would be a lie — the honest line replaces it.
+  const stale = account.error !== null;
   const low = !unlimited && remaining !== null && remaining < LOW_MINUTES;
   const tone = empty ? "hsl(0 85% 62%)" : low ? "hsl(35 100% 60%)" : C;
   const pct = !drain || unlimited || !lease
@@ -72,7 +75,7 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
           {unlimited ? "UNLIMITED" : countdown(remaining)}
         </span>
 
-        {empty && !unlimited && (
+        {empty && !unlimited && !stale && (
           <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, color: tone, fontFamily: "'Rajdhani',sans-serif" }}>
             <TriangleAlert style={{ width: 12, height: 12 }} />
             {running ? "Out of minutes — the call stops now" : "No minutes in this bucket"}
@@ -105,6 +108,17 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
             What is left in this bucket
           </p>
         </div>
+      )}
+
+      {stale && (
+        <p style={{ margin: "7px 0 0", fontSize: 10.5, color: "hsl(35 100% 70%)", fontFamily: "'Rajdhani',sans-serif" }}>
+          {account.error}{" "}
+          <button onClick={() => void refreshBalances()}
+            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit",
+              fontSize: "inherit", fontWeight: 700, fontFamily: "inherit", textDecoration: "underline" }}>
+            Try again
+          </button>
+        </p>
       )}
 
       {drain?.waiting && (

@@ -348,16 +348,20 @@
           <h2 style="font-size:14px;margin:0">Online payments</h2>
           <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="payAttention" /> Needs attention only</label></div>
           <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="payOpen" /> Take payments on the buy page</label></div>
+          <button id="payRecheckAll" title="Ask Paystack, order by order, whether money arrived for anything still marked unpaid">Ask Paystack about every unpaid order</button>
           <button id="payRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:6px 0 12px">Every order the buy page opened — by card or by mobile money — lands here. A customer reaches that page from the Buy button in the app and from your Stream Live page; you never have to send anybody an address. <span class="pill ok">credited</span> means the money arrived <b>and the minutes are already in that account</b>: there is nothing to approve and pressing anything else would pay the customer twice. Anything else is money that has not become minutes yet, and the last column says why. An order nobody has paid stops waiting by itself after half an hour: it is marked <span class="pill n">no payment arrived</span>, leaves the "needs attention" list and nothing was ever charged. If that customer's mobile money confirmation still turns up late, the minutes go in by themselves — so never add them a second time by hand.</p>
+        <div id="payHook" class="muted" style="margin:0 0 10px"></div>
+        <p class="muted" style="margin:0 0 12px">Every order the buy page opened — by card or by mobile money — lands here. A customer reaches that page from the Buy button in the app and from your Stream Live page; you never have to send anybody an address. <span class="pill ok">credited</span> means the money arrived <b>and the minutes are already in that account</b>: there is nothing to approve and pressing anything else would pay the customer twice. <span class="pill fail">paid · minutes owed</span> is the one state that needs you: Paystack has the money and the customer has no minutes. Anything else is money that has not become minutes yet, and the last column says why. An order nobody has paid stops waiting by itself after half an hour: it is marked <span class="pill n">no payment arrived</span>, leaves the "needs attention" list and nothing was ever charged. If that customer's mobile money confirmation still turns up late, the minutes go in by themselves — so never add them a second time by hand.</p>
+        <p class="muted" style="margin:0 0 12px">When the two records disagree, <b>Ask Paystack</b> settles it: it re-asks about that order and puts the minutes in if the money is there. Pressing it twice cannot pay anybody twice — an order already credited answers "already credited earlier". The line above the list says whether Paystack has an address to call when a payment finishes; that address is how the app hears about a payment by itself, without anybody keeping a page open.</p>
         <div id="payTotals" class="muted" style="margin:0 0 10px"></div>
         <div style="overflow:auto">
           <table id="payTable">
-            <thead><tr><th>When</th><th>Who paid</th><th>Package</th><th style="text-align:right">Amount</th><th>By</th><th>Status</th><th>Reference</th><th>Minutes delivered</th><th>If it stopped</th></tr></thead>
+            <thead><tr><th>When</th><th>Who paid</th><th>Package</th><th style="text-align:right">Amount</th><th>By</th><th>Status</th><th>Reference</th><th>Minutes delivered</th><th>If it stopped</th><th>Ask Paystack</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
+        <div id="payResult"></div>
         <div id="payMsg"></div>
       </div>
     </section>
@@ -1080,7 +1084,7 @@
     accounts: [loadAccounts],
     machines: [loadMachines],
     topups: [loadRequests],
-    payments: [loadPayments],
+    payments: [loadPayments, loadPaystackHook],
     keys: [loadKeys],
     decart: [loadKeys, loadSupply],
     split: [loadAccounts],
@@ -1843,10 +1847,13 @@
   });
 
   // ══ ONLINE PAYMENTS (PAYSTACK) ═══════════════════════════════════════════
-  // The buy page's money, in one list. This tab never changes anything: a payment
-  // credits itself, and the only action here is looking.
+  // The buy page's money, in one list. This tab adds minutes by hand and approves
+  // nothing: a payment credits itself. What it can now do is ask Paystack again.
   const PAY_WAY = { card: "Card", mobile_money: "Mobile money", bank: "Bank transfer", ussd: "USSD", qr: "QR code", other: "Other" };
-  const PAY_PILL = { credited: "ok", paid: "pending", pending: "pending", failed: "fail", refunded: "n" };
+  // paid carries its own colour because it is the one state where money has left a
+  // customer's wallet and their minutes have not arrived. pending means nobody paid.
+  const PAY_PILL = { credited: "ok", paid: "fail", pending: "pending", failed: "n", refunded: "n" };
+  const PAY_STATE = { paid: "paid · minutes owed" };
 
   // Paystack speaks pesewas, the panel speaks cedis, and the buy page shows cedis at
   // the rate stored on the gateway. Amounts here are what Paystack actually took, so
@@ -1934,7 +1941,12 @@
       const quiet = p.status === "pending" && p.expired_at;
       const state = quiet
         ? '<span class="pill n" title="no payment arrived within half an hour, so this order is closed on our side. If the money ever does arrive, the minutes go in by themselves.">no payment arrived</span>'
-        : `<span class="pill ${PAY_PILL[p.status] || "n"}">${esc(p.status)}</span>`;
+        : `<span class="pill ${PAY_PILL[p.status] || "n"}">${esc(PAY_STATE[p.status] || p.status)}</span>`;
+      // A credited order has no question left to ask, and a refunded one is closed on
+      // purpose — the money went back to the payer, so nothing is owed on it.
+      const ask = p.status === "credited" || p.status === "refunded"
+        ? '<span class="muted">—</span>'
+        : `<button class="payAsk" data-ref="${esc(p.reference)}" style="font-size:11px;padding:3px 9px" title="Ask Paystack right now whether this order is paid, and add the minutes if it is">Ask</button>`;
       const why = p.status === "credited"
         ? `<span class="muted">${payAgo(p.credited_at || p.paid_at || p.created_at)}</span>`
         : quiet
@@ -1949,12 +1961,96 @@
         <td>${state}</td>
         <td class="mono" style="font-size:11px">${esc(p.reference)}</td>
         <td>${delivered}</td>
-        <td>${why}</td></tr>`;
-    }).join("") || `<tr><td colspan="9" class="muted">${onlyAttention ? "Nothing needs your attention." : "No online payment has been opened yet."}</td></tr>`;
+        <td>${why}</td>
+        <td>${ask}</td></tr>`;
+    }).join("") || `<tr><td colspan="10" class="muted">${onlyAttention ? "Nothing needs your attention." : "No online payment has been opened yet."}</td></tr>`;
     msg("payMsg", "");
   }
   $("payRefresh").onclick = loadPayments;
   $("payAttention").onchange = loadPayments;
+
+  // ── Asking Paystack itself ─────────────────────────────────────────────────
+  // Every state in the list above is this gateway's own record of an order. Paystack is
+  // the one holding the money, so when the two disagree this settles it: it re-asks about
+  // an order and credits whatever it confirms. Settling an order that is already credited
+  // changes nothing, so the button can never pay a customer twice.
+  const PAY_ANSWER = {
+    credited: ["ok", "minutes added"],
+    waiting: ["pending", "still not paid"],
+    not_paid: ["n", "no payment on that order"],
+    refunded: ["n", "refunded to the payer"],
+    refused: ["fail", "the money is there but the credit was refused"],
+    unchecked: ["fail", "Paystack could not be asked"],
+  };
+
+  function askPaystack(reference) {
+    const out = $("payResult");
+    out.innerHTML = `<div class="muted">Asking Paystack${reference ? " about " + esc(reference) : " about every order still waiting"}…</div>`;
+    // One ask at a time: Paystack counts requests per key, and a second press while the
+    // first is still running would only make the same order wait longer.
+    $("payRecheckAll").disabled = true;
+    document.querySelectorAll(".payAsk").forEach((b) => { b.disabled = true; });
+    return api(reference ? { action: "paystack_reconcile", reference } : { action: "paystack_reconcile" })
+      .then((r) => {
+        const results = r.results || [];
+        out.innerHTML = results.length
+          ? results.map((x) => {
+              const a = PAY_ANSWER[x.result] || ["n", x.result || "no answer"];
+              return `<div style="margin:3px 0"><span class="pill ${a[0]}">${esc(a[1])}</span> `
+                + `<span class="mono" style="font-size:11px">${esc(x.reference)}</span> `
+                + `<span class="muted">${esc(x.detail || "")}</span></div>`;
+            }).join("")
+          : '<div class="ok">Nothing on this till is waiting for an answer, so there was nothing to ask.</div>';
+        return loadPayments();
+      })
+      .catch((e) => { out.innerHTML = `<div class="err">${esc(e.message)}</div>`; })
+      .finally(() => {
+        $("payRecheckAll").disabled = false;
+        document.querySelectorAll(".payAsk").forEach((b) => { b.disabled = false; });
+      });
+  }
+  $("payRecheckAll").onclick = () => askPaystack("");
+  $("payTable").addEventListener("click", (ev) => {
+    const btn = ev.target.closest ? ev.target.closest(".payAsk") : null;
+    if (btn && btn.dataset.ref) askPaystack(btn.dataset.ref);
+  });
+
+  // Whether Paystack has an address to call when a payment finishes. If that box holds
+  // something else — a web page, an older project — every payment lands and nobody here
+  // ever hears about it. That is how a customer ends up paying and getting no minutes.
+  function loadPaystackHook() {
+    const el = $("payHook");
+    el.innerHTML = '<span class="muted">Checking whether Paystack can reach this gateway…</span>';
+    const small = 'style="font-size:11px;padding:3px 9px"';
+    return api({ action: "paystack_webhook" })
+      .then((r) => {
+        const ours = SUPABASE_URL.replace(/\/+$/, "") + "/functions/v1/paystack-webhook";
+        const ok = !!r.url && String(r.url).replace(/\/+$/, "") === ours;
+        el.innerHTML = `<span class="pill ${ok ? "ok" : "fail"}">${ok
+          ? "Paystack reports to this gateway"
+          : "Paystack is not reporting to this gateway"}</span> `
+          + `<span class="muted">${esc(r.detail || "")}</span> `
+          + `<button id="payHookCheck" ${small}>Check again</button>`
+          + (ok ? "" : ` <button id="payHookSet" ${small}>Give it this address</button>`)
+          + `<div class="mono" style="font-size:11px;margin-top:4px">${esc(ours)}</div>`;
+        $("payHookCheck").onclick = loadPaystackHook;
+        const set = $("payHookSet");
+        if (!set) return;
+        set.onclick = () => {
+          set.disabled = true;
+          el.innerHTML = '<span class="muted">Sending the address to Paystack…</span>';
+          api({ action: "paystack_webhook", set: true })
+            .then((res) => {
+              el.innerHTML = `<div class="${res.ok ? "ok" : "err"}">${esc(res.detail || (res.ok
+                ? "Paystack will report every finished payment to this gateway."
+                : "Paystack refused, so type the address into your Paystack settings yourself."))}</div>`;
+              if (res.ok) setTimeout(loadPaystackHook, 1500);
+            })
+            .catch((e) => { el.innerHTML = `<div class="err">${esc(e.message)}</div>`; });
+        };
+      })
+      .catch((e) => { el.innerHTML = `<span class="err">${esc(e.message)}</span>`; });
+  }
   // The one switch that decides whether real money may be taken. It is on this tab and
   // nowhere else because this is the tab that shows what each payment did: you open it
   // when you want to be paid, and you close it the moment something looks wrong.

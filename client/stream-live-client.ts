@@ -251,12 +251,15 @@ export class StreamLiveClient {
    * of it was open: every screen that reads the account then gets the server's technical
    * refusal instead of the customer's own balances, and only signing out and back in
    * clears it. Costs one round trip an hour, so the account always loads by itself.
+   *
+   * A stored sign-in that carries no usable expiry stamp is treated as dying rather than
+   * as fresh. That is the one case a clock cannot vouch for, and the ticket is cheap.
    */
   private async token(): Promise<string> {
     const { data } = await this.sb.auth.getSession();
     if (!data.session) throw new GatewayError("not signed in", 401, "signed_out");
     const expiresAt = Number(data.session.expires_at ?? 0);
-    if (expiresAt > 0 && expiresAt * 1000 - Date.now() < TOKEN_REFRESH_MARGIN_MS) {
+    if (!(expiresAt > 0) || expiresAt * 1000 - Date.now() < TOKEN_REFRESH_MARGIN_MS) {
       const fresh = await this.refreshToken();
       if (fresh) return fresh;
     }
@@ -273,6 +276,24 @@ export class StreamLiveClient {
         });
     }
     return this.refreshing;
+  }
+
+  /**
+   * One read of the account, with the sign-in traded in and the read repeated once if the
+   * server refused the token it was given. A refusal here means the clock and the ticket
+   * disagreed — the app believed a token the gateway had stopped accepting — and the
+   * customer should never see that as an empty account. Signing out is what used to fix
+   * it, so this does the same thing without asking.
+   */
+  private async read<T>(run: () => PromiseLike<{ data: T | null; error: { message: string } | null }>): Promise<T> {
+    const first = await run();
+    if (!first.error) return first.data as T;
+    if (!/jwt|expired|invalid token|token has been/i.test(first.error.message)) throw new Error(first.error.message);
+    const fresh = await this.refreshToken();
+    if (!fresh) throw new Error(first.error.message);
+    const again = await run();
+    if (again.error) throw new Error(again.error.message);
+    return again.data as T;
   }
 
   private async userId(): Promise<string> {
@@ -314,9 +335,8 @@ export class StreamLiveClient {
   /** Balances, what the account may use, spend totals and live sessions in one read. */
   async snapshot(): Promise<AccountSnapshot> {
     await this.token();
-    const { data, error } = await this.sb.rpc("sl_account_snapshot");
-    if (error) throw new Error(error.message);
-    const j = (data ?? {}) as SnapshotJson;
+    const j = (await this.read<SnapshotJson | null>(() => this.sb.rpc("sl_account_snapshot"))) as SnapshotJson | null;
+    if (!j) throw new Error("the account did not answer");
     if (j.ok !== true) throw new Error(String(j.error ?? "snapshot unavailable"));
 
     const wallets = j.wallets ?? [];
@@ -352,12 +372,13 @@ export class StreamLiveClient {
    */
   async plans(): Promise<Plan[]> {
     await this.token();
-    const { data, error } = await this.sb
-      .from("plans")
-      .select("id, name, price_cents, blurb, includes, features, max_devices, video_minutes, audio_minutes, video_audio_minutes")
-      .eq("active", true)
-      .order("price_cents", { ascending: true });
-    if (error) throw new Error(error.message);
+    const data = await this.read<Record<string, any>[]>(() =>
+      this.sb
+        .from("plans")
+        .select("id, name, price_cents, blurb, includes, features, max_devices, video_minutes, audio_minutes, video_audio_minutes")
+        .eq("active", true)
+        .order("price_cents", { ascending: true })
+    );
     return (data ?? []).map((p) => ({
       id: String(p.id),
       name: String(p.name ?? p.id),
@@ -663,6 +684,20 @@ export class StreamLiveClient {
   /** Admin panel bridge (403 unless profiles.is_admin). */
   async admin<T = Record<string, unknown>>(action: string, payload: Record<string, unknown> = {}): Promise<T> {
     return (await this.invoke("admin-api", { action, ...payload })) as T;
+  }
+
+  /**
+   * Ask about payments this account has made that have not become minutes.
+   *
+   * A customer who pays and closes the browser leaves an order nobody on this server has
+   * ever confirmed, and the only one who can tell whether the minutes arrived is this app.
+   * So opening it asks, once every few minutes, and the answer is settled against Paystack
+   * by the gateway — which is what makes the meter show the minutes without anybody having
+   * to e-mail a screenshot. Returns how many orders were looked at.
+   */
+  async reconcilePayments(): Promise<number> {
+    const res = await this.invoke("paystack-checkout", { reconcile: true }) as unknown as { checked?: number };
+    return Number(res.checked ?? 0);
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────

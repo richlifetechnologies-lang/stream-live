@@ -61,6 +61,11 @@ contextBridge.exposeInMainWorld("electronAPI", {
     return ipcRenderer.invoke("get-device-id");
   },
 
+  // One line in account.log — the reason something failed, never a credential
+  logNote: (note: string): void => {
+    ipcRenderer.send("app-note", note);
+  },
+
   // ─── Virtual camera ("Stream Live Camera") frame feeder ───────────────────
   vcamStart: (): Promise<{ supported: boolean; active: boolean; ready: boolean; error: string | null }> =>
     ipcRenderer.invoke("vcam-start"),

@@ -12,12 +12,15 @@
 //   delete_account{ userId, reason? }        -- remove the account for good
 //   set_engine    { userId, engine: 'fal'|'decart'|null } -- pin/unpin the service
 //   test_key      { provider, key? , keyId? } -- prove a key works, no inference billed
+//   paystack_reconcile { reference? }  -- ask Paystack about unpaid orders, credit what it confirms
+//   paystack_webhook   { set? }        -- read the call-back address, or register this gateway's
 // Resp: { ok:true, ...result } or { error, status }
 import { preflight, json, fail } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { adminClient } from "../_shared/db.ts";
 import { grantCredits, reapSessions, resolveRequest, signOutEverywhere, updateLease, type Modality } from "../_shared/credits.ts";
 import { verifyKey, type Provider } from "../_shared/verify.ts";
+import { reconcilePending, settleByReference, webhookRegister, webhookState } from "../_shared/paystack-reconcile.ts";
 
 const MODALITIES = ["video", "audio", "video_audio"];
 
@@ -205,6 +208,36 @@ Deno.serve(async (req: Request) => {
           });
         }
         return json({ ok: true, provider, verified: res.ok, status: res.status, detail: res.detail });
+      }
+
+      // ── Online payments: ask Paystack, and make it tell us next time ──────────
+      // { reference? }  -- one order, or everything on the waiting list
+      // The list is what a stuck payment needs when the seller's Paystack call-back
+      // box was never filled in: this asks Paystack directly and credits from the
+      // answer. A named reference is asked even if it was asked about a moment ago,
+      // because the person pressing the button is looking at that one line.
+      case "paystack_reconcile": {
+        const reference = typeof body.reference === "string" ? body.reference.trim() : "";
+        if (reference) {
+          if (!/^[A-Za-z0-9_.-]{6,64}$/.test(reference)) return fail("that reference is not one of ours");
+          return json({ ok: true, results: [await settleByReference(reference)] });
+        }
+        const results = await reconcilePending(null, 25);
+        return json({ ok: true, results, nothing_to_ask: results.length === 0 });
+      }
+
+      // { set?: true }  -- read the call-back address Paystack has, or give it ours
+      // Setting it is deliberately a separate press: it overwrites whatever is in that
+      // box on his account, which is somebody else's integration if he ever shares one.
+      case "paystack_webhook": {
+        if (body.set === true) {
+          const url = `${(Deno.env.get("SUPABASE_URL") ?? "").replace(/\/+$/, "")}/functions/v1/paystack-webhook`;
+          if (!url.startsWith("https://")) return fail("this server does not know its own address, so it cannot register a call-back");
+          const res = await webhookRegister(url);
+          return json({ ok: res.ok, set: true, url, detail: res.detail });
+        }
+        const state = await webhookState();
+        return json({ ok: true, url: state.url, detail: state.detail });
       }
 
       default:

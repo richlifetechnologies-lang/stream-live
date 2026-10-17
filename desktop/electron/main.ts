@@ -42,12 +42,11 @@ function platformArtifactLabel(): string {
   return "Linux";
 }
 
-// Append-only updater log. A silent failure is what made "I don't get the banner"
-// unanswerable, so every early exit writes a line here. Values are reasons only —
-// never a token or key.
-function logUpdate(message: string): void {
+// Append-only log with a size ceiling. A silent failure is what made "I don't get the
+// banner" and "the meter showed nothing" unanswerable, so every early exit writes a line.
+// Values are reasons only — never a token or key.
+function appendRotated(file: string, message: string): void {
   try {
-    const file = path.join(app.getPath("userData"), "updater.log");
     try {
       if (fs.statSync(file).size > UPDATER_LOG_MAX_BYTES) {
         const lines = fs.readFileSync(file, "utf8").split("\n");
@@ -55,7 +54,15 @@ function logUpdate(message: string): void {
       }
     } catch { /* first write creates it */ }
     fs.appendFileSync(file, `${new Date().toISOString()} ${message}\n`);
-  } catch { /* logging must never break the updater */ }
+  } catch { /* logging must never break the app */ }
+}
+
+function logUpdate(message: string): void {
+  appendRotated(path.join(app.getPath("userData"), "updater.log"), message);
+}
+
+function logAccount(message: string): void {
+  appendRotated(path.join(app.getPath("userData"), "account.log"), message);
 }
 
 type UpdateStatusKind = "check-failed" | "download-failed" | "ok";
@@ -483,6 +490,15 @@ ipcMain.handle("get-device-id", () => {
       .update(`${os.hostname()}|${os.arch()}|${os.platform()}`)
       .digest("hex");
   }
+});
+
+// ─── IPC: the account log ────────────────────────────────────────────────────
+// The renderer's balance reads happen after sign-in, where a failure used to leave
+// nothing but an empty meter on screen. Reasons only, and the URL is stripped: this is
+// the file that answers "what did the app actually see when I reopened it".
+ipcMain.on("app-note", (_event, note: unknown) => {
+  const text = String(note ?? "").replace(/https?:\/\/\S+/g, "endpoint").slice(0, 300);
+  if (text) logAccount(text);
 });
 
 // ─── IPC: trigger update download ────────────────────────────────────────────

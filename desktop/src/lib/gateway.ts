@@ -20,6 +20,13 @@ export type AccountState = {
   wallets: Wallet[];
   loading: boolean;
   /**
+   * Why the last read of the account failed, in the customer's own words, or null when
+   * the numbers on screen are current. An account that cannot be read must say so: the
+   * alternative is a meter sitting at zero, which a customer reads as "my minutes are
+   * gone" when the truth is "the app could not ask".
+   */
+  error: string | null;
+  /**
    * False while the account has only ever held its free trial minute. Starts true
    * so no upgrade copy can flash before the first snapshot lands.
    */
@@ -30,7 +37,7 @@ export type AccountState = {
 
 export const gateway = new StreamLiveClient(GATEWAY_CONFIG);
 
-let state: AccountState = { signedIn: false, email: null, wallets: [], loading: true, paid: true, live: null };
+let state: AccountState = { signedIn: false, email: null, wallets: [], loading: true, error: null, paid: true, live: null };
 const listeners = new Set<() => void>();
 
 function setState(patch: Partial<AccountState>) {
@@ -135,14 +142,51 @@ export function hasMinutes(state: AccountState, modality: Modality): boolean {
   return modality === "video" ? w.balance > 0 : w.balance >= 1;
 }
 
+// A payment that reached Paystack while this app was closed has no other witness: the
+// confirm page in the browser is gone, and the seller's call-back address is a box in
+// somebody else's dashboard. So the app asks about its own account's unpaid-for orders
+// whenever it next reads the meter, and the minutes appear on their own. Every few
+// minutes is often enough for a human being, and keeps a live call from adding requests.
+const RECONCILE_EVERY_MS = 5 * 60_000;
+let lastReconcileAt = 0;
+
+/** What a failed read of the account says to the customer. Never the server's own words. */
+function plainReadError(err: unknown): string {
+  const text = err instanceof Error ? err.message : String(err ?? "");
+  if (/signed out|not signed in/i.test(text)) return "Please sign in again.";
+  if (/internet|network|failed to fetch|timeout|aborted/i.test(text)) {
+    return "Your account could not be read — this computer is not reaching the server. Check the connection and try again.";
+  }
+  return "Your account could not be read just now. Nothing has happened to your minutes; try again in a moment.";
+}
+
+/**
+ * One line in the app's own account.log.
+ *
+ * "I closed it and opened it and the meter was empty" was unanswerable because a failed
+ * read left no trace — the message went to the screen and then to the next repaint. The
+ * reason is written out so the file can be read later; it carries no token and no address.
+ */
+function logAccount(note: string): void {
+  const api = (window as unknown as { electronAPI?: { logNote?: (n: string) => void } }).electronAPI;
+  try { api?.logNote?.(note); } catch { /* a log must never break the meter */ }
+}
+
 export async function refreshBalances(): Promise<void> {
   if (!state.signedIn) return;
-  // One snapshot carries both the buckets and the paid flag, so the upgrade copy and
-  // the balances can never disagree. It speaks snake_case; the store does not.
   try {
+    if (Date.now() - lastReconcileAt > RECONCILE_EVERY_MS) {
+      lastReconcileAt = Date.now();
+      // A payment service that is down must never stop the meter loading, so this is
+      // asked for and dropped on the floor; the snapshot below is what matters here.
+      await gateway.reconcilePayments().catch(() => 0);
+    }
+    // One snapshot carries both the buckets and the paid flag, so the upgrade copy and
+    // the balances can never disagree. It speaks snake_case; the store does not.
     const s = await gateway.snapshot();
     setState({
       paid: s.paid,
+      error: null,
       wallets: s.wallets.map(w => ({
         modality: w.modality,
         balance: Number(w.balance),
@@ -150,7 +194,12 @@ export async function refreshBalances(): Promise<void> {
         burnRate: Number(w.burn_rate) || 1,
       })),
     });
-  } catch { /* keep last known balances */ }
+  } catch (err) {
+    // The last known balances stay on screen, but they are marked as not just read, so
+    // nobody reads a stale number as a fresh one or a blank meter as an empty account.
+    setState({ error: plainReadError(err) });
+    logAccount(`balance read failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 export async function deviceId(): Promise<string> {

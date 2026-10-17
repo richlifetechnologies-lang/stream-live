@@ -20,6 +20,7 @@
 // infrastructure failure answers 500 and lets the retry land it.
 import { adminClient } from "../_shared/db.ts";
 import { preflight, json, fail } from "../_shared/cors.ts";
+import { markRefunded, refundState, type PaystackTxn } from "../_shared/paystack-reconcile.ts";
 
 const API = "https://api.paystack.co";
 const TIMEOUT_MS = 15_000;
@@ -77,7 +78,14 @@ async function handle(req: Request): Promise<Response> {
     return fail("could not confirm the payment", 500);   // let Paystack retry
   }
 
-  const txn = fetched.data as Record<string, unknown>;
+  const txn = fetched.data as Record<string, unknown> & PaystackTxn;
+  // A charge Paystack has already refunded still verifies as success. The money is back
+  // with the payer, so the order is closed as refunded instead of buying minutes.
+  if (refundState(txn)) {
+    await markRefunded(reference, "Paystack refunded this payment to the payer, so no minutes were added");
+    console.log(`paystack settle ${reference}: already refunded (${String(txn.refund_status)}) — nothing credited`);
+    return json({ ok: true, reference, refunded: true });
+  }
   // A reference this gateway issued is an order we opened, so the package and the
   // account are already on file. Anything else came through a Paystack payment
   // page, where the amount and the payer's email are all there is to go on.
@@ -92,6 +100,7 @@ async function handle(req: Request): Promise<Response> {
       domain: txn.domain,
       paid_at: txn.paid_at,
       channel: txn.channel,
+      refund_status: txn.refund_status ?? "",
       customer: txn.customer ?? null,
     },
   });

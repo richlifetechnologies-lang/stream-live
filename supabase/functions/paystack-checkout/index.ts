@@ -1,8 +1,10 @@
 // paystack-checkout — the buyer's door to an online payment.
 //
 //   GET  /                       -> the packages on sale and how they can be paid for
-//   GET  /?check=<reference>     -> how that one payment is doing
+//   GET  /?check=<reference>     -> how that one payment is doing, asked of Paystack itself
 //   POST / { email, plan_id, method } -> opens the payment, returns Paystack's page
+//   POST / { reconcile: true }   -> with the app's own sign-in: settle every order that
+//                                   address has paid for and not been credited for
 //
 // method is 'card' or 'mobile_money'. Either way the buyer is handed to Paystack's
 // own screen, which is where the card number or the wallet number is typed and
@@ -13,13 +15,16 @@
 // The page that calls this is a plain web page with no login, so the buyer types
 // the email address their account was made with. That address is not a
 // credential: typing someone else's can only ever buy minutes for that other
-// person, and only after money has genuinely been taken. Nothing is credited
-// here — that happens in paystack-webhook, after Paystack confirms the money.
+// person, and only after money has genuinely been taken. An order is never credited
+// from what this page posts — only from Paystack's own answer about that reference,
+// which is what the re-check below asks for.
 //
 // The secret key never leaves the function's environment, and the buyer is sent
 // to Paystack's own screen, so no card number ever reaches this server.
 import { adminClient } from "../_shared/db.ts";
 import { preflight, json, fail } from "../_shared/cors.ts";
+import { requireUser } from "../_shared/auth.ts";
+import { reconcilePending, settleByReference } from "../_shared/paystack-reconcile.ts";
 
 const API = "https://api.paystack.co";
 const TIMEOUT_MS = 15_000;
@@ -110,34 +115,13 @@ function chosenMethod(raw: unknown, open: string[]): "card" | "mobile_money" | n
  * twice — an order can only ever be credited once — so chasing on every poll costs one
  * request and can never pay anybody out twice.
  *
- * Only a success is chased. A payment Paystack still calls pending may genuinely go
- * through a minute later, which is exactly what a mobile money prompt looks like while the
- * buyer is still finding their PIN.
+ * Every answer comes back as a sentence, including the ones that change nothing, because
+ * "pending here, success over there" was unanswerable while a refusal returned quietly.
  */
-async function chase(db: ReturnType<typeof adminClient>, reference: string) {
-  let key: string;
-  try { key = secretKey(); } catch { return; }
-  const res = await fetch(`${API}/transaction/verify/${encodeURIComponent(reference)}`, {
-    headers: { Authorization: `Bearer ${key}` },
-    signal: AbortSignal.timeout(TIMEOUT_MS),
-  }).catch(() => null);
-  const fetched = res ? await res.json().catch(() => null) : null;
-  const txn = fetched?.status === true ? fetched.data : null;
-  if (!txn || txn.status !== "success") return;
-  const { error } = await db.rpc("sl_paystack_settle", {
-    p_reference: reference,
-    p_txn: {
-      id: String(txn.id ?? ""),
-      status: txn.status,
-      amount: txn.amount,
-      currency: txn.currency,
-      domain: txn.domain,
-      paid_at: txn.paid_at,
-      channel: txn.channel,
-      customer: txn.customer ?? null,
-    },
-  });
-  if (error) console.error(`paystack chase ${reference}: ${error.message}`);
+async function chase(reference: string): Promise<{ result: string; detail: string }> {
+  const out = await settleByReference(reference);
+  console.log(`paystack chase ${reference}: ${out.result} — ${out.detail}`);
+  return { result: out.result, detail: out.detail };
 }
 
 async function handle(req: Request): Promise<Response> {
@@ -150,10 +134,14 @@ async function handle(req: Request): Promise<Response> {
       if (!/^sl-[0-9a-f]{12,24}$/.test(check)) return fail("that reference is not one of ours", 400);
       let { data, error } = await db.rpc("sl_paystack_status", { p_reference: check });
       if (error) return fail(error.message, 500);
-      if (data?.status === "pending") {
-        await chase(db, check);
+      // 'pending' means nothing has confirmed it yet; 'paid' means Paystack has and the
+      // credit was refused. Both are worth asking about, and an order that has just been
+      // asked about is throttled by the stamp on it rather than here.
+      if (data?.status === "pending" || data?.status === "paid") {
+        const said = await chase(check);
         ({ data, error } = await db.rpc("sl_paystack_status", { p_reference: check }));
         if (error) return fail(error.message, 500);
+        return json({ ...(data ?? {}), paystack_says: said.detail, chase: said.result });
       }
       return json(data ?? { ok: false, error: "unknown_reference" });
     }
@@ -164,6 +152,17 @@ async function handle(req: Request): Promise<Response> {
 
   const body = await req.json().catch(() => null) as Record<string, unknown> | null;
   if (!body) return fail("send a JSON body", 400);
+
+  // The app asks for its own customer's stuck payments. Whoever calls this has already
+  // proved who they are, so the answer is limited to orders paid for under that same
+  // address — nobody can use it to poke at somebody else's money.
+  if (body.reconcile === true) {
+    const user = await requireUser(req);
+    if (!user.email) return fail("this sign-in has no email address to check payments against", 403);
+    const done = await reconcilePending(user.email, 10);
+    if (done.length) console.log(`paystack reconcile ${user.email}: ${done.map((d) => `${d.reference} ${d.result}`).join(", ")}`);
+    return json({ ok: true, checked: done.length, results: done });
+  }
 
   const key = secretKey();
   const db = adminClient();

@@ -62,12 +62,69 @@
   .ok  { color: var(--good) }
   .muted { color: var(--muted) }
   a { color: var(--cyan) }
+
+  /* ── The receipt a customer lands on after paying ───────────────────────────
+     This is the only proof of a purchase most customers ever keep, so it is
+     laid out like a document rather than like a message: brand at the top, what
+     was bought and what it cost, then every reference on one screen, then the
+     status. It is also printable, because "send it to me" is a normal thing to
+     ask a payment for. */
+  .receipt { background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+    overflow: hidden; margin-bottom: 14px }
+  .rhead { display: flex; align-items: center; gap: 12px; padding: 18px 20px;
+    border-bottom: 1px solid var(--line); background: linear-gradient(180deg, #0d1533, var(--panel)) }
+  .rhead img, .rhead svg { width: 38px; height: 38px; border-radius: 9px; display: block }
+  .wordmark { font-weight: 800; font-size: 15px; letter-spacing: .16em; text-transform: uppercase }
+  .rtag { color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; margin-top: 2px }
+  .ribbon { margin-left: auto; border-radius: 999px; padding: 6px 13px; font-size: 11.5px;
+    font-weight: 800; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap }
+  .ribbon.ok   { background: #06281a; color: var(--good); border: 1px solid #14532d }
+  .ribbon.wait { background: #241a05; color: #fbbf24; border: 1px solid #78350f }
+  .ribbon.bad  { background: #2a0d15; color: var(--bad); border: 1px solid #7f1d1d }
+  .rtop { padding: 20px 20px 4px }
+  .rplan { font-size: 20px; font-weight: 800; line-height: 1.3 }
+  .ramount { font-size: 34px; font-weight: 800; margin-top: 6px; letter-spacing: -.01em }
+  .ramount span { font-size: 14px; font-weight: 700; color: var(--muted); margin-left: 8px }
+  .rows { margin: 16px 20px 0; border-top: 1px solid var(--line) }
+  .receipt .mins { border: 1px solid #1b2444; background: #070d1e; border-radius: 10px; padding: 10px 12px }
+  .receipt .ml { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px }
+  .receipt .mm { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; margin: 4px 0 }
+  .receipt .mm b { font-weight: 700 }
+  .row { display: flex; gap: 14px; justify-content: space-between; padding: 11px 0;
+    border-bottom: 1px solid var(--line); font-size: 14px }
+  .row dt { color: var(--muted); margin: 0; flex: 0 0 auto }
+  .row dd { margin: 0; text-align: right; font-weight: 600; word-break: break-word }
+  .row dd.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; letter-spacing: .02em }
+  .rstatus { margin: 16px 20px 0; border-radius: 11px; padding: 13px 15px; font-size: 14.5px; font-weight: 600 }
+  .rstatus.ok   { background: #06281a; color: #bbf7d0; border: 1px solid #14532d }
+  .rstatus.wait { background: #241a05; color: #fde68a; border: 1px solid #78350f }
+  .rstatus.bad  { background: #2a0d15; color: #fecdd3; border: 1px solid #7f1d1d }
+  .rfoot { padding: 16px 20px 20px; color: var(--muted); font-size: 13.5px; line-height: 1.6 }
+  .rbtns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 14px }
+  .rbtn { background: #070d1e; border: 1px solid var(--line); border-radius: 10px; color: var(--text);
+    font: inherit; font-size: 13.5px; padding: 9px 14px; cursor: pointer }
+  .rbtn:hover { border-color: var(--cyan) }
+  @keyframes sl-spin { to { transform: rotate(360deg) } }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #78350f;
+    border-top-color: #fbbf24; border-radius: 50%; animation: sl-spin 1s linear infinite;
+    vertical-align: -1px; margin-right: 7px }
+  @media print {
+    body { background: #fff; color: #0b1220 }
+    .wrap { max-width: none; padding: 0 }
+    .rbtns, #shop { display: none }
+    .receipt { border-color: #cbd5e1; background: #fff }
+    .rhead { background: none; border-color: #cbd5e1 }
+    .row { border-color: #e2e8f0 } .row dt { color: #475569 }
+    .rfoot, .rtag { color: #475569 } .rplan, .ramount, .row dd { color: #0b1220 }
+  }
 </style>
 </head>
 <body>
 <div class="wrap">
-  <h1>Buy minutes</h1>
-  <p class="lede">Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.</p>
+  <div id="shop">
+    <h1>Buy minutes</h1>
+    <p class="lede">Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.</p>
+  </div>
 
   <div id="status"></div>
 
@@ -244,40 +301,190 @@ async function renderPackages() {
   $("buy").hidden = false;
 }
 
+// ── The receipt ───────────────────────────────────────────────────────────────
+// A customer who has just paid wants a document, not a status message: what they
+// bought, what it cost, their order number and Paystack's transaction number on one
+// screen, printable. The brand mark is inlined so the page still looks like Stream
+// Live when it is printed or screenshotted as proof.
+const LOGO = '<svg viewBox="0 0 256 256" role="img" aria-label="Stream Live">'
+  + '<defs><linearGradient id="sl-mark" x1="0" y1="0" x2="1" y2="1">'
+  + '<stop offset="0" stop-color="#3ec6ff"/><stop offset="0.55" stop-color="#1b3ff2"/>'
+  + '<stop offset="1" stop-color="#8b2ff5"/></linearGradient></defs>'
+  + '<rect width="256" height="256" rx="58" fill="#0a1026"/>'
+  + '<path d="M78 52 L150 96 a16 16 0 0 1 0 27 L78 168 a16 16 0 0 1-24-13 V65 a16 16 0 0 1 24-13 Z" fill="url(#sl-mark)"/>'
+  + '<path d="M96 84 L126 103 a5 5 0 0 1 0 8 L96 130 a5 5 0 0 1-7-4 v-38 a5 5 0 0 1 7-4 Z" fill="#f7fbff"/>'
+  + '<g fill="none" stroke="url(#sl-mark)" stroke-width="13" stroke-linecap="round">'
+  + '<path d="M170 92 a40 40 0 0 1 0 44"/><path d="M196 74 a68 68 0 0 1 0 80"/></g></svg>';
+
+const CURRENCY = { GHS: "GH₵", NGN: "₦", USD: "$", ZAR: "R", GNF: "GNF ", XOF: "CFA " };
+const amount = (a, cur) => (CURRENCY[cur] || (cur ? cur + " " : "GH₵"))
+  + (Number(a || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Paystack's own channel name is more exact than the two buttons the buyer chose from
+// ("mobile_money" becomes "MTN MoMo" once it has actually gone through a network).
+const PAID_BY = (s) => {
+  const ch = { mobile_money: "Mobile money", card: "Card", bank: "Bank transfer",
+    bank_transfer: "Bank transfer", qrcode: "Paystack QR", hussle: "Bank transfer",
+    banktransfer: "Bank transfer", stripe: "Card", ussd: "Mobile money USSD" }[s.channel] || "Online payment";
+  return s.integration === "test" ? ch + " — test payment" : ch;
+};
+
+/** A UTC timestamp from the server, shown in the minute the browser is standing in. */
+function when(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return isNaN(d) ? iso
+    : d.toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+const row = (k, v, mono) => v ? '<div class="row"><dt>' + k + "</dt><dd"
+  + (mono ? ' class="mono"' : "") + ">" + v + "</dd></div>" : "";
+
+/** credited and failed are final; 'paid' means the money is in and the credit needs the seller. */
+function ribbon(s) {
+  if (s.status === "credited") return { cls: "ok", text: "Paid" };
+  if (s.status === "paid") return { cls: "ok", text: "Money received" };
+  if (s.status === "failed") return { cls: "bad", text: "Not completed" };
+  if (s.status === "refunded") return { cls: "bad", text: "Refunded" };
+  return { cls: "wait", text: s.gone_quiet ? "Still checking" : "Confirming" };
+}
+
+function receiptHtml(s, waiting) {
+  const r = ribbon(s);
+  const grants = Array.isArray(s.grants) ? s.grants : [];
+  const minutes = grants.length
+    ? grants.map((g) => '<div class="mm"><span>' + esc(MOD_LABEL[g.modality] || g.modality || "Minutes")
+      + "</span><b>" + Number(g.minutes || 0).toLocaleString("en-US") + " min</b></div>").join("")
+    : '<div class="mm"><span>' + (r.cls === "bad" ? "Nothing to add" : "Minutes")
+      + "</span><b>" + (waiting ? "adding…" : "not added yet") + "</b></div>";
+
+  // The plain sentence under the status box is what a customer actually reads, so each
+  // state gets its own rather than a shared "thank you".
+  const closing = s.status === "credited"
+    ? "Open Stream Live and sign in with the same email address — the minutes are already on the account. Do not send a top-up request for this purchase; asking again does not add them twice."
+    : s.status === "paid"
+    ? "Do not pay again. Paystack has the money, the minutes could not be added by themselves, and the seller has been told. Re-checking this page keeps trying, and the minutes go in the moment the credit succeeds."
+    : s.status === "failed"
+    ? "Nothing was charged to your card or wallet. You can pick a package and try again."
+    : s.status === "refunded"
+    ? "The money is being returned to the card or wallet you paid with — usually a few minutes for mobile money, up to a few working days for a card. No minutes were added for this order, and you do not need to do anything else."
+    : s.gone_quiet
+    ? "This order was no longer paid within the seller's half-hour window, but this page keeps asking Paystack anyway — if your money is there, the minutes are added by themselves and nothing needs to be paid twice."
+    : "Keep this page open. The minutes are added the moment Paystack confirms the money, which is usually a few seconds after a card payment and after you approve the prompt on your phone for mobile money.";
+
+  const help = "Something wrong? <a href=\"https://t.me/rich_life2k15\">Ask the seller</a> and quote reference <b class=\"mono\">"
+    + esc(s.reference || "") + "</b>.";
+
+  return '<div class="receipt">'
+    + '<div class="rhead">' + LOGO
+      + '<div><div class="wordmark">Stream Live</div><div class="rtag">Payment receipt</div></div>'
+      + '<div class="ribbon ' + r.cls + '">' + esc(r.text) + "</div></div>"
+    + '<div class="rtop"><div class="rplan">' + esc(s.plan || "Minutes package") + "</div>"
+      + '<div class="ramount">' + amount(s.amount, s.currency || "GHS")
+      // "GH₵6.00 GHS" says the same thing twice; the code only earns its place when
+      // the figure above is spelled with it.
+      + (CURRENCY[s.currency || "GHS"] ? "" : "<span>" + esc(s.currency || "") + "</span>")
+      + "</div></div>"
+    + '<div class="mins" style="margin:16px 20px 0">'
+      + '<p class="ml">What this bought</p>' + minutes + "</div>"
+    + '<dl class="rows">'
+      + row("Paid with", esc(PAID_BY(s)))
+      + row("Account", esc(s.account || "not recorded"))
+      + row("Order reference", esc(s.reference || ""), true)
+      + row("Paystack reference", s.paystack_reference ? esc(s.paystack_reference)
+            : '<span class="muted">issued when the payment confirms</span>', true)
+      + row("Order opened", esc(when(s.opened_at)))
+      + row("Payment confirmed", esc(when(s.paid_at) || (r.cls === "bad" ? "never" : "waiting")))
+      + row("Minutes added", esc(when(s.credited_at) || (waiting ? "waiting" : "not yet")))
+    + "</dl>"
+    + '<div class="rstatus ' + r.cls + '">' + (waiting && r.cls === "wait" ? '<span class="spin"></span>' : "")
+      + esc(s.message || "Waiting for Paystack to confirm the money.") + "</div>"
+    + (s.paystack_says && r.cls !== "ok"
+        ? '<p class="muted" style="margin:10px 20px 0;font-size:13px">Paystack, asked just now: '
+          + esc(s.paystack_says) + (s.chase ? " (" + esc(s.chase) + ")" : "") + "</p>" : "")
+    + (s.note && r.cls !== "ok"
+        ? '<p class="muted" style="margin:8px 20px 0;font-size:13px">Recorded on the order: ' + esc(s.note) + "</p>" : "")
+    + '<div class="rfoot">' + esc(closing) + '<div class="rbtns">'
+      + '<button class="rbtn" id="print">Print or save as PDF</button>'
+      + '<button class="rbtn" id="copy">Copy the references</button>'
+      + '<button class="rbtn" id="again">Buy another package</button></div>'
+      + '<p style="margin:14px 0 0">' + help + "</p></div></div>";
+}
+
+/** The frame shown before the server has answered anything, so the page is never blank. */
+function waitingReceipt(reference) {
+  return '<div class="receipt"><div class="rhead">' + LOGO
+    + '<div><div class="wordmark">Stream Live</div><div class="rtag">Payment receipt</div></div>'
+    + '<div class="ribbon wait">Confirming</div></div>'
+    + '<div class="rtop"><div class="rplan">Your order</div>'
+    + '<div class="ramount" style="font-size:20px"><span class="spin"></span>Reading the payment…</div></div>'
+    + '<dl class="rows">' + row("Order reference", esc(reference), true) + "</dl>"
+    + '<div class="rstatus wait">Waiting for Paystack to confirm the money.</div></div>';
+}
+
+function wireReceipt(reference) {
+  $("print").onclick = () => window.print();
+  $("again").onclick = () => {
+    history.replaceState(null, "", location.pathname);
+    document.title = "Stream Live — buy minutes";
+    $("shop").hidden = false;
+    $("buy").hidden = false;
+    renderPackages();
+  };
+  $("copy").onclick = async (e) => {
+    const txt = "Stream Live order " + reference
+      + ($("status").querySelector(".row dd.mono") ? "" : "")
+      + (window.__receipt && window.__receipt.paystack_reference
+          ? ", Paystack reference " + window.__receipt.paystack_reference : "");
+    try {
+      await navigator.clipboard.writeText(txt);
+      e.target.textContent = "Copied";
+    } catch {
+      e.target.textContent = "Select it from the receipt above";
+    }
+    setTimeout(() => { const b = $("copy"); if (b) b.textContent = "Copy the references"; }, 2500);
+  };
+}
+
 // After Paystack takes the payment it sends the buyer back here with ?check=<reference>.
 async function follow(reference) {
+  $("shop").hidden = true;
   $("buy").hidden = true;
-  show('<div class="card"><h2>Confirming your payment</h2><p class="muted" id="line">Waiting for Paystack to confirm the money…</p></div>');
-  for (let i = 0; i < 24; i++) {
-    let s;
-    try { s = await api("?check=" + encodeURIComponent(reference)); } catch (e) { s = null; }
-    if (s && s.status === "credited") {
-      return show('<div class="card"><h2 class="ok">Paid — your minutes are in</h2><p>' + esc(s.message) +
-        '</p><p class="muted">Open Stream Live and sign in with the same email address to use them.</p>' +
-        '<p class="muted">Do not send a top-up request for this purchase — the minutes were added the moment the payment cleared, and asking again does not add them twice.</p></div>');
+  document.title = "Stream Live — your receipt";
+  show(waitingReceipt(reference));
+  wireReceipt(reference);
+
+  // Card payments confirm in seconds; a mobile money prompt waits until the customer
+  // notices their phone. Ask fast for the first minute, then quietly for another eleven,
+  // so a late approval still lands on a finished receipt instead of a dead page.
+  const PLAN = [1500, 2000, 2500, 3000, 4000, 5000, 5000, 5000, 5000, 5000];
+  const FINAL_MS = 12 * 60_000;
+  let spent = 0;
+  for (;;) {
+    const next = spent < 60_000 ? PLAN[Math.min(spent / 5000 | 0, PLAN.length - 1)] : 15_000;
+    await new Promise((r) => setTimeout(r, next));
+    spent += next;
+    let s = null;
+    try {
+      s = await api("?check=" + encodeURIComponent(reference));
+    } catch (e) {
+      show('<div class="card"><h2>We could not reach the payment service</h2><p class="muted">' + esc(e.message) +
+        "</p><p class=\"muted\">Nothing needs to be paid again. Reload this page in a minute, or ask the seller and quote reference <b>" +
+        esc(reference) + "</b>.</p></div>");
+      return;
     }
-    if (s && s.status === "failed") {
-      return show('<div class="card"><h2 class="err">That payment did not complete</h2><p>' + esc(s.message) +
-        '</p><p class="muted">Nothing was charged. Pick a package and try again, or ask for help below.</p></div>');
+    if (!s || s.ok === false) {
+      show('<div class="card"><h2>That order is not on this till</h2><p class="muted">Reference <b>' +
+        esc(reference) + '</b> is not one this page issued. If you paid, message the seller and quote it — the money and the minutes are both traceable from Paystack\'s own number.</p></div>');
+      return;
     }
-    // The seller's own clock: an order nobody has paid after half an hour stops waiting.
-    // It is still honoured if the money turns up later, so this screen never tells a
-    // buyer who actually paid to pay again.
-    if (s && s.gone_quiet === true) {
-      return show('<div class="card"><h2>This order has stopped waiting</h2><p>' + esc(s.message) +
-        '</p><p class="muted">If you never finished it — no card details, no prompt approved on your phone —' +
-        ' nothing was charged. Pick a package and start a fresh order.</p>' +
-        '<p class="muted">If you DID pay, do not pay again. Message the seller and quote reference <b>' +
-        esc(reference) + '</b>: the minutes go in by themselves the moment the payment is confirmed.</p></div>');
-    }
-    const line = $("line");
-    if (line) line.textContent = (s && s.message ? s.message : "Still confirming…") +
-      " (this page checks every few seconds. If you paid by mobile money, approve the prompt on your phone.)";
-    await new Promise((r) => setTimeout(r, 5000));
+    window.__receipt = s;
+    const settled = s.status === "credited" || s.status === "failed"
+      || s.status === "refunded" || s.status === "paid";
+    show(receiptHtml(s, !settled));
+    wireReceipt(reference);
+    if (settled || spent > FINAL_MS) return;
   }
-  show('<div class="card"><h2>Your payment reached us</h2><p class="muted">It is taking longer than usual to appear. ' +
-    'Do not pay again, and do not send a top-up request for it either — the payment credits itself as soon as Paystack confirms. ' +
-    'Message the seller and quote reference <b>' + esc(reference) + "</b> if it is still missing in a few minutes.</p></div>");
 }
 
 $("go").onclick = async () => {
@@ -294,8 +501,11 @@ $("go").onclick = async () => {
   }
 };
 
-const check = new URLSearchParams(location.search).get("check");
-if (check && /^sl-[0-9a-f]{12,24}$/.test(check)) follow(check); else renderPackages();
+// Paystack's own hosted pages come back with `?reference=` / `?trxref=` instead of the
+// `?check=` this page asks for, so a customer who paid that way still lands on a receipt.
+const params = new URLSearchParams(location.search);
+const ref = params.get("check") || params.get("reference") || params.get("trxref") || "";
+if (/^sl-[0-9a-f]{12,24}$/.test(ref)) follow(ref); else renderPackages();
 </script>
 </body>
 </html>
