@@ -162,6 +162,9 @@ export class GatewayError extends Error {
   }
 }
 
+/** A stored sign-in this close to death is traded in before it is presented. */
+const TOKEN_REFRESH_MARGIN_MS = 120_000;
+
 const REASON_BY_STATUS: Record<number, string> = {
   401: "signed_out",
   402: "out_of_minutes",
@@ -179,6 +182,8 @@ export class StreamLiveClient {
   private sessionId: string | null = null;
   private pendingEnd: string | null = null;
   private shopCache: { at: number; info: CheckoutInfo } | null = null;
+  /** One token exchange at a time; the refresh ticket is only spendable once. */
+  private refreshing: Promise<string | null> | null = null;
 
   constructor(cfg: GatewayConfig) {
     this.cfg = cfg;
@@ -239,10 +244,35 @@ export class StreamLiveClient {
     if (error) throw error;
   }
 
+  /**
+   * The sign-in token the app presents to every read, and the exchange that trades the
+   * refresh ticket for a fresh one before the stored token dies. Without that exchange
+   * an install-over-update leaves the app running on a token that expired while no copy
+   * of it was open: every screen that reads the account then gets the server's technical
+   * refusal instead of the customer's own balances, and only signing out and back in
+   * clears it. Costs one round trip an hour, so the account always loads by itself.
+   */
   private async token(): Promise<string> {
     const { data } = await this.sb.auth.getSession();
     if (!data.session) throw new GatewayError("not signed in", 401, "signed_out");
+    const expiresAt = Number(data.session.expires_at ?? 0);
+    if (expiresAt > 0 && expiresAt * 1000 - Date.now() < TOKEN_REFRESH_MARGIN_MS) {
+      const fresh = await this.refreshToken();
+      if (fresh) return fresh;
+    }
     return data.session.access_token;
+  }
+
+  private refreshToken(): Promise<string | null> {
+    if (!this.refreshing) {
+      this.refreshing = this.sb.auth
+        .refreshSession()
+        .then(({ data, error }) => (!error && data.session ? data.session.access_token : null))
+        .finally(() => {
+          this.refreshing = null;
+        });
+    }
+    return this.refreshing;
   }
 
   private async userId(): Promise<string> {

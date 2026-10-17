@@ -711,7 +711,26 @@ function showMacFirstLaunchNotice() {
   }, 2000);
 }
 
+// ─── One copy at a time ────────────────────────────────────────────────────────
+// An update is installed over a running app, so the new copy can boot while the old
+// one is still alive. Both read the same stored sign-in, and the ticket that trades it
+// for a fresh one is only spendable once: whichever copy loses ends up presenting a
+// token the server no longer accepts, and the account cannot be read until the customer
+// signs out and back in. A second launch only wakes the window that is already open.
+const holdsSingleInstanceLock = app.requestSingleInstanceLock();
+if (!holdsSingleInstanceLock) app.quit();
+else {
+  app.on("second-instance", () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+}
+
 app.whenReady().then(() => {
+  if (!holdsSingleInstanceLock) return;
   createWindow();
   showMacFirstLaunchNotice();
   app.on("activate", () => {

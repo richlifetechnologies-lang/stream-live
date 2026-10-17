@@ -48,6 +48,10 @@ function looksInternal(text: string): boolean {
   if (/\b(23505|23503|23514|42703|42P01|22P02|40001)\b/.test(text)) return true;
   if (/does not exist|could not find the table|violates|null value in column|new row violates|relation\b|constraint\b|foreign key/i.test(text)) return true;
   if (/^(Stream Live|Stream Studio)\b/i.test(text)) return true; // our own internal throw prefix
+  // The server's own wording for a sign-in token it will not accept. It names the
+  // token format and tells the customer nothing they can act on, so it never reaches
+  // a screen — the page's plain sentence is used instead.
+  if (/\bJWT\b|JWS(?:Error|InvalidSignature)|invalid_grant|refresh token/i.test(text)) return true;
   if (/stack|\bat\s+\S+\.\S+\s+\(/.test(text)) return true;
   if (/\n\s{2,}/.test(text)) return true; // multi-line stack traces
   // GoTrue wraps anything the database refuses during sign-up (including a trigger
