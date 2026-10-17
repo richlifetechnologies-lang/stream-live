@@ -486,6 +486,24 @@
         </div>
         <div id="usageMsg"></div>
       </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Calls the app could not start — last 24 hours</h2>
+          <div class="row" style="align-items:center;gap:10px">
+            <span class="muted" id="faultWhen"></span>
+            <button id="refreshFaults">Refresh</button>
+          </div>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">What the customer's app saw when a call was refused. <b>engine</b> means the video line took the booking and then never produced a picture; <b>gateway</b> means the account itself was refused, and the reason is named in brackets. A row here is a call that was <b>not</b> billed.</p>
+        <div style="overflow:auto">
+          <table id="faultTable">
+            <thead><tr><th>When</th><th>Stage</th><th>Account</th><th>What came back</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="faultMsg"></div>
+      </div>
     </section>
 
     <!-- ══ TAB: DECART KEYS ══════════════════════════════════════════════════ -->
@@ -2188,7 +2206,7 @@
 
     $("asKey").innerHTML = KEY_ROWS.map((k) => `<option value="${k.id}">${esc(k.label || shortId(k.id))}</option>`).join("");
     stamp("poolWhen");
-    await Promise.all([loadKeyUsage(), loadAssignments()]);
+    await Promise.all([loadKeyUsage(), loadAssignments(), loadCallFailures()]);
   }
 
   function setChip(prefix, cls, text) {
@@ -2237,6 +2255,26 @@
       || '<tr><td colspan="7" class="muted">No key calls in the last 24 hours.</td></tr>';
   }
 
+  // The app's own account of a refused call. This is the only place the video line's
+  // raw answer is kept — the customer never sees it — so "the app said cannot start"
+  // from a support message can be read against a real row instead of guessed at.
+  async function loadCallFailures() {
+    const cutoff = new Date(Date.now() - 864e5).toISOString();
+    const { data, error } = await sb.from("call_failures")
+      .select("created_at, stage, user_id, detail")
+      .gt("created_at", cutoff).order("created_at", { ascending: false }).limit(200);
+    if (error) return msg("faultMsg", "Could not read the refused-call log: " + error.message);
+    msg("faultMsg", "");
+    stamp("faultWhen");
+    await emailsOf((data || []).map((r) => r.user_id));
+    $("faultTable").querySelector("tbody").innerHTML = (data || []).map((r) => `<tr>
+      <td class="muted">${when(r.created_at)}</td>
+      <td><span class="pill ${r.stage === "gateway" ? "warn" : "fail"}">${esc(r.stage)}</span></td>
+      <td class="muted">${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</td>
+      <td class="muted">${esc(r.detail || "")}</td></tr>`).join("")
+      || '<tr><td colspan="4" class="muted">No call has been refused in the last 24 hours.</td></tr>';
+  }
+
   async function loadAssignments() {
     const { data, error } = await sb.from("user_key_assignments").select("user_id, provider, key_id, created_at").order("created_at", { ascending: false });
     if (error) return msg("assignMsg", error.message);
@@ -2258,6 +2296,7 @@
   // exactly as it is.
   $("refreshKeys").onclick = () => loadKeys();
   $("refreshUsage").onclick = () => Promise.all([loadKeyUsage(), refreshKeyUsage()]);
+  $("refreshFaults").onclick = () => loadCallFailures();
 
   // A call bills its key window by window, so the "Today / cap" figure is the one
   // number on this page that moves while you are looking at it. Patching just that
@@ -2297,6 +2336,7 @@
       // on the same tick is safe — and it means a failover you are watching for
       // appears without a click. The key form above it is never touched.
       void loadKeyUsage();
+      void loadCallFailures();
     }
   }, 15_000);
 

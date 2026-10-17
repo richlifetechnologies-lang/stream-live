@@ -20,6 +20,11 @@ const REASON_COPY: Record<string, string> = {
   maintenance: "The service is being updated. Try again in a little while.",
   update_required: "This version of Stream Live is out of date. Update to keep going.",
   upstream_key: "Our AI service didn't answer. Try again in a minute — you weren't charged.",
+  // The engine took the call, never showed a picture, and the automatic retries didn't
+  // either. It says which step failed and says the one thing the customer needs to know
+  // before he presses Start again: that the failed attempts cost him nothing.
+  engine_no_answer: "The video line accepted your call and then never produced a picture, so we ended it and gave your minutes back. Nothing was used. Try again in a minute — if it keeps happening, tell your administrator, who can see exactly what the video service answered.",
+
   lease_expired: "We lost track of your call and ended it, so you weren't over-charged. Try again.",
   no_lease: "Your call was ended because its booking lapsed. Try starting again.",
   session_not_found: "We couldn't find your session any more, so the call stopped. Try again.",

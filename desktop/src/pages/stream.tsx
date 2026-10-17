@@ -6,12 +6,13 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia } from "../lib/gateway";
+import { gateway, deviceId, useAccount, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure } from "../lib/gateway";
 import { drainOf } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
+import { START_TRIES, classifyStartFailure, startFailureMessage, startRetryWaitMs, type StartFailure } from "../lib/start-retry";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
 import {
@@ -721,6 +722,7 @@ const _RELAY_WS    = `wss://fal.run/${_RELAY_APP}`;
 
 interface VideoSession { close(): void; send(d: Record<string, unknown>): void; }
 
+
 type VcamResult = { supported: boolean; active: boolean; ready: boolean; error: string | null };
 interface ElectronAPI {
   getDeviceId?: () => Promise<string>;
@@ -918,7 +920,7 @@ export default function StreamPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStarting, setIsStarting]  = useState(false);
   const [isClosing, setIsClosing]    = useState(false);
-  const [connStep, setConnStep]       = useState<"auth"|"engine"|null>(null);
+  const [connStep, setConnStep]       = useState<"auth"|"engine"|"retry"|null>(null);
   const [elapsed, setElapsed]         = useState(0);
   // Frames-per-second readout, shown below the video panel. Never on the panel:
   // that frame is what OBS and the calling apps capture. Updated straight into
@@ -1054,6 +1056,9 @@ export default function StreamPage() {
   const remoteStreamRef = useRef<MediaStream|null>(null);
   const isStartingRef   = useRef(false);
   const closingRef      = useRef(false);
+  // Set when he presses Cancel, or leaves the page, during the pause between two asks
+  // for a call. Without it a start he turned down would quietly open on its own.
+  const startCancelRef  = useRef(false);
   // Live-camera restart handles used by enumerateDevices auto-correct.
   const startCameraRef   = useRef<((deviceId?: string) => Promise<void>) | null>(null);
   const cameraReadyRef   = useRef(false);
@@ -1633,7 +1638,7 @@ export default function StreamPage() {
 
   // Route changes (e.g. opening Settings mid-stream) unmount this page. Without
   // this the fal WebSocket would stay open and keep billing in the background.
-  useEffect(() => { return () => { void teardownStream(); }; }, [teardownStream]);
+  useEffect(() => { return () => { startCancelRef.current = true; void teardownStream(); }; }, [teardownStream]);
 
   // ─── Stop the call when the countdown reaches zero ─────────────────────────
   // The gateway only re-prices the lease on the 45-second heartbeat, so left to
@@ -1662,26 +1667,25 @@ export default function StreamPage() {
   }, [isStreaming, account, teardownStream, toast, setLocation]);
 
   // ─── Start stream ──────────────────────────────────────────────────────────
-  const handleStartStream = useCallback(async () => {
-    if (isStartingRef.current || closingRef.current || isStreaming) return;
-    // The card's listening check holds the microphone for a few seconds; a call must never
-    // start while it has the device.
-    micCheckRef.current?.stop();
-    const needsVideo = activeTab !== "audio-only";
-    const needsVoice = activeTab !== "video-only" && vcEnabled;
-    const tabName: TabName = activeTab;
-
-    if (credsMissing) { setLocation(account.signedIn ? "/minutes" : "/account"); return; }
-    if (needsVideo && (!cameraReady || !localStreamRef.current)) {
-      toast({ title: "Camera not ready", description: "Enable your camera first.", variant: "destructive" }); return;
-    }
-
-    isStartingRef.current = true; setIsStarting(true); setConnStep("auth"); setConnStatus("connecting");
-
+  /**
+   * One ask for a call: open the metered lease, then the pipelines.
+   *
+   * Returns null when the call is on air, and a StartFailure when anything refused it.
+   * Nothing in here speaks to the customer — the caller decides whether to ask the
+   * engine again first, so the sentence he ends up reading matches the number of tries
+   * already spent on his behalf.
+   */
+  const attemptStart = useCallback(async (tabName: TabName, needsVideo: boolean, needsVoice: boolean): Promise<StartFailure | null> => {
+    // The gateway owns this from the moment startCall answers, and teardownStream()
+    // clears the page's copy of it before the failure reaches the caller — so it is
+    // held here too, for the record of what the video service answered.
+    let sessionId: string | null = null;
+    setConnStep("auth"); setConnStatus("connecting");
     try {
       // Open the metered lease first: nothing touches WebRTC until the gateway
       // confirms this account and bucket can pay for the call.
       const ticket = await gateway.startCall(tabName, await deviceId());
+      sessionId = ticket.sessionId;
       sessionIdRef.current = ticket.sessionId;
       beginLease(ticket);
 
@@ -1762,7 +1766,7 @@ export default function StreamPage() {
           },
           prompt, refImageB64,
         );
-        if (sessionGenRef.current !== gen) { session.close(); return; }
+        if (sessionGenRef.current !== gen) { session.close(); return null; }
         videoSessionRef.current = session;
       } else {
         // Audio-only: start mic preview
@@ -1810,28 +1814,79 @@ export default function StreamPage() {
       const t0 = Date.now();
       timerRef.current = setInterval(() => { setElapsed(Math.floor((Date.now() - t0) / 1000)); }, 1000);
       setIsStreaming(true);
+      return null;
 
     } catch (err) {
       // teardownStream gives back any prepaid chunk, so no separate refund call.
       void teardownStream();
-      if (err instanceof GatewayError) {
-        const msg = endReasonMessage(err.reason);
-        if (err.reason === "out_of_minutes") {
-          toast({ title: "Out of minutes", description: msg, variant: "destructive" });
-          setLocation("/minutes");
-        } else {
-          // A refused old build is the one case where we can fix it ourselves:
-          // ask the updater for the banner instead of leaving him stuck on a
-          // message with nowhere to go.
-          if (err.reason === "update_required") getElectronAPI()?.checkForUpdate?.();
-          toast({ title: "Cannot start", description: msg, variant: "destructive" });
-        }
-      } else {
-        toast({ title: "Cannot start", description: toUserMessage(err, "Could not start the call. Please try again."), variant: "destructive" });
+      // The lease was open and no picture arrived. This is the failure that used to end
+      // in "Could not start the call. Please try again." with nothing left behind: the
+      // engine's own words now go to the gateway's log table, and repeating the ask is
+      // what the measurements say actually gets a call through.
+      return classifyStartFailure(
+        err instanceof GatewayError ? err.reason : null,
+        needsVideo,
+        err instanceof Error ? err.message : String(err),
+        sessionId,
+      );
+    }
+  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation]);
+
+  /**
+   * Press of the Start button. Asks for a call, and when the video line accepts it and
+   * then dies — which is what happens to a call started right after another one closed —
+   * waits and asks again before anyone is told anything.
+   */
+  const handleStartStream = useCallback(async () => {
+    if (isStartingRef.current || closingRef.current || isStreaming) return;
+    // The card's listening check holds the microphone for a few seconds; a call must never
+    // start while it has the device.
+    micCheckRef.current?.stop();
+    const needsVideo = activeTab !== "audio-only";
+    const needsVoice = activeTab !== "video-only" && vcEnabled;
+
+    if (credsMissing) { setLocation(account.signedIn ? "/minutes" : "/account"); return; }
+    if (needsVideo && (!cameraReady || !localStreamRef.current)) {
+      toast({ title: "Camera not ready", description: "Enable your camera first.", variant: "destructive" }); return;
+    }
+
+    isStartingRef.current = true; setIsStarting(true);
+    startCancelRef.current = false;
+    try {
+      let last: StartFailure | null = null;
+      for (let i = 0; i < START_TRIES; i++) {
+        const failure = await attemptStart(activeTab, needsVideo, needsVoice);
+        if (!failure) return;
+        last = failure;
+        // Write it down while it is still true what the engine said.
+        if (failure.sessionId) reportCallFailure(failure.sessionId, failure.stage, failure.detail);
+        const waitMs = startRetryWaitMs(failure, i);
+        if (waitMs === null) break;
+        // The failed attempt ran a teardown, which released the page's "starting" flag;
+        // a wait is not an idle page, or a second press would open two calls.
+        isStartingRef.current = true;
+        setConnStep("retry");
+        await new Promise<void>(r => setTimeout(r, waitMs));
+        // Cancelled, or he left the page, while we waited. Starting his call after he
+        // said no to it is worse than the failure itself.
+        if (startCancelRef.current) return;
       }
-    } finally { isStartingRef.current = false; setIsStarting(false); }
+      const f = last;
+      if (!f) return;
+      if (f.reason === "out_of_minutes") {
+        toast({ title: "Out of minutes", description: endReasonMessage(f.reason), variant: "destructive" });
+        setLocation("/minutes");
+        return;
+      }
+      // A refused old build is the one case where we can fix it ourselves: ask the
+      // updater for the banner instead of leaving him stuck on a message with nowhere to go.
+      if (f.reason === "update_required") getElectronAPI()?.checkForUpdate?.();
+      toast({ title: "Cannot start", description: startFailureMessage(f), variant: "destructive" });
+    } finally {
+      isStartingRef.current = false; setIsStarting(false); setConnStep(null);
+    }
   }, [isStreaming, credsMissing, cameraReady, activeTab, selectedStyle, customPrompt, refImageB64,
-      selectedMicId, vcEnabled, vcVoiceId, teardownStream, toast, setLocation]);
+      selectedMicId, vcEnabled, vcVoiceId, attemptStart, teardownStream, toast, setLocation, account]);
 
   const handleStop = useCallback(() => teardownStream(), [teardownStream]);
 
@@ -2542,10 +2597,12 @@ export default function StreamPage() {
             <div>
               <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>Starting…</h3>
               <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
-                {connStep === "engine" ? "2/2 · Connecting to AI engine…" : "1/2 · Authorizing your account…"}
+                {connStep === "engine" ? "2/2 · Connecting to AI engine…"
+                  : connStep === "retry" ? "2/2 · The video line didn't answer. Asking again…"
+                  : "1/2 · Authorizing your account…"}
               </p>
             </div>
-            <button onClick={() => teardownStream()} style={{ padding: "10px 20px", borderRadius: 8, width: "100%", background: "transparent", border: "1px solid hsl(187 100% 52% / 0.25)", color: "hsl(187 100% 52% / 0.8)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            <button onClick={() => { startCancelRef.current = true; void teardownStream(); }} style={{ padding: "10px 20px", borderRadius: 8, width: "100%", background: "transparent", border: "1px solid hsl(187 100% 52% / 0.25)", color: "hsl(187 100% 52% / 0.8)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
               <X style={{ width: 14, height: 14 }} /> Cancel
             </button>
           </div>

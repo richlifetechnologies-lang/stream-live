@@ -172,6 +172,22 @@ function logAccount(note: string): void {
   try { api?.logNote?.(note); } catch { /* a log must never break the meter */ }
 }
 
+/**
+ * The video engine's own words about a call that never showed a picture.
+ *
+ * Until now that sentence existed only on the customer's screen for a second, and the
+ * app hides engine wording there by design — so a call that failed for a reason nobody
+ * could read left no trace at all, not on his panel and not in the database. This writes
+ * it to a table only he can read. It is fire-and-forget in every direction: a failure to
+ * report must never add a second problem to the one the customer already has.
+ */
+export function reportCallFailure(sessionId: string | null, stage: string, detail: string): void {
+  void gateway.raw
+    .rpc("sl_report_call_failure", { p_session_id: sessionId, p_stage: stage, p_detail: detail })
+    .then(() => undefined, () => undefined);
+  logAccount(`call failure reported (${stage}): ${detail}`);
+}
+
 export async function refreshBalances(): Promise<void> {
   if (!state.signedIn) return;
   try {
