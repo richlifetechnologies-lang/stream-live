@@ -134,6 +134,7 @@
       <button data-tab="accounts" class="on">Accounts</button>
       <button data-tab="machines">Machines</button>
       <button data-tab="topups">Top-ups</button>
+      <button data-tab="payments">Payments</button>
       <button data-tab="keys">Key pool</button>
       <button data-tab="decart">DeCart keys</button>
       <button data-tab="engines">Engines</button>
@@ -340,6 +341,31 @@
       </div>
     </section>
 
+<!-- ══ TAB: ONLINE PAYMENTS ══════════════════════════════════════════════ -->
+    <section id="tab-payments" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Online payments</h2>
+          <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="payAttention" /> Needs attention only</label></div>
+          <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="payOpen" /> Take payments on the buy page</label></div>
+          <button id="payRefresh">Refresh</button>
+        </div>
+        <div class="row" style="align-items:center;gap:8px;margin:0 0 8px;flex-wrap:wrap">
+          <span class="muted">Where a customer pays you online:</span>
+          <a id="payPageUrl" href="#" target="_blank" rel="noopener" style="font-size:12.5px">not live yet</a>
+          <button id="payPageCopy" disabled>Copy address</button>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">Every order the buy page opened — by card or by mobile money — lands here. <span class="pill ok">credited</span> means the money arrived <b>and the minutes are already in that account</b>: there is nothing to approve and pressing anything else would pay the customer twice. Anything else is money that has not become minutes yet, and the last column says why.</p>
+        <div id="payTotals" class="muted" style="margin:0 0 10px"></div>
+        <div style="overflow:auto">
+          <table id="payTable">
+            <thead><tr><th>When</th><th>Who paid</th><th>Package</th><th style="text-align:right">Amount</th><th>By</th><th>Status</th><th>Reference</th><th>Minutes delivered</th><th>If it stopped</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="payMsg"></div>
+      </div>
+    </section>
     <!-- ══ TAB: KEY POOL ═══════════════════════════════════════════════════ -->
     <section id="tab-keys" class="hidden">
       <div class="card">
@@ -1046,6 +1072,7 @@
     accounts: [loadAccounts],
     machines: [loadMachines],
     topups: [loadRequests],
+    payments: [loadPayments],
     keys: [loadKeys],
     decart: [loadKeys, loadSupply],
     split: [loadAccounts],
@@ -1735,6 +1762,40 @@
     const rows = data || [];
     await emailsOf(rows.map((r) => r.user_id));
 
+    // Has the website already taken this money? A buyer who pays on the buy page and
+    // then presses "ask for minutes" for the same purchase is the one way this system
+    // can pay out twice — once automatically, once by your hand. The approve button
+    // will refuse the exact match; the row says so before you reach for it.
+    const { data: ONLINE } = await sb.from("payments")
+      .select("reference, paystack_id, status, email, user_id, amount, channel, credited_at, created_at")
+      .in("status", ["pending", "paid", "credited"])
+      .order("created_at", { ascending: false })
+      .limit(300);
+    const paidByRef = {};   // an online order, under every name its reference goes by
+    const paidByUser = {};  // the newest online payment that reached each account
+    const online = ONLINE || [];
+    online.forEach((p) => {
+      if (p.reference) paidByRef[String(p.reference).trim().toLowerCase()] = p;
+      if (p.paystack_id) paidByRef[String(p.paystack_id).trim().toLowerCase()] = p;
+      if (p.user_id && p.status === "credited" && !paidByUser[p.user_id]) paidByUser[p.user_id] = p;
+    });
+    function gatewayFlag(r) {
+      const typed = String(r.payment_reference || "").trim().toLowerCase();
+      const exact = typed ? paidByRef[typed] : null;
+      if (exact) {
+        return exact.status === "credited"
+          ? '<div class="pill no">this reference is a paid website order — approving it twice-pays</div>'
+          : '<div class="pill pending">Paystack already has this money — reject and let it land</div>';
+      }
+      const recent = r.user_id ? paidByUser[r.user_id] : null;
+      if (recent && Date.now() - new Date(recent.credited_at || recent.created_at).getTime() < 24 * 3600000) {
+        return `<div class="muted" style="color:#facc15">this account paid ${ghs(recent.amount)} by `
+          + (PAY_WAY[recent.channel] || recent.channel || "the website") + " "
+          + payAgo(recent.credited_at || recent.created_at) + " — check this request is separate money</div>";
+      }
+      return "";
+    }
+
     const { count } = await sb.from("credit_requests").select("id", { count: "exact", head: true }).eq("status", "pending");
     setTabLabel("topups", (count ? `Top-ups (${count})` : "Top-ups"));
 
@@ -1746,7 +1807,7 @@
         <td>${MOD_LABEL[r.modality]}</td>
         <td class="mono" style="text-align:right">${mins(r.minutes)}</td>
         <td style="text-align:right">${open ? `<input data-f="grant" type="number" min="0" step="0.5" value="${N(r.minutes)}" style="max-width:90px;text-align:right" />` : `<span class="mono">${mins(r.minutes)}</span>`}</td>
-        <td class="muted">${esc(r.payment_channel || "—")}<div class="muted">${esc(r.payment_reference || "")}</div></td>
+        <td class="muted">${esc(r.payment_channel || "—")}<div class="muted">${esc(r.payment_reference || "")}</div>${open ? gatewayFlag(r) : ""}</td>
         <td>${open ? `<input data-f="note" value="" placeholder="optional admin note" />` : `<span class="muted">${esc(r.note || "—")}</span>`}</td>
         <td><span class="pill ${r.status}">${r.status}</span></td>
         <td style="white-space:nowrap">${open ? `<button data-req-act="approve" data-id="${r.id}" class="primary">Approve</button> <button data-req-act="reject" data-id="${r.id}" class="danger">Reject</button>` : ""}</td></tr>`;
@@ -1772,6 +1833,155 @@
       await Promise.all([loadRequests(), loadAccounts(), CUR && openAccount(CUR.user_id)]);
     } catch (err) { msg("reqMsg", err.message); }
   });
+
+  // ══ ONLINE PAYMENTS (PAYSTACK) ═══════════════════════════════════════════
+  // The buy page's money, in one list. This tab never changes anything: a payment
+  // credits itself, and the only action here is looking.
+  const PAY_WAY = { card: "Card", mobile_money: "Mobile money", bank: "Bank transfer", ussd: "USSD", qr: "QR code", other: "Other" };
+  const PAY_PILL = { credited: "ok", paid: "pending", pending: "pending", failed: "fail", refunded: "n" };
+
+  // Paystack speaks pesewas, the panel speaks cedis, and the buy page shows cedis at
+  // the rate stored on the gateway. Amounts here are what Paystack actually took, so
+  // this is the figure to reconcile the till against — not the price on the page.
+  const ghs = (pesewas) => "GH\u20B5" + (N(pesewas) / 100).toFixed(2);
+
+  function payAgo(iso) {
+    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    if (!Number.isFinite(m) || m < 1) return "just now";
+    if (m < 60) return m + " min ago";
+    if (m < 1440) return Math.round(m / 60) + " h ago";
+    return Math.round(m / 1440) + " d ago";
+  }
+
+  // What "needs attention" means, in the order it matters:
+  //  * test money — a test key never pays anybody, and a row like this is a dry run
+  //  * paid but not credited — Paystack has the money, the account does not have minutes
+  //  * pending and stale — a buyer who opened the checkout and never finished
+  //  * failed or refunded — he tried, or you gave it back
+  //  * credited to nobody — the email he typed has no account on this gateway
+  function payNeedsAttention(p) {
+    if (p.paystack_domain === "test") return true;
+    if (p.status === "paid") return true;
+    if (p.status === "pending") return Date.now() - new Date(p.created_at).getTime() > 3 * 60000;
+    if (p.status === "failed" || p.status === "refunded") return true;
+    if (p.status === "credited" && !p.user_id) return true;
+    return false;
+  }
+
+  function payDelivered(p) {
+    const grants = p.credit_result && p.credit_result.grants;
+    if (!Array.isArray(grants) || !grants.length) return "";
+    return grants
+      .map((g) => mins(g.minutes) + " " + (MOD_LABEL[g.modality] || g.modality))
+      .join(" + ");
+  }
+
+  // The address a customer types into a browser to pay you. It is not stored on this
+  // panel and never typed by you: the payment service already knows it, because it is
+  // the page the buyer is sent back to once Paystack has the money. Reading it from
+  // there means this line can never disagree with where payments actually land — if
+  // the page moves, the new address appears here by itself.
+  let PAY_PAGE_URL = "";
+  async function showPayPageLink() {
+    if (PAY_PAGE_URL) return;
+    const a = $("payPageUrl");
+    try {
+      const res = await fetch(SUPABASE_URL + "/functions/v1/paystack-checkout", {
+        headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
+      });
+      const body = await res.json().catch(() => ({}));
+      const page = String(body.page || "");
+      if (!/^https:\/\/[^\s]+$/.test(page)) throw new Error("no address");
+      PAY_PAGE_URL = page;
+      a.href = page;
+      a.textContent = page;
+      $("payPageCopy").disabled = false;
+    } catch (e) {
+      a.textContent = "not live yet";
+    }
+  }
+
+  async function loadPayments() {
+    void showPayPageLink();
+    const onlyAttention = $("payAttention").checked;
+    const [{ data, error }, plans, cfgRes] = await Promise.all([
+      sb.from("payments").select("*").order("created_at", { ascending: false }).limit(300),
+      sb.from("plans").select("id, name").then((r) => r.data || []),
+      sb.from("app_config").select("paystack_enabled").eq("id", 1).maybeSingle(),
+    ]);
+    if (error) return msg("payMsg", error.message);
+    // maybeSingle answers { data, error } — the row is inside data, and reading the
+    // wrapper's own property is how this line first shipped wrong.
+    const open = cfgRes && cfgRes.data && cfgRes.data.paystack_enabled === true;
+    if (document.activeElement !== $("payOpen")) $("payOpen").checked = open;
+    const NAMES = {};
+    (plans || []).forEach((p) => { NAMES[p.id] = p.name; });
+
+    const all = data || [];
+    const need = all.filter(payNeedsAttention);
+    setTabLabel("payments", need.length ? `Payments (${need.length})` : "Payments");
+
+    const rows = onlyAttention ? need : all;
+    const took = all.filter((p) => p.status === "credited" || p.status === "paid");
+    const cents = took.reduce((s, p) => s + N(p.amount), 0);
+    $("payTotals").textContent = all.length
+      ? `${all.length} order(s) on file · ${ghs(cents)} taken or owed across ${took.length} successful payment(s) · ${need.length} need your attention`
+      : "No online order has been opened yet.";
+
+    $("payTable").querySelector("tbody").innerHTML = rows.map((p) => {
+      const attention = payNeedsAttention(p);
+      // The email on the row is the one the buyer typed at checkout, so it needs no
+      // lookup — and it is what you reconcile against when an account is missing.
+      const who = `<b>${esc(p.email || "no email")}</b>`
+        + (p.user_id ? "" : '<div class="pill none">no account for this email</div>');
+      const way = `<span>${esc(PAY_WAY[p.channel] || p.channel || "—")}</span>`
+        + (p.paystack_domain === "test" ? ' <span class="pill n" title="opened with a test key — this is not real money">test</span>' : "");
+      const delivered = p.status === "credited"
+        ? `<span class="pill ok">${esc(payDelivered(p) || "minutes granted")}</span>`
+        : p.status === "paid"
+          ? '<span class="pill pending">on its way</span>'
+          : '<span class="muted">—</span>';
+      const why = p.status === "credited"
+        ? `<span class="muted">${payAgo(p.credited_at || p.paid_at || p.created_at)}</span>`
+        : `<span class="muted">${esc(p.note || "")}${p.note ? "" : `order opened ${payAgo(p.created_at)}`}</span>`;
+      return `<tr${attention ? ' style="background:#1c1a10"' : ""}>
+        <td class="muted">${when(p.created_at)}</td>
+        <td>${who}</td>
+        <td>${esc(NAMES[p.plan_id] || p.plan_id || "unknown package")}</td>
+        <td class="mono" style="text-align:right">${ghs(p.amount)}</td>
+        <td>${way}</td>
+        <td><span class="pill ${PAY_PILL[p.status] || "n"}">${esc(p.status)}</span></td>
+        <td class="mono" style="font-size:11px">${esc(p.reference)}</td>
+        <td>${delivered}</td>
+        <td>${why}</td></tr>`;
+    }).join("") || `<tr><td colspan="9" class="muted">${onlyAttention ? "Nothing needs your attention." : "No online payment has been opened yet."}</td></tr>`;
+    msg("payMsg", "");
+  }
+  $("payRefresh").onclick = loadPayments;
+  $("payAttention").onchange = loadPayments;
+  // The one switch that decides whether real money may be taken. It is on this tab and
+  // nowhere else because this is the tab that shows what each payment did: you open it
+  // when you want to be paid, and you close it the moment something looks wrong.
+  // Closing it stops new checkouts only — a payment already taken stays taken, and an
+  // order that is paid but not yet credited still credits itself.
+  $("payOpen").onchange = async () => {
+    const want = $("payOpen").checked;
+    $("payOpen").disabled = true;
+    const { error } = await sb.from("app_config").update({ paystack_enabled: want }).eq("id", 1);
+    $("payOpen").disabled = false;
+    if (error) { $("payOpen").checked = !want; return msg("payMsg", error.message); }
+    msg("payMsg", want
+      ? "Open. The buy page now charges real money for every package that carries minutes and a price, and each payment credits that customer by itself."
+      : "Closed. The buy page now refuses every payment and tells the customer to pay you another way. Nothing already paid is undone, and a payment that is on its way still lands.", "ok");
+  };
+  $("payPageCopy").onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(PAY_PAGE_URL);
+      msg("payMsg", "Copied. A customer opens that address, types the email their account was made with, picks card or mobile money, and the minutes land by themselves — no request to file and nothing for you to approve.", "ok");
+    } catch (e) {
+      msg("payMsg", "The browser would not let the page copy it — open the address and copy it from the address bar instead.");
+    }
+  };
 
   // ══ KEY POOL ════════════════════════════════════════════════════════════
   // admin_key_health is the only source: it carries a last-4 tail per provider,

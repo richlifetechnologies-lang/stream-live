@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Stream Live — buy minutes</title>
+<meta name="description" content="Pay by card or by Ghana mobile money — MTN MoMo, Telecel Cash, AT Money — and your minutes are added to your Stream Live account straight away." />
+<style>
+  :root {
+    --ink: #060a18; --panel: #0a1026; --line: #1b2444; --text: #e8eefc;
+    --muted: #94a3c8; --cyan: #3ec6ff; --good: #4ade80; --bad: #fb7185;
+  }
+  * { box-sizing: border-box }
+  body { margin: 0; background: var(--ink); color: var(--text);
+    font: 16px/1.65 system-ui, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 780px; margin: 0 auto; padding: 40px 20px 80px }
+  h1 { font-size: 28px; margin: 0 0 6px }
+  h2 { font-size: 19px; margin: 0 0 10px }
+  h3 { font-size: 14px; margin: 0 0 8px }
+  p.lede { color: var(--muted); margin: 0 0 28px }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 14px }
+  .pkgs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)) }
+  .pkg { cursor: pointer; text-align: left; color: inherit; font: inherit; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px }
+  .pkg:hover { border-color: var(--cyan) }
+  .pkg.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset }
+  .pkg .name { font-weight: 700 }
+  .pkg .price { font-size: 26px; font-weight: 800; margin: 8px 0 2px }
+  .pkg .price span { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 6px }
+  .pkg .blurb { color: var(--muted); font-size: 13px; margin: 2px 0 0 }
+  .pkg .mins { border: 1px solid #1b2444; background: #070d1e; border-radius: 10px; padding: 10px 12px; margin-top: 12px }
+  .pkg .ml { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px }
+  .pkg .mm { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; margin: 4px 0 }
+  .pkg .mm b { font-weight: 700 }
+  .pkg ul { margin: 12px 0 0; padding-left: 18px; font-size: 12.5px; color: #cfe3ff }
+  .pkg .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px }
+  .pkg .tags span { border: 1px solid var(--line); background: #070d1e; border-radius: 999px;
+    padding: 2px 9px; font-size: 10.5px; color: var(--muted) }
+  .ways { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) }
+  .way { cursor: pointer; text-align: left; color: inherit; font: inherit; background: #070d1e;
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px }
+  .way:hover { border-color: var(--cyan) }
+  .way.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset }
+  .way b { display: block; font-size: 15px }
+  .way small { display: block; color: var(--muted); font-size: 12.5px; line-height: 1.45; margin-top: 3px }
+  label { display: block; color: var(--muted); font-size: 13.5px; margin: 0 0 6px }
+  input { width: 100%; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line);
+    background: #070d1e; color: var(--text); font: inherit }
+  input:focus { outline: none; border-color: var(--cyan) }
+  button.go { width: 100%; margin-top: 14px; padding: 14px 18px; border: 0; border-radius: 11px;
+    background: linear-gradient(90deg, var(--cyan), #1b3ff2); color: #031020; font-weight: 800;
+    font-size: 16px; cursor: pointer }
+  button.go:disabled { opacity: .5; cursor: default }
+  .note { border-left: 3px solid var(--cyan); padding: 12px 14px; background: var(--panel);
+    border-radius: 10px; color: var(--muted); font-size: 14px; margin: 18px 0 }
+  .err { color: var(--bad); font-size: 14.5px; margin-top: 10px; min-height: 20px }
+  .ok  { color: var(--good) }
+  .muted { color: var(--muted) }
+  a { color: var(--cyan) }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Buy minutes</h1>
+  <p class="lede">Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.</p>
+
+  <div id="status"></div>
+
+  <div id="buy" hidden>
+    <h3>1. Choose a package</h3>
+    <div class="pkgs" id="pkgs"></div>
+
+    <div class="card" style="margin-top:16px">
+      <h3>2. How would you like to pay?</h3>
+      <div class="ways" id="ways"></div>
+
+      <h3 style="margin-top:20px">3. The email address your Stream Live account was created with</h3>
+      <label for="email">Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.</label>
+      <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
+
+      <button class="go" id="go" disabled>Choose a package above</button>
+      <div class="err" id="err"></div>
+    </div>
+
+    <p class="muted" style="font-size:13.5px" id="rate"></p>
+    <p class="muted" style="font-size:13.5px">
+      Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it.
+      With mobile money, Paystack sends a prompt to the phone number you give and the payment goes when you approve
+      it. Something wrong? <a href="https://t.me/rich_life2k15">Ask for help</a> and quote your reference.
+    </p>
+  </div>
+</div>
+
+<script>
+const CHECKOUT = "https://onhanfathvfkkliayvrn.supabase.co/functions/v1/paystack-checkout";
+const $ = (id) => document.getElementById(id);
+let chosen = null;      // the package card that is switched on
+let method = null;      // "card" or "mobile_money"
+let ways = [];          // what the seller has open, from the server
+
+// The panel's own vocabulary, copied rather than re-invented so the buyer reads the
+// same words in both places.
+const MOD_LABEL = { video: "Video Call", audio: "Audio Call", video_audio: "Video + Audio" };
+const FEATURE_LABEL = { video: "Video calls", voice: "Voice / audio", portrait_obs: "Portrait OBS output" };
+const MODS = ["video", "audio", "video_audio"];
+const minutesOf = (p) => MODS.map((m) => [m, Number(p[m + "_minutes"] || 0)]).filter(([, v]) => v > 0);
+
+// Two decimals, the way the panel writes money.
+const money = (pesewas) => "GH₵" + (Number(pesewas) / 100).toFixed(2);
+
+const WAY_TEXT = {
+  card: { title: "Debit or credit card", sub: "Visa, Mastercard or Verve. You type the card on Paystack's own screen." },
+  mobile_money: { title: "Mobile money", sub: "MTN MoMo, Telecel Cash (the old Vodafone Cash) or AT Money — whichever network you use. Paystack sends a prompt to your phone and the payment goes when you approve it." },
+};
+const WAY_NAME = { card: "card", mobile_money: "mobile money" };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function api(path) {
+  const res = await fetch(CHECKOUT + path, { headers: { "Content-Type": "application/json" } });
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body && body.error ? body.error : "the payment service did not answer");
+  return body;
+}
+
+async function post(path, init) {
+  const res = await fetch(CHECKOUT + path, init);
+  const body = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(body && body.error ? body.error : "the payment service did not answer");
+  return body;
+}
+
+function show(html) { $("status").innerHTML = html; }
+
+/**
+ * One card, painted the way the panel's Plans tab paints a package: name, price,
+ * the short line under it, "Minutes in this package", the list of what is included,
+ * then the feature tags and the device count. The only difference he asked for is
+ * the price: cedis instead of dollars.
+ */
+function cardHtml(p) {
+  const mods = minutesOf(p);
+  const tags = [...(p.features || []), null].map((f) =>
+    f ? "<span>" + esc(FEATURE_LABEL[f] || f) + "</span>"
+      : "<span>" + (Number(p.max_devices || 1) === 1 ? "1 device" : Number(p.max_devices || 1) + " devices") + "</span>");
+  return '<div class="name">' + esc(p.name || "Untitled package") + "</div>"
+    + '<div class="price">' + money(p.price_ghp) + "<span>GHS</span></div>"
+    + (p.blurb ? '<div class="blurb">' + esc(p.blurb) + "</div>" : "")
+    + (mods.length
+        ? '<div class="mins"><p class="ml">Minutes in this package</p>'
+          + mods.map(([m, v]) => '<div class="mm"><span>' + MOD_LABEL[m] + "</span><b>"
+            + Number(v).toLocaleString("en-US") + " min</b></div>").join("") + "</div>"
+        : '<div class="blurb">No minutes attached — ask before buying this one.</div>')
+    + ((p.includes || []).length ? "<ul>" + p.includes.map((l) => "<li>" + esc(l) + "</li>").join("") + "</ul>" : "")
+    + '<div class="tags">' + tags.join("") + "</div>";
+}
+
+/** Once a package and a way are both switched on, the button says exactly what it will do. */
+function refreshGo() {
+  const go = $("go");
+  if (!chosen) { go.disabled = true; go.textContent = "Choose a package above"; return; }
+  if (!method) { go.disabled = true; go.textContent = "Choose how you want to pay"; return; }
+  go.disabled = false;
+  go.textContent = "Pay " + money(chosen.price_ghp) + " by " + WAY_NAME[method];
+}
+
+function renderWays() {
+  $("ways").innerHTML = ways.map((c) =>
+    '<button class="way" data-way="' + esc(c) + '"><b>' + esc(WAY_TEXT[c].title) + "</b><small>"
+    + esc(WAY_TEXT[c].sub) + "</small></button>"
+  ).join("");
+  $("ways").querySelectorAll(".way").forEach((node) => {
+    node.onclick = () => {
+      method = node.dataset.way;
+      $("ways").querySelectorAll(".way").forEach((n) => n.classList.toggle("on", n === node));
+      $("err").textContent = "";
+      refreshGo();
+    };
+  });
+  // One way open is not a choice, so the page does not make the buyer click it.
+  if (ways.length === 1) {
+    const only = $("ways").querySelector('.way[data-way="' + ways[0] + '"]');
+    if (only) only.onclick();
+  }
+}
+
+async function renderPackages() {
+  let data;
+  try { data = await api(""); }
+  catch (e) { return show('<div class="card"><h2>Payment is not available right now</h2><p class="muted">' + e.message + "</p></div>"); }
+
+  if (!data.enabled || !data.packages.length) {
+    return show('<div class="card"><h2>Nothing is on sale online yet</h2><p class="muted">Minutes can still be added to ' +
+      'your account by the seller — use the contact details inside the app.</p></div>');
+  }
+  if (data.sample) {
+    show('<div class="card"><b>This is the local test page.</b> <span class="muted">The packages below are sample ' +
+      'figures, not the seller\'s real catalogue. On the live page the cards come straight from the Plans list.</span></div>');
+  }
+
+  ways = Array.isArray(data.channels) && data.channels.length ? data.channels : ["card"];
+
+  $("pkgs").innerHTML = data.packages.map((p) =>
+    '<button class="pkg" data-id="' + esc(p.id) + '">' + cardHtml(p) + "</button>"
+  ).join("");
+  const nodes = $("pkgs").querySelectorAll(".pkg");
+  nodes.forEach((node, i) => {
+    const p = data.packages[i];
+    node.onclick = () => {
+      chosen = p;
+      nodes.forEach((n) => n.classList.toggle("on", n === node));
+      $("err").textContent = "";
+      refreshGo();
+    };
+  });
+
+  renderWays();
+  $("rate").textContent = "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis " +
+    "at GH₵" + Number(data.rate || 12) + " to the dollar.";
+  $("buy").hidden = false;
+}
+
+// After Paystack takes the payment it sends the buyer back here with ?check=<reference>.
+async function follow(reference) {
+  $("buy").hidden = true;
+  show('<div class="card"><h2>Confirming your payment</h2><p class="muted" id="line">Waiting for Paystack to confirm the money…</p></div>');
+  for (let i = 0; i < 24; i++) {
+    let s;
+    try { s = await api("?check=" + encodeURIComponent(reference)); } catch (e) { s = null; }
+    if (s && s.status === "credited") {
+      return show('<div class="card"><h2 class="ok">Paid — your minutes are in</h2><p>' + esc(s.message) +
+        '</p><p class="muted">Open Stream Live and sign in with the same email address to use them.</p>' +
+        '<p class="muted">Do not send a top-up request for this purchase — the minutes were added the moment the payment cleared, and asking again does not add them twice.</p></div>');
+    }
+    if (s && s.status === "failed") {
+      return show('<div class="card"><h2 class="err">That payment did not complete</h2><p>' + esc(s.message) +
+        '</p><p class="muted">Nothing was charged. Pick a package and try again, or ask for help below.</p></div>');
+    }
+    const line = $("line");
+    if (line) line.textContent = (s && s.message ? s.message : "Still confirming…") +
+      " (this page checks every few seconds. If you paid by mobile money, approve the prompt on your phone.)";
+    await new Promise((r) => setTimeout(r, 5000));
+  }
+  show('<div class="card"><h2>Your payment reached us</h2><p class="muted">It is taking longer than usual to appear. ' +
+    'Do not pay again, and do not send a top-up request for it either — the payment credits itself as soon as Paystack confirms. ' +
+    'Message the seller and quote reference <b>' + esc(reference) + "</b> if it is still missing in a few minutes.</p></div>");
+}
+
+$("go").onclick = async () => {
+  const email = $("email").value.trim();
+  if (!email) { $("err").textContent = "Type your account email address first."; return; }
+  $("go").disabled = true;
+  $("err").textContent = "";
+  try {
+    const r = await post("", { method: "POST", body: JSON.stringify({ email, plan_id: chosen.id, method }) });
+    location.href = r.checkout_url;
+  } catch (e) {
+    $("err").textContent = e.message;
+    $("go").disabled = false;
+  }
+};
+
+const check = new URLSearchParams(location.search).get("check");
+if (check && /^sl-[0-9a-f]{12,24}$/.test(check)) follow(check); else renderPackages();
+</script>
+</body>
+</html>
