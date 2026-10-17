@@ -76,6 +76,37 @@
   .presult.show { display: block; }
   .presult.ok { background: #0d3320; color: #4ade80; border: 1px solid #14532d; }
   .presult.fail { background: #3a1620; color: #ffb3c1; border: 1px solid #6b2233; }
+  /* Plans tab: a package row, its switch, its inline editor and the buyer preview. */
+  .switch { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px;
+            border: 1px solid #24303d; background: #16202b; color: #8aa0b2; font-size: 11px; font-weight: 700; }
+  .switch .dot { width: 8px; height: 8px; border-radius: 50%; background: #6b8296; }
+  .switch.on { background: #0d3320; border-color: #14532d; color: #4ade80; }
+  .switch.on .dot { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,.55); }
+  /* Ten columns of money will not fit a narrow window; the scroller on #plansList
+     lets it slide sideways instead of crushing the figures into unreadable strips.
+     The editor is deliberately outside that scroller, so it is never the part cut off. */
+  #plansList table { min-width: 960px; }
+  tr.planoff td { opacity: .55; }
+  tr.planoff td.planhold { opacity: 1; }
+  .num { font-family: ui-monospace, monospace; text-align: right; white-space: nowrap; }
+  .pname { font-weight: 700; font-size: 13px; }
+  .pblurb { color: #6b8296; font-size: 11.5px; margin-top: 2px; }
+  .ptags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+  .ptag { font-size: 10px; padding: 2px 7px; border-radius: 999px; background: #16202b; color: #8aa0b2; border: 1px solid #24303d; white-space: nowrap; }
+  .prev { border: 1px solid #24303d; border-radius: 14px; padding: 14px; background: #0e141b; }
+  .prev .ph { font-size: 10px; font-weight: 700; color: #35e0e6; text-transform: uppercase; letter-spacing: .1em; }
+  .prev .pp { font-size: 26px; font-weight: 800; margin: 6px 0 0; font-family: ui-monospace, monospace; }
+  .prev .pp span { font-size: 11px; color: #6b8296; font-weight: 600; margin-left: 5px; font-family: inherit; }
+  .prev .pb { font-size: 12.5px; color: #8aa0b2; margin: 6px 0 0; }
+  .prev .pm { border: 1px solid #1d2733; background: #0b0f14; border-radius: 10px; padding: 8px 10px; margin-top: 10px; }
+  .prev .pml { font-size: 9.5px; color: #6b8296; text-transform: uppercase; letter-spacing: .1em; margin: 0 0 5px; }
+  .prev .pmm { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; margin: 3px 0; }
+  .prev ul { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 5px; }
+  .prev li { font-size: 12.5px; color: #cfe6ef; display: flex; gap: 7px; }
+  .prev li::before { content: "\2713"; color: #35e0e6; }
+  .prev .pt { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #1d2733; }
+  .prev .pt span { font-size: 10.5px; padding: 3px 9px; border-radius: 999px; background: #16202b; color: #9fc4d2; border: 1px solid #24303d; }
+  .dirty { font-size: 11px; color: #facc15; font-weight: 700; }
 </style>
 </head>
 <body>
@@ -772,11 +803,17 @@
     <section id="tab-plans" class="hidden">
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Packages</h2>
-          <button id="addPlan">+ New plan</button>
+          <h2 style="font-size:14px;margin:0">Packages you sell</h2>
+          <div class="btns" style="align-items:center">
+            <button id="plansReload">Refresh</button>
+            <button id="addPlan" class="primary">+ New package</button>
+          </div>
         </div>
-        <p class="muted" style="margin:6px 0 12px">This is the catalogue the user reads in the desktop app before paying you: name, USD price, the minutes attached to each of the three buckets, the one-line pitch and what the buyer gets. Setting a number here does not credit anyone — you still grant the minutes on the Accounts tab, and <b>Credit this package</b> does that in one click.</p>
-        <div id="plansList"></div>
+        <p class="muted" id="plansSummary" style="margin:8px 0 0"></p>
+        <p class="muted" style="margin:6px 0 12px">One line per package: what the buyer pays, the minutes they get, what those minutes cost you in AI time, and how many accounts hold it. <b>Edit</b> opens that package so you can change it and see it exactly as the buyer does; the switch in the "On sale" column puts a package on the buyer's screen or takes it off, immediately, without opening anything.</p>
+        <div id="plansList" style="overflow:auto"></div>
+        <div id="plansEditor"></div>
+        <div id="plansNew" class="hidden"></div>
         <div id="plansMsg"></div>
       </div>
     </section>
@@ -2570,107 +2607,408 @@
   $("poolRefresh").onclick = loadPool;
 
   // ══ PLANS ═══════════════════════════════════════════════════════════════
-  // One card per package: this is the copy the desktop app shows the buyer, so
-  // price is entered in dollars and stored in cents (plans.price_cents, USD).
-  async function loadPlans() {
+  // The catalogue a buyer reads, laid out as a catalogue: one row per package, with the
+  // buyer's figures (price, minutes, what it unlocks) and the owner's figures (what those
+  // minutes cost in AI time, what is left of the price) on the same line. Editing opens
+  // under the row and paints the package exactly as the desktop app will paint it.
+  // Price is entered in dollars and stored in cents (plans.price_cents, USD), because
+  // cents is how the app prints it and dollars is how he thinks.
+  let PLAN_EDIT = null;     // package id whose editor is open
+  let PLAN_DIRTY = false;   // that editor holds changes that were never saved
+  let PLAN_HOLD = {};       // package id -> how many accounts hold it
+  let PLAN_MINCOST = null;  // bucket -> $ per SOLD minute, from the live rates
+  let PLAN_TARGET = NaN;    // the profit percent he set on the Prices tab
+
+  // The Prices tab's arithmetic, applied to a whole package, and read from the stored
+  // rates rather than from that tab's input boxes so the two can never disagree:
+  // $ per real airtime minute divided by the live burn multiplier is $ per SOLD minute,
+  // which is the unit a package actually sells.
+  async function planRates() {
+    if (!RATE_ROWS.length) { try { await loadRates(); } catch { /* the cost columns simply stay blank */ } }
+    const { data } = await sb.from("billing_config")
+      .select("lucy_video_per_sec_cost, voice_cloning_per_sec_cost, profit_margin_percent")
+      .eq("id", 1).maybeSingle();
+    const video = N(data?.lucy_video_per_sec_cost, PG_DEFAULT.falMin / 60) * 60;
+    const voice = N(data?.voice_cloning_per_sec_cost, PG_DEFAULT.voiceMin / 60) * 60;
+    const perReal = { video, audio: voice, video_audio: video + voice };
+    const eff = effectiveRates(), out = {};
+    MODALITIES.forEach((m) => { out[m] = perReal[m] / Math.max(0.05, N(eff[m]?.multiplier, 1)); });
+    PLAN_MINCOST = out;
+    PLAN_TARGET = data ? N(data.profit_margin_percent, NaN) : NaN;
+  }
+
+  const planCost = (v) => (PLAN_MINCOST ? MODALITIES.reduce((s, m) => s + N(PLAN_MINCOST[m]) * N(v.minutes[m]), 0) : null);
+
+  async function loadPlans(force) {
+    // The panel re-reads the open tab once a minute. On this tab that would rebuild every
+    // field, so while an editor holds unsaved typing the re-read is refused outright —
+    // losing half-written prices is worse than a stale row.
+    if (PLAN_DIRTY) {
+      if (force) msg("plansMsg", "There are unsaved changes on the open package. Press Save, or Discard, first.", "err");
+      return;
+    }
     const { data, error } = await sb.from("plans")
       .select("id, name, price_cents, blurb, includes, max_devices, features, active, video_minutes, audio_minutes, video_audio_minutes")
       .order("price_cents", { ascending: true });
-    if (error) return console.error(error);
+    if (error) return msg("plansMsg", error.message, "err");
     PLAN_ROWS = data || [];
-    $("plansList").innerHTML = PLAN_ROWS.map(planCard).join("")
-      || '<p class="muted">No plans yet — add one above.</p>';
+    // Who holds what. A read this login is not allowed to make is not worth an error on a
+    // tab whose job is the catalogue, so the column just prints a dash.
+    PLAN_HOLD = {};
+    try {
+      const { data: subs, error: se } = await sb.from("subscriptions").select("plan_id");
+      if (!se) (subs || []).forEach((s) => { if (s.plan_id) PLAN_HOLD[s.plan_id] = (PLAN_HOLD[s.plan_id] || 0) + 1; });
+    } catch { PLAN_HOLD = {}; }
+    try { await planRates(); } catch { PLAN_MINCOST = null; }
+    planSummary();
+    renderPlans();
   }
 
-  function planCard(p) {
-    const feats = p.features || [];
-    return `<div class="plan" data-id="${esc(p.id)}" style="border:1px solid #1d2733;border-radius:10px;padding:12px;margin-bottom:12px;background:#0b0f14">
+  // The one sentence that tells him whether the catalogue is safe to sell today.
+  function planSummary() {
+    const priceOf = (p) => N(p.price_cents) / 100;
+    const live = PLAN_ROWS.filter((p) => p.active);
+    const prices = PLAN_ROWS.map(priceOf).filter((v) => v > 0).sort((a, b) => a - b);
+    const bare = PLAN_ROWS.filter((p) => !MODALITIES.some((m) => planMinutes(p)[m] > 0));
+    const under = PLAN_MINCOST ? PLAN_ROWS.filter((p) => priceOf(p) > 0 && priceOf(p) < planCost({ minutes: planMinutes(p) })) : [];
+    $("plansSummary").innerHTML = !PLAN_ROWS.length
+      ? "Nothing in the catalogue yet — press “+ New package”."
+      : `${PLAN_ROWS.length} package${PLAN_ROWS.length === 1 ? "" : "s"} in the catalogue, ${live.length} on sale`
+        + (prices.length ? ` · ${pgUsd(prices[0])} to ${pgUsd(prices[prices.length - 1])}` : "")
+        + (bare.length ? `<br><span class="dirty">${bare.length} has no minutes attached, so anyone who pays gets nothing: ${bare.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "")
+        + (under.length ? `<br><span class="dirty">${under.length} priced under what it costs you: ${under.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "");
+  }
+
+  function renderPlans() {
+    $("plansList").innerHTML = !PLAN_ROWS.length ? '<p class="muted">No packages yet.</p>' : `<table>
+        <thead><tr>
+          <th>Package the buyer sees</th><th class="num">Price</th>
+          <th class="num">Video</th><th class="num">Audio</th><th class="num">Video + Audio</th>
+          <th class="num">Costs you</th><th class="num">You keep</th>
+          <th>Accounts</th><th>On sale</th><th></th>
+        </tr></thead>
+        <tbody>${PLAN_ROWS.map(planRow).join("")}</tbody></table>`;
+    // The editor sits outside that scroller on purpose: ten money columns need more
+    // width than a small window gives, and the half-written package plus its buyer
+    // preview must never be the part that is cut off.
+    const p = PLAN_EDIT ? PLAN_ROWS.find((x) => x.id === PLAN_EDIT) : null;
+    $("plansEditor").innerHTML = p ? planEditor(p) : "";
+    if (p) bindEditor();
+  }
+
+  const planRowEl = (id) => document.querySelector('#plansList tr[data-plan="' + String(id).replace(/"/g, "") + '"]');
+
+  function planRow(p) {
+    const a = planMinutes(p);
+    const price = N(p.price_cents) / 100;
+    const cost = planCost({ minutes: a });
+    const keep = cost === null ? null : price - cost;
+    const held = PLAN_HOLD[p.id] || 0;
+    const dash = '<span class="muted">—</span>';
+    const devices = N(p.max_devices, 1);
+    return `<tr data-plan="${esc(p.id)}"${p.active ? "" : ' class="planoff"'}>
+      <td><div class="pname">${esc(p.name || p.id)}</div>
+        ${p.blurb ? `<div class="pblurb">${esc(p.blurb)}</div>` : ""}
+        <div class="ptags">${(p.features || []).map((f) => `<span class="ptag">${esc(FEATURE_LABEL[f] || f)}</span>`).join("")}
+          <span class="ptag">${devices === 1 ? "1 device" : devices + " devices"}</span></div></td>
+      <td class="num">${pgUsd(price)}</td>
+      ${MODALITIES.map((m) => `<td class="num">${a[m] ? mins(a[m]) : dash}</td>`).join("")}
+      <td class="num">${cost === null ? dash : pgUsd(cost)}</td>
+      <td class="num" style="color:${cost === null ? "#6b8296" : keep < 0 ? "#fb7185" : "#4ade80"}">${cost === null ? dash : pgUsd(keep)}</td>
+      <td class="planhold">${held ? `<span class="pill n">${held}</span>` : '<span class="muted">none</span>'}</td>
+      <td class="planhold"><button class="switch ${p.active ? "on" : "off"}" data-p="sell" data-id="${esc(p.id)}"
+        title="${p.active ? "Buyers see this one. Press to take it off the shelf." : "Not on the buyer's screen. Press to sell it."}"><span class="dot"></span>${p.active ? "On sale" : "Off sale"}</button></td>
+      <td><div class="btns"><button data-p="edit" data-id="${esc(p.id)}">${PLAN_EDIT === p.id ? "Close" : "Edit"}</button><button data-p="copy" data-id="${esc(p.id)}">Copy</button></div></td>
+    </tr>`;
+  }
+
+  // Shared by the editor and the new-package form, so changing a package and making one
+  // look the same and behave the same.
+  function planFields(p) {
+    const v = p ? {
+      name: p.name ?? "", price: (N(p.price_cents) / 100).toFixed(2), blurb: p.blurb ?? "",
+      includes: (p.includes || []).join("\n"), devices: N(p.max_devices, 1), feats: p.features || [],
+      min_video: N(p.video_minutes, 0), min_audio: N(p.audio_minutes, 0), min_video_audio: N(p.video_audio_minutes, 0),
+    } : {
+      name: "", price: "", blurb: "", includes: "Minutes never expire\nWorks on every device you sign in to",
+      devices: 2, feats: ["video"], min_video: 0, min_audio: 0, min_video_audio: 0,
+    };
+    return `
       <div class="row">
-        <div style="flex:0 0 150px"><label style="margin-top:0">Plan id</label><input value="${esc(p.id)}" readonly /></div>
-        <div><label style="margin-top:0">Name users see</label><input data-f="name" value="${esc(p.name ?? "")}" /></div>
-        <div style="flex:0 0 140px"><label style="margin-top:0">Price (USD)</label><input data-f="price" type="number" min="0" step="0.01" value="${(N(p.price_cents) / 100).toFixed(2)}" /></div>
-        <div style="flex:0 0 110px"><label style="margin-top:0">Devices</label><input data-f="devices" type="number" min="1" value="${N(p.max_devices, 1)}" /></div>
+        <div><label style="margin-top:0">Name the buyer sees</label><input data-f="name" value="${esc(v.name)}" placeholder="Starter" /></div>
+        <div style="flex:0 0 130px"><label style="margin-top:0">Price (USD)</label><input data-f="price" type="number" min="0" step="0.01" value="${v.price}" placeholder="9.00" /></div>
+        <div style="flex:0 0 130px"><label style="margin-top:0">Devices at once</label><input data-f="devices" type="number" min="1" value="${v.devices}" /></div>
       </div>
-      <label>Minutes attached to this package — what the buyer sees, and what you credit when they pay</label>
-      <div class="row">
-        <div><label style="margin-top:0">Video Call</label><input data-f="min_video" type="number" min="0" step="1" value="${N(p.video_minutes, 0)}" /></div>
-        <div><label style="margin-top:0">Audio Call</label><input data-f="min_audio" type="number" min="0" step="1" value="${N(p.audio_minutes, 0)}" /></div>
-        <div><label style="margin-top:0">Video + Cloned Audio</label><input data-f="min_video_audio" type="number" min="0" step="1" value="${N(p.video_audio_minutes, 0)}" /></div>
+      <label>Minutes this package sells — this is what lands on the buyer's account when you credit them</label>
+      <div class="grid3">
+        ${MODALITIES.map((m) => `<div><label style="margin-top:0">${MOD_LABEL[m]}</label><input data-f="min_${m}" type="number" min="0" step="1" value="${v["min_" + m]}" /></div>`).join("")}
       </div>
       <label>One-line pitch</label>
-      <input data-f="blurb" value="${esc(p.blurb ?? "")}" placeholder="For streamers who go live on camera" />
-      <div class="row" style="align-items:flex-start">
-        <div style="flex:1 1 340px">
-          <label>What the buyer gets — one line each</label>
-          <textarea data-f="includes" placeholder="300 Video Call minutes&#10;1 Audio Call bucket unlocked&#10;Two devices at a time">${esc((p.includes || []).join("\n"))}</textarea>
-        </div>
-        <div style="flex:0 0 200px">
-          <label>Capabilities</label>
-          ${FEATURES.map((f) => `<label class="feat" style="margin:0 0 6px;display:flex"><input type="checkbox" data-f="feat_${f}" ${feats.includes(f) ? "checked" : ""} />${FEATURE_LABEL[f] || f}</label>`).join("")}
-        </div>
+      <input data-f="blurb" value="${esc(v.blurb)}" placeholder="For streamers who go live on camera" />
+      <label>What the buyer gets — one line each</label>
+      <textarea data-f="includes" placeholder="300 Video Call minutes&#10;Two devices at a time">${esc(v.includes)}</textarea>
+      <label>What it unlocks</label>
+      <div>${FEATURES.map((f) => `<label class="feat" style="margin:0 14px 6px 0"><input type="checkbox" data-f="feat_${f}" ${v.feats.includes(f) ? "checked" : ""} /> ${FEATURE_LABEL[f]}</label>`).join("")}</div>
+      <p class="phint">Those three boxes decide which call tabs a buyer holding this package may use. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” does all three buckets in one click.</p>`;
+  }
+
+  function planEditor(p) {
+    const held = PLAN_HOLD[p.id] || 0;
+    return `<div class="planedit" style="border:1px solid #24303d;border-left:3px solid #35e0e6;border-radius:10px;padding:14px;margin-top:14px;background:#0b0f14">
+      <div class="row" style="justify-content:space-between;align-items:center;margin-bottom:10px">
+        <h3 style="font-size:13px;margin:0">Editing ${esc(p.name || p.id)}</h3>
+        <span class="muted">Press Close on its row, or Discard below, to leave it as it is.</span>
       </div>
-      <div class="row" style="align-items:center;margin-top:10px">
-        <label class="feat" style="margin:0"><input type="checkbox" data-f="active" ${p.active ? "checked" : ""} /> Sell this package</label>
-        <div class="btns" style="margin-left:auto"><button data-p="save" data-id="${esc(p.id)}" class="primary">Save</button><button data-p="del" data-id="${esc(p.id)}" class="danger">Delete</button></div>
+      <div class="grid2" style="align-items:start">
+        <div>
+          ${planFields(p)}
+          <input type="hidden" data-f="ref" value="${esc(p.id)}" />
+          <p class="pmeta" style="margin-top:10px">Reference <code>${esc(p.id)}</code> — what the Prices tab and your own notes call this package. Buyers never see it.</p>
+          <div class="btns" style="margin-top:10px;align-items:center">
+            <button data-p="save" data-id="${esc(p.id)}" class="primary">Save this package</button>
+            <button data-p="discard" data-id="${esc(p.id)}">Discard</button>
+            <button data-p="del" data-id="${esc(p.id)}" class="danger">Delete${held ? ` (${held} account${held === 1 ? "" : "s"} hold${held === 1 ? "s" : ""} it)` : ""}</button>
+            <span class="dirty" data-dirty hidden>Unsaved changes</span>
+          </div>
+        </div>
+        <div>
+          <label style="margin-top:0">What the buyer sees</label>
+          <div class="prev" data-prev></div>
+          <p class="phint" data-money></p>
+          <p class="phint">Whether it is on the shelf is the switch on the row above, and that saves on the press — so nothing here can publish a half-finished package by accident.</p>
+        </div>
       </div>
     </div>`;
   }
 
-  $("addPlan").onclick = async () => {
-    const id = prompt("New plan id (lowercase, no spaces, e.g. 'duo'):");
-    if (!id) return;
-    const clean = id.trim().toLowerCase().replace(/[^a-z0-9_]/g, "");
-    if (!clean) return msg("plansMsg", "Invalid id.");
-    const { error } = await sb.from("plans").insert({
-      id: clean, name: clean, max_devices: 2, features: ["video"], active: true, price_cents: 0, includes: [],
-    });
-    msg("plansMsg", error ? error.message : "Plan created — set its price and Save.", error ? "err" : "ok");
-    await loadPlans();
+  // Painted to match the buyer's Plans screen: name, the big price, the pitch, only the
+  // minute lines that are above zero, the bullets, then the unlock and device chips.
+  function planPreview(v) {
+    const mods = MODALITIES.filter((m) => v.minutes[m] > 0);
+    return `<div class="ph">${esc(v.name || "Untitled package")}</div>
+      <div class="pp">${pgUsd(v.price)}<span>USD</span></div>
+      ${v.blurb ? `<div class="pb">${esc(v.blurb)}</div>` : ""}
+      ${mods.length
+        ? `<div class="pm"><p class="pml">Minutes in this package</p>${mods.map((m) => `<div class="pmm"><span>${MOD_LABEL[m]}</span><span class="mono">${v.minutes[m].toLocaleString("en-US")} min</span></div>`).join("")}</div>`
+        : '<div class="pb" style="color:#facc15">No minutes attached — a buyer who pays this gets nothing.</div>'}
+      ${v.includes.length ? `<ul>${v.includes.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
+      <div class="pt">${v.features.map((f) => `<span>${esc(FEATURE_LABEL[f] || f)}</span>`).join("")}<span>${v.devices === 1 ? "1 device" : v.devices + " devices"}</span></div>`;
+  }
+
+  function planMoney(v) {
+    if (!PLAN_MINCOST) return "<b>Cost figures unavailable</b> — this login could not read the saved rates.";
+    const cost = planCost(v), keep = v.price - cost;
+    const parts = MODALITIES.filter((m) => v.minutes[m] > 0)
+      .map((m) => `${v.minutes[m]} ${MOD_LABEL[m]} at ${pgUsd(PLAN_MINCOST[m], 3)} a minute = ${pgUsd(PLAN_MINCOST[m] * v.minutes[m])}`);
+    const aim = Number.isFinite(PLAN_TARGET) ? `, against the ${PLAN_TARGET}% you asked for on the Prices tab` : "";
+    return `<b>Costs you ${pgUsd(cost)}</b> of AI time${parts.length ? ` (${parts.join("; ")})` : " — no minutes attached"}.`
+      + (keep < 0
+        ? `<br><span style="color:#fb7185">At ${pgUsd(v.price)} you lose ${pgUsd(-keep)} of cash on every sale. Anything above ${pgUsd(cost)} breaks even.</span>`
+        : `<br><span style="color:#4ade80">You keep ${pgUsd(keep)}</span> — ${v.price > 0 ? (keep / v.price * 100).toFixed(0) + "% of the price" : "no price set yet"}${aim}.`);
+  }
+
+  function readPlanForm(host) {
+    const get = (f) => host.querySelector(`[data-f="${f}"]`);
+    const num = (f) => N(get(f)?.value, 0);
+    return {
+      id: get("ref") ? get("ref").value : "",
+      name: String(get("name")?.value ?? "").trim(),
+      price: Math.max(0, num("price")),
+      blurb: String(get("blurb")?.value ?? "").trim(),
+      includes: String(get("includes")?.value ?? "").split("\n").map((s) => s.trim()).filter(Boolean),
+      devices: Math.max(1, Math.round(num("devices"))),
+      minutes: Object.fromEntries(MODALITIES.map((m) => [m, Math.max(0, Math.round(num("min_" + m)))])),
+      features: FEATURES.filter((f) => get("feat_" + f)?.checked),
+    };
+  }
+
+  // What gets written. Sale state is deliberately absent: the On sale switch owns that,
+  // on its own press, so saving a description can never put a package on the shelf.
+  function planToRow(v) {
+    return {
+      name: v.name || v.id || "Package",
+      price_cents: Math.round(v.price * 100),
+      currency: "usd",
+      blurb: v.blurb || null,
+      includes: v.includes,
+      max_devices: v.devices,
+      video_minutes: v.minutes.video,
+      audio_minutes: v.minutes.audio,
+      video_audio_minutes: v.minutes.video_audio,
+      features: v.features,
+    };
+  }
+
+  function bindEditor() {
+    const host = $("plansEditor");
+    if (!host.firstElementChild) return;
+    const paint = () => {
+      const v = readPlanForm(host);
+      host.querySelector("[data-prev]").innerHTML = planPreview(v);
+      host.querySelector("[data-money]").innerHTML = planMoney(v);
+      host.querySelector("[data-dirty]").hidden = !PLAN_DIRTY;
+    };
+    host.querySelectorAll("[data-f]").forEach((el) => el.addEventListener("input", () => { PLAN_DIRTY = true; paint(); }));
+    paint();
+  }
+
+  function plansBusyElsewhere(act) {
+    if (!PLAN_DIRTY) return false;
+    msg("plansMsg", "The open package has unsaved changes — Save or Discard them before you " + act + ", or this tab would throw your typing away.", "err");
+    return true;
+  }
+
+  $("plansReload").onclick = () => loadPlans(true);
+
+  $("addPlan").onclick = () => {
+    const box = $("plansNew");
+    if (!box.classList.contains("hidden")) { box.classList.add("hidden"); box.innerHTML = ""; return; }
+    if (plansBusyElsewhere("add a new one")) return;
+    box.classList.remove("hidden");
+    box.innerHTML = `<div style="border:1px solid #1d2733;border-radius:10px;padding:14px;margin-top:14px;background:#0e141b">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h3 style="font-size:13px;margin:0">New package</h3>
+        <span class="muted">Created <b>off the shelf</b>. Buyers only see it once you press its On sale switch.</span>
+      </div>
+      ${planFields(null)}
+      <label>What the buyer sees</label>
+      <div data-prev></div>
+      <div class="btns" style="margin-top:12px">
+        <button data-p="create" class="primary">Create it</button>
+        <button data-p="cancelnew">Cancel</button>
+      </div>
+    </div>`;
+    const prev = box.querySelector("[data-prev]");
+    const paint = () => { prev.innerHTML = `<div class="prev">${planPreview(readPlanForm(box))}</div><p class="phint">${planMoney(readPlanForm(box))}</p>`; };
+    box.querySelectorAll("[data-f]").forEach((el) => el.addEventListener("input", paint));
+    paint();
   };
 
   document.addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-p]");
     if (!b) return;
-    const id = b.dataset.id;
-    const card = document.querySelector(`#plansList .plan[data-id="${id}"]`);
-    if (b.dataset.p === "save" && card) {
-      const get = (f) => card.querySelector(`[data-f="${f}"]`);
-      const price = N(get("price").value, 0);
-      const row = {
-        name: get("name").value.trim() || id,
-        price_cents: Math.max(0, Math.round(price * 100)),
-        currency: "usd",
-        blurb: get("blurb").value.trim() || null,
-        includes: get("includes").value.split("\n").map((s) => s.trim()).filter(Boolean),
-        max_devices: N(get("devices").value, 1),
-        video_minutes: Math.max(0, Math.round(N(get("min_video").value, 0))),
-        audio_minutes: Math.max(0, Math.round(N(get("min_audio").value, 0))),
-        video_audio_minutes: Math.max(0, Math.round(N(get("min_video_audio").value, 0))),
-        features: FEATURES.filter((f) => get("feat_" + f)?.checked),
-        active: get("active").checked,
-      };
-      const { error } = await sb.from("plans").update(row).eq("id", id);
-      msg("plansMsg", error ? error.message : `Saved “${row.name}” at $${(row.price_cents / 100).toFixed(2)}.`, error ? "err" : "ok");
-      await loadPlans();
+    const id = b.dataset.id, act = b.dataset.p;
+
+    if (act === "edit") {
+      if (PLAN_DIRTY && PLAN_EDIT !== id) return plansBusyElsewhere("open another package");
+      PLAN_DIRTY = false;
+      PLAN_EDIT = PLAN_EDIT === id ? null : id;
+      renderPlans();
+      // The editor is under the whole table, so a long catalogue leaves it off-screen.
+      if (PLAN_EDIT) $("plansEditor").scrollIntoView({ block: "nearest" });
+      return;
     }
-    if (b.dataset.p === "del") {
-      const name = card ? (card.querySelector('[data-f="name"]')?.value.trim() || id) : id;
-      if (!confirm(`Delete “${name}”? Buyers who already have it keep the minutes they hold.`)) return;
-      // .select() is what makes this debuggable: a delete that RLS silently refuses
-      // still answers 204 with no error, so without it the panel would say "Deleted"
-      // while the row stayed.
+    if (act === "cancelnew") { $("plansNew").classList.add("hidden"); $("plansNew").innerHTML = ""; return; }
+
+    if (act === "create") {
+      const box = $("plansNew");
+      const v = readPlanForm(box);
+      if (!v.name) return msg("plansMsg", "Give it a name first — that is the line the buyer reads.", "err");
+      const slug = v.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "package";
+      let newId = slug;
+      for (let n = 2; PLAN_ROWS.some((x) => x.id === newId); n++) newId = `${slug}_${n}`;
+      const row = Object.assign({ id: newId }, planToRow(v), { active: false });
+      const { error } = await sb.from("plans").insert(row);
+      if (error) {
+        return msg("plansMsg", /duplicate key/i.test(error.message)
+          ? `A package already uses the reference “${newId}”. Change its name a little, or edit the one already in the list.`
+          : error.message, "err");
+      }
+      box.classList.add("hidden"); box.innerHTML = "";
+      PLAN_EDIT = null; PLAN_DIRTY = false;
+      const total = MODALITIES.reduce((s, m) => s + v.minutes[m], 0);
+      msg("plansMsg", `Created “${row.name}” at ${pgUsd(v.price)} carrying ${mins(total)} minutes — off the shelf until you switch it on. Its reference is “${newId}”, which is what the Prices tab calls it.`, "ok");
+      return loadPlans();
+    }
+
+    if (act === "copy") {
+      if (plansBusyElsewhere("copy a package")) return;
+      const p = PLAN_ROWS.find((x) => x.id === id);
+      if (!p) return;
+      const base = String(id).replace(/_copy\d*$/, "");
+      let newId = base + "_copy";
+      for (let n = 2; PLAN_ROWS.some((x) => x.id === newId); n++) newId = `${base}_copy${n}`;
+      const row = {
+        id: newId, name: `${p.name || p.id} copy`, price_cents: N(p.price_cents), currency: "usd",
+        blurb: p.blurb ?? null, includes: p.includes ?? [], max_devices: N(p.max_devices, 1),
+        video_minutes: N(p.video_minutes, 0), audio_minutes: N(p.audio_minutes, 0),
+        video_audio_minutes: N(p.video_audio_minutes, 0), features: p.features ?? [], active: false,
+      };
+      const { error } = await sb.from("plans").insert(row);
+      if (error) return msg("plansMsg", error.message, "err");
+      PLAN_EDIT = null; PLAN_DIRTY = false;
+      msg("plansMsg", `Copied to “${row.name}” — off the shelf, so nothing changes for a buyer until you say so.`, "ok");
+      return loadPlans();
+    }
+
+    if (act === "discard") {
+      PLAN_EDIT = null; PLAN_DIRTY = false;
+      msg("plansMsg", "Changes thrown away. Nothing was written.", "ok");
+      return loadPlans();
+    }
+
+    if (act === "save") {
+      const host = $("plansEditor");
+      if (!host.firstElementChild) return;
+      const v = readPlanForm(host);
+      if (!v.name) return msg("plansMsg", "Give the package a name — that is the line the buyer reads.", "err");
+      const row = planToRow(v);
+      const { data, error } = await sb.from("plans").update(row).eq("id", id).select("id");
+      if (error) return msg("plansMsg", error.message, "err");
+      // .select() is what makes this debuggable: a write RLS silently refuses still answers
+      // with no error, so without it the panel would say "Saved" over an untouched row.
+      if (!data || !data.length) {
+        return msg("plansMsg", `Nothing was saved on “${v.name}”: the request was accepted but 0 rows changed, which means this login is not allowed to edit packages.`, "err");
+      }
+      const cost = planCost(v);
+      PLAN_EDIT = null; PLAN_DIRTY = false;
+      msg("plansMsg", `Saved “${v.name}” at ${pgUsd(v.price)}${cost !== null && v.price > 0 && cost > v.price ? ` — it still costs you ${pgUsd(cost)}, so this one sells at a loss.` : "."}`, "ok");
+      return loadPlans();
+    }
+
+    if (act === "sell") {
+      const p = PLAN_ROWS.find((x) => x.id === id);
+      if (!p) return;
+      const next = !p.active;
+      const { data, error } = await sb.from("plans").update({ active: next }).eq("id", id).select("id");
+      if (error) return msg("plansMsg", error.message, "err");
+      if (!data || !data.length) {
+        return msg("plansMsg", `“${p.name || id}” did not change: the request was accepted but 0 rows came back, so this login is not allowed to put packages on or off the shelf.`, "err");
+      }
+      p.active = next;
+      // This row only, on purpose. Re-rendering the whole table would rebuild every field,
+      // and a half-typed edit on another package would vanish because he switched this one.
+      const tr = planRowEl(id);
+      if (tr) {
+        tr.classList.toggle("planoff", !next);
+        const sw = tr.querySelector('button[data-p="sell"]');
+        if (sw) { sw.className = "switch " + (next ? "on" : "off"); sw.innerHTML = `<span class="dot"></span>${next ? "On sale" : "Off sale"}`; }
+      }
+      planSummary();
+      msg("plansMsg", next
+        ? `“${p.name || id}” is on sale — buyers see it on their Plans screen now.`
+        : `“${p.name || id}” is off the shelf — new buyers stop seeing it. Accounts that already hold it keep every minute they have.`, "ok");
+      return;
+    }
+
+    if (act === "del") {
+      if (plansBusyElsewhere("delete one")) return;
+      const p = PLAN_ROWS.find((x) => x.id === id);
+      const name = p ? (p.name || p.id) : id;
+      const held = PLAN_HOLD[id] || 0;
+      if (!confirm(`Delete “${name}” from the catalogue?\n\n${held ? `${held} account${held === 1 ? "" : "s"} hold${held === 1 ? "s" : ""} it — they keep the minutes they already have, but the package is gone.\n\n` : ""}This cannot be undone. If you only want buyers to stop seeing it, use its On sale switch instead.`)) return;
       const { data, error } = await sb.from("plans").delete().eq("id", id).select("id");
       if (error) {
         msg("plansMsg", /foreign key|referential integrity/i.test(error.message)
-          ? `“${name}” is still attached to at least one account, so the database refused to remove it. Tick off “Sell this package” and press Save instead — new buyers stop seeing it and the accounts using it stay intact.`
+          ? `“${name}” is still attached to at least one account, so the database refused to remove it. Use its On sale switch instead — new buyers stop seeing it and the accounts holding it stay intact.`
           : error.message, "err");
       } else if (!data || !data.length) {
-        msg("plansMsg", `“${name}” was not removed: the request was accepted but 0 rows came back, which means this login is not allowed to delete plans.`, "err");
+        msg("plansMsg", `“${name}” was not removed: the request was accepted but 0 rows came back, which means this login is not allowed to delete packages.`, "err");
       } else {
         msg("plansMsg", `Deleted “${name}”.`, "ok");
+        PLAN_EDIT = null;
       }
-      await loadPlans();
-      return;
+      return loadPlans();
     }
   });
 
