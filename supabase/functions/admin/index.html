@@ -105,6 +105,8 @@
   .prev .pt { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 12px; padding-top: 10px; border-top: 1px solid #1d2733; }
   .prev .pt span { font-size: 10.5px; padding: 3px 9px; border-radius: 999px; background: #16202b; color: #9fc4d2; border: 1px solid #24303d; }
   .dirty { font-size: 11px; color: #facc15; font-weight: 700; }
+  .alert { border: 1px solid #6b4a06; background: #1a1305; color: #facc15; border-radius: 10px; padding: 10px 12px; font-size: 12.5px; margin-top: 12px; line-height: 1.5; }
+  .alert b { color: #fde68a; }
 </style>
 </head>
 <body>
@@ -350,6 +352,7 @@
         </div>
         <div id="poolMsg"></div>
         <div class="grid4" style="margin-top:12px" id="keyStats"></div>
+        <div id="poolAlert"></div>
         <p class="muted" style="margin:12px 0 0">For every call the gateway tries the key assigned to that account first, then every enabled key by ascending <b>priority</b>, skipping any that already hit its daily cap, and only then the env secret. A key that fails is logged and the next one is tried in the same request, so one bad key never takes the product down. Users never see, send or store any of this.</p>
       </div>
 
@@ -1779,6 +1782,44 @@
   // looked like the form had broken, and the usage Refresh had no message of its own.
   function stamp(id) { $(id).textContent = "read " + new Date().toISOString().slice(11, 19) + " UTC"; }
 
+  // A provider's refusal is JSON noise on a monitoring screen. Left raw, a plan refusal on the
+  // voice account reads exactly like a dead network — and the two cost completely different things.
+  const PLAN_REFUSAL = /paid_plan_required|payment_required|can_not_use_instant_voice_cloning|free users cannot/i;
+  const CREDIT_REFUSAL = /insufficient|out of credit|quota exceeded|billing/i;
+  const KEY_REFUSAL = /invalid api key|invalid credential|unauthorized|x-api-key/i;
+
+  function plainErr(text) {
+    if (!text) return "";
+    if (PLAN_REFUSAL.test(text)) return "That account is on a free plan, and a free plan refuses voice calls and voice uploads. Nothing in the app can work around it.";
+    if (CREDIT_REFUSAL.test(text)) return "That account has run out of credit. Until it is topped up, every call routed to it fails.";
+    if (KEY_REFUSAL.test(text)) return "The key itself was refused — wrong string, revoked, or restricted so it cannot reach this endpoint.";
+    return "";
+  }
+
+  // One sentence above the table, because the truth about the pool is not per-row: when the newest
+  // voice refusal is a plan refusal, no voice call can work on any key until that account is paid —
+  // and a customer only ever sees "our AI service didn't answer".
+  // The raw refusal is kept for support (it carries the request id) but a plan refusal is a
+  // hundred and sixty characters of JSON, so it sits under the plain sentence, not instead of it.
+  function shortErr(text) {
+    const s = String(text || "");
+    return s.length > 160 ? esc(s.slice(0, 160)) + "…" : esc(s);
+  }
+
+  function poolAlert() {
+    const live = KEY_ROWS.filter((k) => k.enabled !== false);
+    let line = "";
+    if (!live.length) {
+      // Nothing stored at all: the table already says calls fall back to the env secrets,
+      // so claiming every voice call fails here would contradict the row below it.
+    } else if (!live.some((k) => k.voice_key_tail)) {
+      line = "<b>No voice key is stored.</b> Every voice call and every voice upload will fail. The video tabs run on a different account and are unaffected.";
+    } else if (live.some((k) => PLAN_REFUSAL.test(String(k.last_error || "")))) {
+      line = "<b>Voice is switched off by the voice account, not by the app.</b> Its newest refusal says the plan does not cover it, and a free plan refuses both the stock voices and new voice clones — so there is no voice left for a call to use. Until that account is on a paid plan, keep audio minutes off every account, trials included: anyone who pays will only meet a red card. The video tabs run on a separate account and are not affected.";
+    }
+    $("poolAlert").innerHTML = line ? `<div class="alert">${line}</div>` : "";
+  }
+
   async function loadKeys() {
     const base = "id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures";
     let { data, error } = await sb.from("admin_key_health").select(base + ", trial_key_tail, trial_minutes_budget, trial_minutes_used").order("priority", { ascending: true });
@@ -1807,6 +1848,7 @@
     stats.push([live.filter((k) => k.voice_key_tail).length, "voice keys live"]);
     stats.push([KEY_ROWS.reduce((a, k) => a + N(k.recent_failures), 0), "failures in 24h"]);
     $("keyStats").innerHTML = stats.map(([v, l]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+    poolAlert();
 
     const cell = (k, provider, tail) => !tail ? '<span class="pill none">missing</span>' : `
       <div style="display:flex;align-items:center;gap:7px;white-space:nowrap">
@@ -1818,6 +1860,7 @@
 
     $("keysTable").querySelector("tbody").innerHTML = KEY_ROWS.map((k) => {
       const used = N(k.minutes_today), cap = k.daily_minute_cap;
+      const why = plainErr(k.last_error);
       const tRow = `<td>${cell(k, "decart", k.trial_key_tail)}</td>`;
       const tLeft = k.trial_key_tail
         ? (k.trial_minutes_budget == null
@@ -1834,7 +1877,7 @@
         <td class="mono">${N(k.priority, 100)}</td>
         <td class="mono" data-usage="${k.id}">${cap == null ? "uncapped" : mins(used) + " / " + mins(cap)}${cap != null && used >= N(cap) ? ' <span class="pill warn">capped</span>' : ""}</td>
         <td class="mono">${N(k.recent_failures) ? `<span class="pill fail">${k.recent_failures}</span>` : '<span class="pill ok">0</span>'}</td>
-        <td class="muted">${esc(k.last_error || "—")}${k.last_error_at ? `<div class="muted">${when(k.last_error_at)}</div>` : ""}</td>
+        <td class="muted">${why ? `<div style="color:#facc15">${why}</div><div style="font-size:11px;margin-top:3px" title="${esc(k.last_error)}">${shortErr(k.last_error)}</div>` : esc(k.last_error || "—")}${k.last_error_at ? `<div class="muted">${when(k.last_error_at)}</div>` : ""}</td>
         <td style="white-space:nowrap">
           <button data-act="edit" data-id="${k.id}">Edit</button>
           <button data-act="del" data-id="${k.id}" class="danger">Delete</button>
