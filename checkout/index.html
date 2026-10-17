@@ -423,17 +423,22 @@ function waitingReceipt(reference) {
 }
 
 function wireReceipt(reference) {
-  $("print").onclick = () => window.print();
-  $("again").onclick = () => {
+  // Only what is actually on the page gets wired. The very first card - the one a buyer
+  // sees while the payment is still arriving - carries no buttons at all, and this function
+  // used to reach for them anyway: it threw, the watch loop died with it, and the page sat
+  // reading "Confirming" on a payment that had already been credited. Two customers paid
+  // into that silence before it was caught.
+  const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
+  on("print", () => window.print());
+  on("again", () => {
     history.replaceState(null, "", location.pathname);
     document.title = "Stream Live — buy minutes";
     $("shop").hidden = false;
     $("buy").hidden = false;
     renderPackages();
-  };
-  $("copy").onclick = async (e) => {
+  });
+  on("copy", async (e) => {
     const txt = "Stream Live order " + reference
-      + ($("status").querySelector(".row dd.mono") ? "" : "")
       + (window.__receipt && window.__receipt.paystack_reference
           ? ", Paystack reference " + window.__receipt.paystack_reference : "");
     try {
@@ -443,7 +448,7 @@ function wireReceipt(reference) {
       e.target.textContent = "Select it from the receipt above";
     }
     setTimeout(() => { const b = $("copy"); if (b) b.textContent = "Copy the references"; }, 2500);
-  };
+  });
 }
 
 /**
