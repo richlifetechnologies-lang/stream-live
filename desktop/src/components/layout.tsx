@@ -1,5 +1,5 @@
 import { Link, useLocation } from "wouter";
-import { Video, Settings, History, User, CreditCard } from "lucide-react";
+import { Video, Settings, History, Hourglass, User, CreditCard } from "lucide-react";
 import { Logo } from "./brand";
 
 /**
@@ -13,7 +13,8 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { href: "/", icon: Video, label: "Stream" },
-    { href: "/minutes", icon: CreditCard, label: "Buy minutes" },
+    { href: "/minutes", icon: Hourglass, label: "Minutes" },
+    { href: "/plans", icon: CreditCard, label: "Plans & prices" },
     { href: "/account", icon: User, label: "Account" },
     { href: "/usage", icon: History, label: "History" },
     { href: "/settings", icon: Settings, label: "Settings" },

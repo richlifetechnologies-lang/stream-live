@@ -5,6 +5,7 @@ import StreamPage from "./pages/stream";
 import SettingsPage from "./pages/settings";
 import UsagePage from "./pages/usage";
 import MinutesPage from "./pages/minutes";
+import PlansPage from "./pages/plans";
 import AccountPage from "./pages/account";
 import PopoutPage from "./pages/popout";
 import ObsoutPage from "./pages/obsout";
@@ -310,6 +311,9 @@ export default function App() {
         </Route>
         <Route path="/minutes">
           <MinutesPage />
+        </Route>
+        <Route path="/plans">
+          <PlansPage />
         </Route>
         <Route path="/settings">
           <SettingsPage />
