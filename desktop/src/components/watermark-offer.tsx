@@ -22,13 +22,16 @@ export function WatermarkOffer({
   paid,
   videoMinutesLeft,
   ctaLabel = "Buy minutes",
-  ctaHref = "/plans",
+  ctaHref = "/minutes",
+  ctaOnClick,
 }: {
   paid: boolean;
   videoMinutesLeft: number | null;
   /** Where the button leads when there is no online till. */
   ctaLabel?: string;
   ctaHref?: string;
+  /** Set instead of a route when the answer is further up or down the same page. */
+  ctaOnClick?: () => void;
 }) {
   const [, setLocation] = useLocation();
   const [page, setPage] = useState<string | null>(null);
@@ -93,7 +96,7 @@ export function WatermarkOffer({
         </a>
       ) : (
       <button
-        onClick={() => setLocation(ctaHref)}
+        onClick={() => (ctaOnClick ? ctaOnClick() : setLocation(ctaHref))}
         style={{
           alignSelf: "center", padding: "14px 22px", borderRadius: 11, border: "none",
           background: GOLD, color: "hsl(222 47% 6%)", fontWeight: 700, fontSize: 14,

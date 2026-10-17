@@ -70,11 +70,11 @@ async function paystack(path: string, key: string, body?: Record<string, unknown
 }
 
 /**
- * Packages a buyer can pay for and the two ways they may pay: everything switched
- * on in the app that carries minutes, each with its cedi price worked out from the
- * dollar price at the live exchange figure. The page never has to be edited when he
- * adds or re-prices a package — sl_paystack_packages reads the same table the app's
- * Plans screen does.
+ * Everything the seller lists, with the two ways they may pay for it: every package
+ * switched on in the app, each with its cedi price worked out from the dollar price at
+ * the live exchange figure, and a flag saying whether money can actually be taken for it
+ * here. The page never has to be edited when he adds or re-prices a package —
+ * sl_paystack_packages reads the same table the app's Plans screen does.
  */
 async function packages() {
   const { data, error } = await adminClient().rpc("sl_paystack_packages");
@@ -89,7 +89,7 @@ async function packages() {
     rate: Number(data?.ghs_per_usd ?? 12),
     page: pageUrl(),
     channels: channels.length ? channels : ["card"],
-    packages: shelf.filter((p) => Number(p.price_ghp) > 0),
+    packages: shelf,
   };
 }
 
@@ -183,6 +183,12 @@ async function handle(req: Request): Promise<Response> {
   const planId = String(body.plan_id ?? "").trim();
   const plan = shelf.find((p: Record<string, unknown>) => p.id === planId);
   if (!plan) return fail("That package is not on sale right now.", 400);
+  // The page lists every package the seller has, including one he has not finished
+  // pricing or has not put minutes on. Those show on the page with the reason written
+  // on the card; they cannot be paid for, and this is the door that says so.
+  if (plan.buyable !== true || Number(plan.price_ghp) <= 0) {
+    return fail("That package cannot be paid for online yet. Ask the seller before you buy it.", 400);
+  }
 
   // The address has to belong to an account, or the money buys minutes for
   // nobody. Better to refuse before any money is taken than after.
@@ -194,13 +200,16 @@ async function handle(req: Request): Promise<Response> {
     );
   }
 
-  // Someone hammering this button would otherwise pile up open orders.
+  // Someone hammering this button would otherwise pile up open orders. Orders the seller's
+  // own clock has already let go are not counted, or a buyer who abandoned a checkout
+  // half an hour ago would be punished for it.
   const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
   const { count } = await db
     .from("payments")
     .select("id", { count: "exact", head: true })
     .eq("email", email)
     .eq("status", "pending")
+    .is("expired_at", null)
     .gte("created_at", since);
   if ((count ?? 0) >= 5) return fail("Too many unfinished payments from this address. Try again shortly.", 429);
 

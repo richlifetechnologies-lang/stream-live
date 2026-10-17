@@ -352,7 +352,7 @@ export const ADMIN_HTML = `<!doctype html>
           <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="payOpen" /> Take payments on the buy page</label></div>
           <button id="payRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:6px 0 12px">Every order the buy page opened — by card or by mobile money — lands here. A customer reaches that page from the Buy button in the app and from your Stream Live page; you never have to send anybody an address. <span class="pill ok">credited</span> means the money arrived <b>and the minutes are already in that account</b>: there is nothing to approve and pressing anything else would pay the customer twice. Anything else is money that has not become minutes yet, and the last column says why.</p>
+        <p class="muted" style="margin:6px 0 12px">Every order the buy page opened — by card or by mobile money — lands here. A customer reaches that page from the Buy button in the app and from your Stream Live page; you never have to send anybody an address. <span class="pill ok">credited</span> means the money arrived <b>and the minutes are already in that account</b>: there is nothing to approve and pressing anything else would pay the customer twice. Anything else is money that has not become minutes yet, and the last column says why. An order nobody has paid stops waiting by itself after half an hour: it is marked <span class="pill n">no payment arrived</span>, leaves the "needs attention" list and nothing was ever charged. If that customer's mobile money confirmation still turns up late, the minutes go in by themselves — so never add them a second time by hand.</p>
         <div id="payTotals" class="muted" style="margin:0 0 10px"></div>
         <div style="overflow:auto">
           <table id="payTable">
@@ -1856,10 +1856,16 @@ export const ADMIN_HTML = `<!doctype html>
   //  * pending and stale — a buyer who opened the checkout and never finished
   //  * failed or refunded — he tried, or you gave it back
   //  * credited to nobody — the email he typed has no account on this gateway
+  // An order the server has already let go is NOT attention: nothing is owed on it and
+  // there is nothing to chase. It stays on the list as a record, marked as what it is.
+  // Should its money ever turn up late, the row moves to credited on its own.
   function payNeedsAttention(p) {
     if (p.paystack_domain === "test") return true;
     if (p.status === "paid") return true;
-    if (p.status === "pending") return Date.now() - new Date(p.created_at).getTime() > 3 * 60000;
+    if (p.status === "pending") {
+      if (p.expired_at) return false;
+      return Date.now() - new Date(p.created_at).getTime() > 3 * 60000;
+    }
     if (p.status === "failed" || p.status === "refunded") return true;
     if (p.status === "credited" && !p.user_id) return true;
     return false;
@@ -1912,16 +1918,24 @@ export const ADMIN_HTML = `<!doctype html>
         : p.status === "paid"
           ? '<span class="pill pending">on its way</span>'
           : '<span class="muted">—</span>';
+      // A checkout nobody finished is not a payment waiting to happen. Say so on the row,
+      // and say what happens if the money does arrive late — because it still credits itself.
+      const quiet = p.status === "pending" && p.expired_at;
+      const state = quiet
+        ? '<span class="pill n" title="no payment arrived within half an hour, so this order is closed on our side. If the money ever does arrive, the minutes go in by themselves.">no payment arrived</span>'
+        : \`<span class="pill \${PAY_PILL[p.status] || "n"}">\${esc(p.status)}</span>\`;
       const why = p.status === "credited"
         ? \`<span class="muted">\${payAgo(p.credited_at || p.paid_at || p.created_at)}</span>\`
-        : \`<span class="muted">\${esc(p.note || "")}\${p.note ? "" : \`order opened \${payAgo(p.created_at)}\`}</span>\`;
+        : quiet
+          ? \`<span class="muted">opened \${payAgo(p.created_at)}, let go \${payAgo(p.expired_at)}</span>\`
+          : \`<span class="muted">\${esc(p.note || "")}\${p.note ? "" : \`order opened \${payAgo(p.created_at)}\`}</span>\`;
       return \`<tr\${attention ? ' style="background:#1c1a10"' : ""}>
         <td class="muted">\${when(p.created_at)}</td>
         <td>\${who}</td>
         <td>\${esc(NAMES[p.plan_id] || p.plan_id || "unknown package")}</td>
         <td class="mono" style="text-align:right">\${ghs(p.amount)}</td>
         <td>\${way}</td>
-        <td><span class="pill \${PAY_PILL[p.status] || "n"}">\${esc(p.status)}</span></td>
+        <td>\${state}</td>
         <td class="mono" style="font-size:11px">\${esc(p.reference)}</td>
         <td>\${delivered}</td>
         <td>\${why}</td></tr>\`;

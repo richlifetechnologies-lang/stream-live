@@ -170,24 +170,24 @@
     <div class="grid">
       <div class="card">
         <h3>Windows 10 or 11</h3>
-        <p><code>StreamLive-Setup-1.8.0.exe</code><br>
+        <p><code>StreamLive-Setup-1.8.1.exe</code><br>
           Double-click it and accept the security prompt. Part way through it asks to add one free audio
           driver — press <b>Yes</b>. When it finishes, <b>restart the computer</b>: the microphone does not
           work until you do. Nothing else to download.</p>
-        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.8.0/StreamLive-Setup-1.8.0.exe">Download for Windows</a></p>
+        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.8.1/StreamLive-Setup-1.8.1.exe">Download for Windows</a></p>
       </div>
       <div class="card">
         <h3>Mac with an Apple chip</h3>
-        <p><code>StreamLive-1.6.4-arm64.dmg</code><br>
+        <p><code>StreamLive-1.8.1-arm64.dmg</code><br>
           For M1, M2, M3 and M4 Macs. Installs like any other Mac app, then follows the
           <a href="#mac">five steps below</a> so a call app can see it.</p>
-        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.6.4/StreamLive-1.6.4-arm64.dmg">Download for Apple Mac</a></p>
+        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.8.1/StreamLive-1.8.1-arm64.dmg">Download for Apple Mac</a></p>
       </div>
       <div class="card">
         <h3>Mac with an Intel chip</h3>
-        <p><code>StreamLive-1.6.4-x64.dmg</code><br>
+        <p><code>StreamLive-1.8.1-x64.dmg</code><br>
           For Intel Macs from 2020 and earlier. Same five steps as the Apple-chip disk.</p>
-        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.6.4/StreamLive-1.6.4-x64.dmg">Download for Intel Mac</a></p>
+        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.8.1/StreamLive-1.8.1-x64.dmg">Download for Intel Mac</a></p>
       </div>
     </div>
     <div class="note" style="margin-top:20px">
@@ -325,10 +325,10 @@
   try {
     const res = await fetch("https://onhanfathvfkkliayvrn.supabase.co/functions/v1/paystack-checkout");
     const data = await res.json();
-    const priced = (Array.isArray(data.packages) ? data.packages : [])
-      .filter(p => Number(p.price_ghp) > 0);
-    if (data && data.enabled === true && priced.length) {
-      const cheapest = Math.min.apply(null, priced.map(p => Number(p.price_ghp)));
+    const sellable = (Array.isArray(data.packages) ? data.packages : [])
+      .filter(p => p.buyable !== false && Number(p.price_ghp) > 0);
+    if (data && data.enabled === true && sellable.length) {
+      const cheapest = Math.min.apply(null, sellable.map(p => Number(p.price_ghp)));
       document.getElementById("buy").textContent = "Buy minutes from GH₵" + (cheapest / 100).toFixed(2);
       document.getElementById("buy").hidden = false;
     }

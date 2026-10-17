@@ -369,7 +369,10 @@ export class StreamLiveClient {
     const prices: Record<string, number> = {};
     for (const p of (Array.isArray(j.packages) ? j.packages as Array<Record<string, unknown>> : [])) {
       const cents = Number(p.price_ghp ?? 0);
-      if (cents > 0) prices[String(p.id)] = Math.round(cents) / 100;
+      // The shelf lists every package the seller has, including one he has not finished
+      // setting up. Only what the server itself offers for sale gets a price here, so the
+      // app can never put a Buy button on a package the payment page would refuse.
+      if (cents > 0 && p.buyable !== false) prices[String(p.id)] = Math.round(cents) / 100;
     }
     const info: CheckoutInfo = { enabled: j.enabled === true, page, currency: String(j.currency ?? "GHS"), prices };
     this.shopCache = { at: Date.now(), info };

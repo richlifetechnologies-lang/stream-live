@@ -2511,7 +2511,7 @@ export default function StreamPage() {
             paid={account.paid}
             videoMinutesLeft={videoLeft}
             ctaLabel="See the packages"
-            ctaHref="/plans"
+            ctaHref="/minutes"
           />
         </div>
       )}

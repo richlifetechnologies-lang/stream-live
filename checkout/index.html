@@ -24,9 +24,14 @@
     border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px }
   .pkg:hover { border-color: var(--cyan) }
   .pkg.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset }
+  .pkg:disabled { cursor: default; opacity: .6; border-style: dashed }
+  .pkg:disabled:hover { border-color: var(--line) }
   .pkg .name { font-weight: 700 }
   .pkg .price { font-size: 26px; font-weight: 800; margin: 8px 0 2px }
   .pkg .price span { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 6px }
+  .pkg .unpriced { font-size: 17px; font-weight: 700; color: var(--muted); margin: 10px 0 4px }
+  .pkg .why { border-left: 3px solid #7c6318; background: #14100a; border-radius: 8px;
+    padding: 9px 11px; margin-top: 12px; color: #f0d699; font-size: 12.5px; line-height: 1.5 }
   .pkg .blurb { color: var(--muted); font-size: 13px; margin: 2px 0 0 }
   .pkg .mins { border: 1px solid #1b2444; background: #070d1e; border-radius: 10px; padding: 10px 12px; margin-top: 12px }
   .pkg .ml { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px }
@@ -133,25 +138,38 @@ async function post(path, init) {
 
 function show(html) { $("status").innerHTML = html; }
 
+/** Why a listed package cannot be paid for here, in the buyer's words. Null = it can. */
+function notBuyable(p) {
+  if (p.buyable === true) return null;
+  return Number(p.listed_price_ghp) > 0
+    ? "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it."
+    : "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.";
+}
+
 /**
  * One card, painted the way the panel's Plans tab paints a package: name, price,
  * the short line under it, "Minutes in this package", the list of what is included,
  * then the feature tags and the device count. The only difference he asked for is
- * the price: cedis instead of dollars.
+ * the price: cedis instead of dollars. A package the seller lists but cannot yet
+ * sell stays on the page and says why on the card.
  */
 function cardHtml(p) {
   const mods = minutesOf(p);
+  const why = notBuyable(p);
   const tags = [...(p.features || []), null].map((f) =>
     f ? "<span>" + esc(FEATURE_LABEL[f] || f) + "</span>"
       : "<span>" + (Number(p.max_devices || 1) === 1 ? "1 device" : Number(p.max_devices || 1) + " devices") + "</span>");
   return '<div class="name">' + esc(p.name || "Untitled package") + "</div>"
-    + '<div class="price">' + money(p.price_ghp) + "<span>GHS</span></div>"
+    + (Number(p.listed_price_ghp) > 0
+        ? '<div class="price">' + money(p.listed_price_ghp) + "<span>GHS</span></div>"
+        : '<div class="unpriced">Price not set</div>')
     + (p.blurb ? '<div class="blurb">' + esc(p.blurb) + "</div>" : "")
     + (mods.length
         ? '<div class="mins"><p class="ml">Minutes in this package</p>'
           + mods.map(([m, v]) => '<div class="mm"><span>' + MOD_LABEL[m] + "</span><b>"
             + Number(v).toLocaleString("en-US") + " min</b></div>").join("") + "</div>"
-        : '<div class="blurb">No minutes attached — ask before buying this one.</div>')
+        : "")
+    + (why ? '<div class="why">' + why + "</div>" : "")
     + ((p.includes || []).length ? "<ul>" + p.includes.map((l) => "<li>" + esc(l) + "</li>").join("") + "</ul>" : "")
     + '<div class="tags">' + tags.join("") + "</div>";
 }
@@ -201,11 +219,16 @@ async function renderPackages() {
 
   ways = Array.isArray(data.channels) && data.channels.length ? data.channels : ["card"];
 
-  $("pkgs").innerHTML = data.packages.map((p) =>
-    '<button class="pkg" data-id="' + esc(p.id) + '">' + cardHtml(p) + "</button>"
+  // Every package the seller lists is on this page. The ones the server will not take
+  // money for are shown with the reason and cannot be chosen.
+  const off = data.packages.map((p) => notBuyable(p) !== null);
+  $("pkgs").innerHTML = data.packages.map((p, i) =>
+    '<button class="pkg" data-id="' + esc(p.id) + '"' + (off[i] ? " disabled" : "") + ">"
+    + cardHtml(p) + "</button>"
   ).join("");
   const nodes = $("pkgs").querySelectorAll(".pkg");
   nodes.forEach((node, i) => {
+    if (off[i]) return;
     const p = data.packages[i];
     node.onclick = () => {
       chosen = p;
@@ -236,6 +259,16 @@ async function follow(reference) {
     if (s && s.status === "failed") {
       return show('<div class="card"><h2 class="err">That payment did not complete</h2><p>' + esc(s.message) +
         '</p><p class="muted">Nothing was charged. Pick a package and try again, or ask for help below.</p></div>');
+    }
+    // The seller's own clock: an order nobody has paid after half an hour stops waiting.
+    // It is still honoured if the money turns up later, so this screen never tells a
+    // buyer who actually paid to pay again.
+    if (s && s.gone_quiet === true) {
+      return show('<div class="card"><h2>This order has stopped waiting</h2><p>' + esc(s.message) +
+        '</p><p class="muted">If you never finished it — no card details, no prompt approved on your phone —' +
+        ' nothing was charged. Pick a package and start a fresh order.</p>' +
+        '<p class="muted">If you DID pay, do not pay again. Message the seller and quote reference <b>' +
+        esc(reference) + '</b>: the minutes go in by themselves the moment the payment is confirmed.</p></div>');
     }
     const line = $("line");
     if (line) line.textContent = (s && s.message ? s.message : "Still confirming…") +

@@ -230,14 +230,14 @@ export default function AccountPage() {
         </button>
 
         {/* What minutes cost and who to pay */}
-        <button onClick={() => setLocation("/plans")}
+        <button onClick={() => setLocation("/minutes")}
           style={{ ...card, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", cursor: "pointer", textAlign: "left" }}>
           <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <CreditCard style={{ width: 16, height: 16, color: C }} />
             <span>
-              <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Plans and prices</span>
+              <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Buy minutes</span>
               <span style={{ display: "block", fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
-                Packages on sale, what each one includes and how to reach your administrator
+                Every package on sale, what each one includes and how to reach your administrator
               </span>
             </span>
           </span>
