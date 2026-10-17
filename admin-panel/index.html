@@ -827,6 +827,19 @@
     <section id="tab-plans" class="hidden">
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">The cedi rate every price is converted at</h2>
+          <div class="btns"><button id="rateGhsSave" class="primary">Save rate</button></div>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">Your packages are priced in dollars. The buyer is charged in cedis: each dollar price is multiplied by this figure at the moment their order is opened. Change it here when the rate moves and every Buy button in the app and every price on the checkout page follow it at once — no package has to be re-typed.</p>
+        <div class="row" style="align-items:flex-end;gap:14px">
+          <div style="flex:0 0 220px"><label style="margin-top:0">Cedis per one US dollar</label><input id="rateGhs" type="number" min="0.01" step="0.01" /></div>
+          <p class="muted" id="rateGhsHint" style="flex:1 1 260px;margin:0 0 8px"></p>
+        </div>
+        <div id="rateGhsMsg"></div>
+      </div>
+
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
           <h2 style="font-size:14px;margin:0">Packages you sell</h2>
           <div class="btns" style="align-items:center">
             <button id="plansReload">Refresh</button>
@@ -1078,7 +1091,7 @@
     sessions: [loadSessions],
     airtime: [loadAirtime],
     gateway: [loadConfig],
-    plans: [loadPlans],
+    plans: [loadPlans, loadGhsRate],
     // loadRates first: every price on this tab is divided by the live burn multiplier,
     // so the Prices tab has to re-read burn_rates or it keeps pricing off a rate that
     // was retired on the Burn rates tab a minute ago.
@@ -3093,6 +3106,35 @@
     msg("plansMsg", "The open package has unsaved changes — Save or Discard them before you " + act + ", or this tab would throw your typing away.", "err");
     return true;
   }
+
+  // ── The cedi rate every dollar price is converted at ───────────────────────
+  // One stored figure on the config row. The Buy button in the app and the checkout
+  // page both read it live, so saving here moves every cedi price at once and no
+  // package has to be re-typed.
+  function ghsRateHint() {
+    const r = N($("rateGhs").value, 0);
+    $("rateGhsHint").innerHTML = r > 0
+      ? `At this rate a $10 package charges GH₵${(10 * r).toFixed(2)} and a $25 package charges GH₵${(25 * r).toFixed(2)}.`
+      : "Type a rate above zero to see what a buyer pays.";
+  }
+
+  async function loadGhsRate() {
+    const { data, error } = await sb.from("app_config").select("paystack_ghs_per_usd").eq("id", 1).maybeSingle();
+    if (error) return msg("rateGhsMsg", error.message, "err");
+    if (!data) return msg("rateGhsMsg", "No config row (id = 1) — the rate cannot be read.", "err");
+    if (document.activeElement !== $("rateGhs")) $("rateGhs").value = N(data.paystack_ghs_per_usd, 12);
+    ghsRateHint();
+  }
+
+  $("rateGhs").oninput = ghsRateHint;
+  $("rateGhsSave").onclick = async () => {
+    const r = Number($("rateGhs").value);
+    if (!Number.isFinite(r) || r <= 0) return msg("rateGhsMsg", "The rate must be a number above zero.", "err");
+    const { error } = await sb.from("app_config").update({ paystack_ghs_per_usd: r }).eq("id", 1);
+    if (error) return msg("rateGhsMsg", error.message, "err");
+    msg("rateGhsMsg", "Saved. Every Buy button in the app and every price on the checkout page now use this rate.", "ok");
+    ghsRateHint();
+  };
 
   $("plansReload").onclick = () => loadPlans(true);
 
