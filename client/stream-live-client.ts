@@ -81,6 +81,19 @@ export type SnapshotSession = {
 /** Where the user pays, typed by the administrator on the panel's Contact tab. */
 export type AdminPayment = { momo: string | null; btc: string | null };
 
+/**
+ * What the online payment service sells right now, and where it lives. The address
+ * comes back from the service itself — the app never stores a payment address, so a
+ * page that moves is followed without a new build and without anybody retyping it.
+ */
+export type CheckoutInfo = {
+  enabled: boolean;
+  page: string;
+  currency: string;
+  /** Cedi price per package, as the payment page will actually charge it. */
+  prices: Record<string, number>;
+};
+
 /** The administrator's contact centres — WhatsApp and Telegram, nothing else. */
 export type AdminContact = {
   message: string | null;
@@ -165,6 +178,7 @@ export class StreamLiveClient {
   private pingFailures = 0;
   private sessionId: string | null = null;
   private pendingEnd: string | null = null;
+  private shopCache: { at: number; info: CheckoutInfo } | null = null;
 
   constructor(cfg: GatewayConfig) {
     this.cfg = cfg;
@@ -328,6 +342,38 @@ export class StreamLiveClient {
         video_audio: Number(p.video_audio_minutes ?? 0),
       },
     }));
+  }
+
+  /**
+   * The online payment shelf. A null answer means there is no online door: the service
+   * is not deployed, is switched off, or did not answer. Nothing here throws, because
+   * somebody reading prices must never be blocked by the payment service being down.
+   */
+  async checkout(): Promise<CheckoutInfo | null> {
+    // Three screens ask for the shelf at once and the watermark banner asks on every
+    // mount, so one answer is kept for a minute rather than fetched each time.
+    if (this.shopCache && Date.now() - this.shopCache.at < 60_000) return this.shopCache.info;
+    let j: Record<string, unknown>;
+    try {
+      const token = await this.token();
+      const res = await fetch(`${this.cfg.supabaseUrl}/functions/v1/paystack-checkout`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return null;
+      j = await res.json() as Record<string, unknown>;
+    } catch {
+      return null;
+    }
+    const page = String(j.page ?? "");
+    if (!/^https:\/\/\S+$/.test(page)) return null;
+    const prices: Record<string, number> = {};
+    for (const p of (Array.isArray(j.packages) ? j.packages as Array<Record<string, unknown>> : [])) {
+      const cents = Number(p.price_ghp ?? 0);
+      if (cents > 0) prices[String(p.id)] = Math.round(cents) / 100;
+    }
+    const info: CheckoutInfo = { enabled: j.enabled === true, page, currency: String(j.currency ?? "GHS"), prices };
+    this.shopCache = { at: Date.now(), info };
+    return info;
   }
 
   async ledger(limit = 50): Promise<Array<Record<string, unknown>>> {

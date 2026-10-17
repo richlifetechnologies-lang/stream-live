@@ -6,11 +6,14 @@ import { WatermarkOffer } from "../components/watermark-offer";
 import { gateway, useAccount } from "../lib/gateway";
 import { MOD_LABELS } from "../lib/minutes";
 import { toUserMessage } from "../lib/end-reason";
-import { FEATURE_LABELS, usd, type AccountSnapshot, type Modality, type Plan } from "@stream-live/client";
-import { Check, Clock, Monitor, RefreshCw, Sparkles, Tag } from "lucide-react";
+import { FEATURE_LABELS, usd, type AccountSnapshot, type CheckoutInfo, type Modality, type Plan } from "@stream-live/client";
+import { Check, Clock, CreditCard, Monitor, RefreshCw, Sparkles, Tag } from "lucide-react";
 
 const C = "hsl(187 100% 52%)";
 const MODS: Modality[] = ["video", "audio", "video_audio"];
+
+/** The cedi figure the payment page will charge — the seller's own, not a guess. */
+const ghs = (n: number) => "GH\u20B5" + n.toFixed(2);
 
 const panel: React.CSSProperties = {
   background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 18, marginBottom: 14,
@@ -25,14 +28,15 @@ export default function PlansPage() {
   const [, setLocation] = useLocation();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [snap, setSnap] = useState<AccountSnapshot | null>(null);
+  const [shop, setShop] = useState<CheckoutInfo | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
   const load = useCallback(async () => {
     if (!account.signedIn) return;
     try {
-      const [p, s] = await Promise.all([gateway.plans(), gateway.snapshot()]);
-      setPlans(p); setSnap(s); setError(null);
+      const [p, s, c] = await Promise.all([gateway.plans(), gateway.snapshot(), gateway.checkout()]);
+      setPlans(p); setSnap(s); setShop(c); setError(null);
     } catch (e) {
       setError(toUserMessage(e, "We couldn't load the plans. Try again in a moment."));
     } finally {
@@ -44,6 +48,10 @@ export default function PlansPage() {
 
   const videoWallet = snap?.wallets.find(w => w.modality === "video");
   const videoLeft = videoWallet?.unlimited ? null : Number(videoWallet?.balance ?? 0);
+  // Only a package the payment service itself quotes is buyable. A card it does not
+  // name keeps its price and its minutes and simply has no button, so the screen can
+  // never promise a purchase the page would refuse.
+  const online = shop?.enabled === true;
 
   if (!account.signedIn) {
     return (
@@ -78,7 +86,9 @@ export default function PlansPage() {
           <div>
             <h1 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 20, color: "hsl(190 80% 96%)", marginBottom: 3 }}>Plans and prices</h1>
             <p style={{ fontSize: 13, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", maxWidth: 620, margin: 0 }}>
-              The packages your administrator sells and the minutes each one carries. Pay by MoMo or Bitcoin, then ask for the top-up on the Minutes page — minutes never expire.
+              {online
+                ? "The packages your administrator sells and the minutes each one carries. Buy one below, pay by card or mobile money, and the minutes are in your account before you come back — no request to send and nobody to wait for. Minutes never expire."
+                : "The packages your administrator sells and the minutes each one carries. Pay by MoMo or Bitcoin, then ask for the top-up on the Minutes page — minutes never expire."}
             </p>
           </div>
           <button onClick={() => void load()}
@@ -105,6 +115,7 @@ export default function PlansPage() {
           {plans.map(p => {
             const mine = snap?.planId === p.id;
             const mins = MODS.filter(m => p.minutes[m] > 0);
+            const buyable = online ? shop!.prices[p.id] : undefined;
             return (
               <div key={p.id} style={{ ...panel, marginBottom: 0, borderColor: mine ? `${C}66` : "hsl(222 40% 11%)", display: "flex", flexDirection: "column" }}>
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10 }}>
@@ -134,6 +145,13 @@ export default function PlansPage() {
                   </div>
                 )}
 
+                {buyable !== undefined && (
+                  <a href={shop!.page} target="_blank" rel="noreferrer"
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12, padding: "11px 16px", borderRadius: 10, background: C, color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 13.5, fontFamily: "'Rajdhani',sans-serif", textDecoration: "none", cursor: "pointer" }}>
+                    <CreditCard style={{ width: 14, height: 14 }} /> Buy — {ghs(buyable)}
+                  </a>
+                )}
+
                 {p.includes.length > 0 && (
                   <ul style={{ listStyle: "none", padding: 0, margin: "10px 0 14px", display: "flex", flexDirection: "column", gap: 6 }}>
                     {p.includes.map((line, i) => (
@@ -161,7 +179,7 @@ export default function PlansPage() {
 
         {snap && (hasPayment(snap.pay) || hasContact(snap.contact)) ? (
           <>
-            <PayCard pay={snap.pay} title="Pay the administrator — MoMo or Bitcoin only" />
+            <PayCard pay={snap.pay} title={online ? "Or pay the administrator directly" : "Pay the administrator — MoMo or Bitcoin only"} />
             <ContactCard contact={snap.contact} title="After paying, tell the administrator" />
           </>
         ) : (
@@ -177,7 +195,9 @@ export default function PlansPage() {
 
         <div style={{ ...panel, background: "transparent", border: "1px dashed hsl(222 40% 14%)" }}>
           <p style={{ fontSize: 12, color: "hsl(222 25% 48%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.6 }}>
-            The minutes above land in your account when your administrator confirms the payment, and they never expire. Prices and minutes are set by them — Stream Live takes no card details, charges nothing inside the app, and there is no trial balance.
+            {online
+              ? "Buying on this screen charges through the payment page in your browser — card or mobile money — and the minutes land in your account the moment it clears. Minutes never expire. Prices and minutes are set by your administrator."
+              : "The minutes above land in your account when your administrator confirms the payment, and they never expire. Prices and minutes are set by them — Stream Live takes no card details, charges nothing inside the app, and there is no trial balance."}
           </p>
         </div>
       </div>

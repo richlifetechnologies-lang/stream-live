@@ -1,5 +1,7 @@
+import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Sparkles } from "lucide-react";
+import { gateway } from "../lib/gateway";
 
 const GOLD = "hsl(38 100% 58%)";
 
@@ -12,6 +14,9 @@ const GOLD = "hsl(38 100% 58%)";
  * a balance: the instant minutes are credited the account stops being a trial
  * account and this leaves with the next snapshot, whether or not the money has been
  * spent yet.
+ *
+ * While the seller has online payment open the button goes straight to the payment
+ * page — choosing a package and paying is one click away, not a form to fill in.
  */
 export function WatermarkOffer({
   paid,
@@ -21,11 +26,19 @@ export function WatermarkOffer({
 }: {
   paid: boolean;
   videoMinutesLeft: number | null;
-  /** Where the button leads. On the pricing page itself the next step is the request form. */
+  /** Where the button leads when there is no online till. */
   ctaLabel?: string;
   ctaHref?: string;
 }) {
   const [, setLocation] = useLocation();
+  const [page, setPage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (paid || videoMinutesLeft === null || videoMinutesLeft >= 1) return;
+    let alive = true;
+    gateway.checkout().then(c => { if (alive && c?.enabled) setPage(c.page); });
+    return () => { alive = false; };
+  }, [paid, videoMinutesLeft]);
 
   if (paid) return null;
   // A minute is the smallest thing the app sells, and under a minute no call can
@@ -65,6 +78,20 @@ export function WatermarkOffer({
         </p>
       </div>
 
+      {page ? (
+        <a href={page} target="_blank" rel="noreferrer"
+          style={{
+            alignSelf: "center", display: "inline-block", padding: "14px 22px", borderRadius: 11, border: "none",
+            background: GOLD, color: "hsl(222 47% 6%)", fontWeight: 700, fontSize: 14,
+            fontFamily: "'Orbitron', monospace", letterSpacing: "0.04em", cursor: "pointer",
+            whiteSpace: "nowrap", boxShadow: `0 0 26px ${GOLD}55`, textDecoration: "none",
+          }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.filter = "brightness(1.08)"; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}
+        >
+          Buy minutes
+        </a>
+      ) : (
       <button
         onClick={() => setLocation(ctaHref)}
         style={{
@@ -78,6 +105,7 @@ export function WatermarkOffer({
       >
         {ctaLabel}
       </button>
+      )}
     </div>
   );
 }

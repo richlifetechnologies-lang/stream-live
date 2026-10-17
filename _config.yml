@@ -5,10 +5,12 @@
 #
 # Publishing is limited to what a customer should be able to read:
 #   index.html     the Stream Live page, and the target of the Site URL
+#   checkout/      the page a customer pays on — mirrored into stream-live-releases,
+#                  which is the address the gateway actually sends buyers back to
 #   admin-panel/   the operator screen, at its existing address
 #
 # Do not add a .nojekyll file. That disables Jekyll entirely, which serves the
-# raw repository instead of the two entries below and re-opens the whole leak.
+# raw repository instead of the entries below and re-opens the whole leak.
 title: Stream Live
 description: An AI camera and voice for OBS, Zoom, Teams and calls
 

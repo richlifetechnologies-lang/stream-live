@@ -170,11 +170,11 @@
     <div class="grid">
       <div class="card">
         <h3>Windows 10 or 11</h3>
-        <p><code>StreamLive-Setup-1.7.4.exe</code><br>
+        <p><code>StreamLive-Setup-1.8.0.exe</code><br>
           Double-click it and accept the security prompt. Part way through it asks to add one free audio
           driver — press <b>Yes</b>. When it finishes, <b>restart the computer</b>: the microphone does not
           work until you do. Nothing else to download.</p>
-        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.7.4/StreamLive-Setup-1.7.4.exe">Download for Windows</a></p>
+        <p><a class="btn primary" href="https://github.com/richlifetechnologies-lang/stream-live-releases/releases/download/v1.8.0/StreamLive-Setup-1.8.0.exe">Download for Windows</a></p>
       </div>
       <div class="card">
         <h3>Mac with an Apple chip</h3>
@@ -307,14 +307,32 @@
     <ul class="plain">
       <li>Packages and prices are listed in the app under <b>Plans</b>, and your remaining time under
         <b>Minutes</b>.</li>
-      <li>Pay for a package, then send the reference from the same screen — the app shows the payment and
-        contact details to use.</li>
-      <li>An administrator adds the minutes to your account, and the app shows the new balance without you
-        restarting it.</li>
-      <li>Time does not expire, and one account can be used on more than one computer.</li>
+      <li>Pay by card or mobile money and the minutes go into your account on their own — no message to send,
+        nobody to wait for. They never expire.</li>
+      <li>Or pay the administrator directly with MoMo or Bitcoin, then send them the reference from the same
+        screen; they add the minutes themselves.</li>
+      <li>One account can be used on more than one computer.</li>
     </ul>
+    <div class="cta" style="margin-top:22px">
+      <a class="btn primary" id="buy" href="checkout/" hidden>Buy minutes</a>
+    </div>
   </div>
 </section>
+<script>
+// The buy door only appears while the seller actually has online payment switched on,
+// so a closed till can never leave a dead button on the page.
+(async function () {
+  try {
+    const res = await fetch("https://onhanfathvfkkliayvrn.supabase.co/functions/v1/paystack-checkout");
+    const data = await res.json();
+    if (data && data.enabled === true && Array.isArray(data.packages) && data.packages.length) {
+      const cheapest = Math.min.apply(null, data.packages.map(p => Number(p.price_ghp) || 0));
+      document.getElementById("buy").textContent = "Buy minutes from GH₵" + (cheapest / 100).toFixed(2);
+      document.getElementById("buy").hidden = false;
+    }
+  } catch (e) { /* no payment door today */ }
+})();
+</script>
 
 <section id="help">
   <div class="wrap">

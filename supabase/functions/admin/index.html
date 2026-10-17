@@ -350,12 +350,7 @@
           <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="payOpen" /> Take payments on the buy page</label></div>
           <button id="payRefresh">Refresh</button>
         </div>
-        <div class="row" style="align-items:center;gap:8px;margin:0 0 8px;flex-wrap:wrap">
-          <span class="muted">Where a customer pays you online:</span>
-          <a id="payPageUrl" href="#" target="_blank" rel="noopener" style="font-size:12.5px">not live yet</a>
-          <button id="payPageCopy" disabled>Copy address</button>
-        </div>
-        <p class="muted" style="margin:6px 0 12px">Every order the buy page opened — by card or by mobile money — lands here. <span class="pill ok">credited</span> means the money arrived <b>and the minutes are already in that account</b>: there is nothing to approve and pressing anything else would pay the customer twice. Anything else is money that has not become minutes yet, and the last column says why.</p>
+        <p class="muted" style="margin:6px 0 12px">Every order the buy page opened — by card or by mobile money — lands here. A customer reaches that page from the Buy button in the app and from your Stream Live page; you never have to send anybody an address. <span class="pill ok">credited</span> means the money arrived <b>and the minutes are already in that account</b>: there is nothing to approve and pressing anything else would pay the customer twice. Anything else is money that has not become minutes yet, and the last column says why.</p>
         <div id="payTotals" class="muted" style="margin:0 0 10px"></div>
         <div style="overflow:auto">
           <table id="payTable">
@@ -1876,33 +1871,7 @@
       .join(" + ");
   }
 
-  // The address a customer types into a browser to pay you. It is not stored on this
-  // panel and never typed by you: the payment service already knows it, because it is
-  // the page the buyer is sent back to once Paystack has the money. Reading it from
-  // there means this line can never disagree with where payments actually land — if
-  // the page moves, the new address appears here by itself.
-  let PAY_PAGE_URL = "";
-  async function showPayPageLink() {
-    if (PAY_PAGE_URL) return;
-    const a = $("payPageUrl");
-    try {
-      const res = await fetch(SUPABASE_URL + "/functions/v1/paystack-checkout", {
-        headers: { apikey: SUPABASE_ANON_KEY, Authorization: "Bearer " + SUPABASE_ANON_KEY },
-      });
-      const body = await res.json().catch(() => ({}));
-      const page = String(body.page || "");
-      if (!/^https:\/\/[^\s]+$/.test(page)) throw new Error("no address");
-      PAY_PAGE_URL = page;
-      a.href = page;
-      a.textContent = page;
-      $("payPageCopy").disabled = false;
-    } catch (e) {
-      a.textContent = "not live yet";
-    }
-  }
-
   async function loadPayments() {
-    void showPayPageLink();
     const onlyAttention = $("payAttention").checked;
     const [{ data, error }, plans, cfgRes] = await Promise.all([
       sb.from("payments").select("*").order("created_at", { ascending: false }).limit(300),
@@ -1973,14 +1942,6 @@
     msg("payMsg", want
       ? "Open. The buy page now charges real money for every package that carries minutes and a price, and each payment credits that customer by itself."
       : "Closed. The buy page now refuses every payment and tells the customer to pay you another way. Nothing already paid is undone, and a payment that is on its way still lands.", "ok");
-  };
-  $("payPageCopy").onclick = async () => {
-    try {
-      await navigator.clipboard.writeText(PAY_PAGE_URL);
-      msg("payMsg", "Copied. A customer opens that address, types the email their account was made with, picks card or mobile money, and the minutes land by themselves — no request to file and nothing for you to approve.", "ok");
-    } catch (e) {
-      msg("payMsg", "The browser would not let the page copy it — open the address and copy it from the address bar instead.");
-    }
   };
 
   // ══ KEY POOL ════════════════════════════════════════════════════════════

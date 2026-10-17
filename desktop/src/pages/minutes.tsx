@@ -7,8 +7,8 @@ import { ContactCard, PayCard } from "../components/contact";
 import { WatermarkOffer } from "../components/watermark-offer";
 import { gateway, useAccount, useLease, requestTopup } from "../lib/gateway";
 import { toUserMessage } from "../lib/end-reason";
-import type { AccountSnapshot, Modality } from "@stream-live/client";
-import { Hourglass, Radio, RefreshCw, Send, ArrowLeftRight, CircleCheck, CircleOff } from "lucide-react";
+import type { AccountSnapshot, CheckoutInfo, Modality } from "@stream-live/client";
+import { Hourglass, Radio, RefreshCw, Send, ArrowLeftRight, CircleCheck, CircleOff, CreditCard } from "lucide-react";
 
 const C = "hsl(187 100% 52%)";
 const MODS: Modality[] = ["video", "audio", "video_audio"];
@@ -54,6 +54,7 @@ export default function MinutesPage() {
   const [, setLocation] = useLocation();
 
   const [snap, setSnap] = useState<AccountSnapshot | null>(null);
+  const [shop, setShop] = useState<CheckoutInfo | null>(null);
   const [ledger, setLedger] = useState<Array<Record<string, unknown>>>([]);
   const [requests, setRequests] = useState<Array<Record<string, unknown>>>([]);
   const [error, setError] = useState<string | null>(null);
@@ -78,6 +79,14 @@ export default function MinutesPage() {
   }, [account.signedIn]);
 
   useEffect(() => { void load(); }, [load]);
+  // The packages change far less often than the balances, so this is read once per
+  // visit rather than on every 15-second refresh.
+  useEffect(() => {
+    if (!account.signedIn) return;
+    let alive = true;
+    gateway.checkout().then(c => { if (alive && c) setShop(c); });
+    return () => { alive = false; };
+  }, [account.signedIn]);
   // Balances move when a lease settles, so refresh while the page is open.
   useEffect(() => {
     if (!account.signedIn) return;
@@ -170,6 +179,12 @@ export default function MinutesPage() {
           <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
             <Badge icon={Radio} tone={running > 0 ? "hsl(143 72% 55%)" : "hsl(222 25% 45%)"} text={running > 0 ? `${running} live now` : "no calls running"} />
             <Badge icon={Hourglass} tone={pending > 0 ? "hsl(35 100% 60%)" : "hsl(222 25% 45%)"} text={pending > 0 ? `${pending} top-up${pending === 1 ? "" : "s"} waiting` : "no requests waiting"} />
+            {shop?.enabled === true && (
+              <button onClick={() => setLocation("/plans")}
+                style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 9, border: "none", background: C, color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 12.5, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer" }}>
+                <CreditCard style={{ width: 13, height: 13 }} /> Buy minutes
+              </button>
+            )}
           </div>
         </div>
 
@@ -212,10 +227,17 @@ export default function MinutesPage() {
                   {Number(w.total_credited).toFixed(1)} min credited
                 </span>
                 {(zero || low) && (
-                  <button onClick={() => askFor(w.modality)}
-                    style={{ padding: "6px 12px", borderRadius: 7, background: `${tone}1f`, border: `1px solid ${tone}55`, cursor: "pointer", color: tone, fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
-                    Ask for minutes
-                  </button>
+                  shop?.enabled === true ? (
+                    <button onClick={() => setLocation("/plans")}
+                      style={{ padding: "6px 12px", borderRadius: 7, background: `${tone}1f`, border: `1px solid ${tone}55`, cursor: "pointer", color: tone, fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
+                      Buy minutes
+                    </button>
+                  ) : (
+                    <button onClick={() => askFor(w.modality)}
+                      style={{ padding: "6px 12px", borderRadius: 7, background: `${tone}1f`, border: `1px solid ${tone}55`, cursor: "pointer", color: tone, fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
+                      Ask for minutes
+                    </button>
+                  )
                 )}
               </div>
             </div>
@@ -280,7 +302,9 @@ export default function MinutesPage() {
               <Send style={{ width: 14, height: 14 }} /> {sending ? "Sending…" : "Send request"}
             </button>
             <p style={{ fontSize: 11, color: "hsl(222 25% 42%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.5 }}>
-              Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in this bucket once they approve it and never expire.{" "}
+              {shop?.enabled === true
+                ? "Use this only when you paid outside the app — by MoMo, Bitcoin or in person. Anything bought with the Buy button needs no request; the minutes arrive on their own."
+                : "Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in this bucket once they approve it and never expire."}{" "}
               <button onClick={() => setLocation("/plans")}
                 style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: C, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
                 See plans and prices
