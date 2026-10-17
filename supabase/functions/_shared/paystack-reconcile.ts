@@ -37,22 +37,44 @@ export type PaystackTxn = {
  * "The money went back to the payer."
  *
  * A transaction Paystack has refunded still verifies as `success` - the charge happened -
- * with the refund carried in a separate field. Without this check a re-check would happily
- * hand out minutes for money the customer already has back in their wallet, which is the
- * one way this gateway can lose the seller real money.
+ * with the refund carried in a separate field. A mobile-money **reversal** is different
+ * again: the transaction's own state becomes `reversed`. Both mean the same thing for this
+ * gateway, and both were seen on the live account, so both are handled here. Without this
+ * a re-check would happily hand out minutes for money the customer already has back in
+ * their wallet, which is the one way this gateway can lose the seller real money.
  */
 export function refundState(txn: PaystackTxn): string | null {
   const s = String(txn.refund_status ?? "").toLowerCase();
   return s === "processed" || s === "ok" || s === "success" ? s : null;
 }
 
+/** True when Paystack has put this money back with the payer, by refund or by reversal. */
+export function moneyReturned(txn: PaystackTxn): boolean {
+  return refundState(txn) !== null || String(txn.status ?? "").toLowerCase() === "reversed";
+}
+
+/** The sentence written on the order, in the payer's own words. */
+export function returnedWhy(txn: PaystackTxn): string {
+  return String(txn.status ?? "").toLowerCase() === "reversed"
+    ? "Paystack reversed this payment back to the payer's wallet, so no minutes were added"
+    : "Paystack refunded this payment to the payer, so no minutes were added";
+}
+
 /** Writes the refund onto the order so the seller's Payments tab and the receipt both say so. */
-export async function markRefunded(reference: string, why: string): Promise<void> {
+export async function markRefunded(
+  reference: string,
+  why: string,
+  paystackId = "",
+): Promise<void> {
   // A credited order is left alone on purpose: the minutes were already delivered, and
   // clawing them back or double-marking is the seller's call, not this code's.
+  const patch: Record<string, unknown> = { status: "refunded", note: why };
+  // Paystack's own number is what the seller searches his till with, and a closed order
+  // never got one until a re-check asked - the receipt has to be able to show it.
+  if (paystackId.length) patch.paystack_id = paystackId;
   const { error } = await adminClient()
     .from("payments")
-    .update({ status: "refunded", note: why })
+    .update(patch)
     .eq("reference", reference)
     .neq("status", "credited");
   if (error) console.error(`paystack refund mark ${reference}: ${error.message}`);
@@ -118,11 +140,12 @@ export async function settleByReference(reference: string): Promise<Outcome> {
 
   const { txn, detail } = await verify(reference, key);
   if (!txn) return { ...base, result: "unchecked", detail };
-  // Refunded first: Paystack still calls a refunded charge a success, so this has to be
-  // settled before anything decides the money is here.
-  if (refundState(txn)) {
-    await markRefunded(reference, "Paystack refunded this payment to the payer, so no minutes were added");
-    return { ...base, result: "refunded", detail: "Paystack says this payment was refunded to the payer, so nothing is owed on it." };
+  // Returned money first: Paystack still calls a refunded charge a success, and a reversal
+  // arrives as its own state, so this has to be settled before anything decides the money
+  // is here.
+  if (moneyReturned(txn)) {
+    await markRefunded(reference, returnedWhy(txn), String(txn.id ?? ""));
+    return { ...base, result: "refunded", detail: "Paystack says this payment went back to the payer, so nothing is owed on it." };
   }
   if (txn.status !== "success") {
     // Not yet, or never. Pending mobile money is a normal wait and must not be marked failed.

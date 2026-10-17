@@ -20,7 +20,7 @@
 // infrastructure failure answers 500 and lets the retry land it.
 import { adminClient } from "../_shared/db.ts";
 import { preflight, json, fail } from "../_shared/cors.ts";
-import { markRefunded, refundState, type PaystackTxn } from "../_shared/paystack-reconcile.ts";
+import { markRefunded, moneyReturned, returnedWhy, type PaystackTxn } from "../_shared/paystack-reconcile.ts";
 
 const API = "https://api.paystack.co";
 const TIMEOUT_MS = 15_000;
@@ -79,11 +79,12 @@ async function handle(req: Request): Promise<Response> {
   }
 
   const txn = fetched.data as Record<string, unknown> & PaystackTxn;
-  // A charge Paystack has already refunded still verifies as success. The money is back
-  // with the payer, so the order is closed as refunded instead of buying minutes.
-  if (refundState(txn)) {
-    await markRefunded(reference, "Paystack refunded this payment to the payer, so no minutes were added");
-    console.log(`paystack settle ${reference}: already refunded (${String(txn.refund_status)}) — nothing credited`);
+  // A charge Paystack has refunded still verifies as success, and a mobile-money reversal
+  // arrives as its own state. Either way the money is back with the payer, so the order is
+  // closed as refunded instead of buying minutes.
+  if (moneyReturned(txn)) {
+    await markRefunded(reference, returnedWhy(txn), String(txn.id ?? ""));
+    console.log(`paystack settle ${reference}: money returned (${String(txn.status)}/${String(txn.refund_status)}) — nothing credited`);
     return json({ ok: true, reference, refunded: true });
   }
   // A reference this gateway issued is an order we opened, so the package and the
