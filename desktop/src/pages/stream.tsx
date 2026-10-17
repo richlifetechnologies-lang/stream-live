@@ -1077,17 +1077,20 @@ export default function StreamPage() {
   const videoLeft = !videoWallet || videoWallet.unlimited ? null : videoWallet.balance;
 
   // A new account holds one thing: the free video minute. Dropping it on the
-  // video+audio tab would open the app on a bucket the customer has never had and
-  // cannot fill from a trial, so when video is the only funded bucket, the tab
-  // follows the wallet. Once per sign-in — after that the choice is theirs.
-  const trialTabRouted = useRef(false);
+  // video+audio tab opens the app on a bucket the customer has never had and cannot
+  // fill from a trial, and the copy sitting on that tab then tells them they have no
+  // minutes — so the tab follows the money until they pick one themselves. It re-checks
+  // on every balance read rather than once, because a trial that lands a beat after
+  // sign-in must still route them to where it actually is.
+  const tabChosen = useRef(false);
   useEffect(() => {
-    if (trialTabRouted.current || account.loading || !account.signedIn || account.wallets.length === 0) return;
-    trialTabRouted.current = true;
-    if (hasMinutes(account, "video") && !hasMinutes(account, "audio") && !hasMinutes(account, "video_audio")) {
-      setActiveTab("video-only");
-    }
-  }, [account]);
+    if (tabChosen.current || account.loading || !account.signedIn || account.wallets.length === 0) return;
+    if (account.live) return;
+    const here = modalityForTab(activeTab);
+    if (hasMinutes(account, here)) return;
+    const elsewhere = TABS.filter(t => t.id !== activeTab && hasMinutes(account, modalityForTab(t.id)));
+    if (elsewhere.length === 1) setActiveTab(elsewhere[0].id);
+  }, [account, activeTab]);
 
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
@@ -1130,6 +1133,7 @@ export default function StreamPage() {
 
   // ─── Tab switch: stop stream first ─────────────────────────────────────────
   const switchTab = useCallback((tab: TabId) => {
+    tabChosen.current = true;
     if (isStreaming || isStarting) {
       teardownStream();
       toast({ title: "Stream stopped", description: "Switching modes." });
