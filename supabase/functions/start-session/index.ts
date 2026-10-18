@@ -8,7 +8,8 @@
 // Resp: { sessionId, token|null, expiresInSeconds, leaseExpiresAt, modality,
 //         balance, unlimited, wallet, leaseMinutes }
 // Errors: 401 auth, 402 no balance, 403 entitlement/device, 409 concurrent limit,
-//         412 update required, 503 maintenance, 502 upstream key failure.
+//         412 update required, 429 the line is still being released (with
+//         retry_after_seconds), 503 maintenance, 502 upstream key failure.
 import { preflight, json, fail } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { adminClient } from "../_shared/db.ts";
@@ -35,19 +36,21 @@ const STATUS_BY_REASON: Record<string, number> = {
 };
 
 // The video app this product sells, in the spelling fal.ai documents for an app id:
-// owner/name. The desktop opens wss://fal.run/decart/lucy-2-5/realtime, so this is the
-// app that call has to be allowed for.
-const REALTIME_APP = "decart/lucy-2-5";
+// owner/name, plus the endpoint suffix. The desktop opens
+// wss://fal.run/decart/lucy-2-5/realtime, so that is the app a call has to be allowed for.
+const REALTIME_APP = "decart/lucy-2-5/realtime";
 
 async function mintFalToken(userId: string, appId: string, ttlSeconds: number) {
   const expiration = Math.max(DEFAULT_TOKEN_TTL_SECONDS, ttlSeconds);
-  // Builds up to 1.8.6 name this app as the bare "lucy-2-5", which is not an app id
-  // fal's own documentation recognises, and a token minted for it still comes back 200.
-  // The paid path then dies a few seconds into the connection — 72 of its last 84 calls
-  // on this gateway closed without ever sending a picture, while every trial call on the
-  // other pipeline worked. Carrying both spellings fixes the installed builds as soon as
-  // this function is redeployed, and cannot take away anything that works today: fal has
-  // never refused either name at mint time, it only decides at connect time.
+  // Builds up to 1.8.6 ask for the bare "lucy-2-5", which is not an app id fal's own
+  // documentation recognises, and a mint for it still comes back 200. Both spellings are
+  // carried so a token is good for whatever the installed build opens.
+  //
+  // This is naming hygiene, not the cure for the calls that die a few seconds in. The
+  // live records say the refusals follow the customer's machine and its re-ask spacing,
+  // and calls on that same bare-name token did get through while others did not - so
+  // fixing this alone would leave the complaint exactly where it is. The gate that
+  // answers it is the machine pacing added to sl_start_session.
   const allowedApps = Array.from(new Set([appId, REALTIME_APP].filter(Boolean)));
   return runWithKeys<{ token: string; expiresAt: string }>(userId, "fal", async (key) => {
     const res = await fetch("https://rest.fal.ai/tokens/", {
@@ -164,9 +167,17 @@ Deno.serve(async (req: Request) => {
 
     const started = await startLease(user.id, modality, tab, deviceId);
     if (!started.lease) {
+      // A paced machine is told how long to wait, in seconds, so the app can count it
+      // down instead of pressing a dead pass. Only a number ever leaves; the gate's own
+      // wording stays in the record.
+      const wait = Number((started.detail as { retry_after_seconds?: unknown } | null)?.retry_after_seconds);
       return fail(String(started.reason ?? "could not start session"),
         STATUS_BY_REASON[String(started.reason ?? "")] ?? 403,
-        { reason: started.reason, balances: acct.balances });
+        {
+          reason: started.reason,
+          balances: acct.balances,
+          retry_after_seconds: Number.isFinite(wait) && wait > 0 ? Math.min(Math.round(wait), 600) : null,
+        });
     }
     const lease = started.lease;
 

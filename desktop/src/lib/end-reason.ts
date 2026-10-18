@@ -15,7 +15,7 @@ const REASON_COPY: Record<string, string> = {
   device_limit_reached: "You've reached the number of devices allowed on this account. Your administrator can free one up for you.",
   device_revoked: "This device was removed by your administrator.",
   concurrent_limit: "You're already on a call. End it before starting another one.",
-  lines_busy: "Every video line our provider allows is in use right now. Give it a minute and try again.",
+  lines_busy: "The video line you need is still being released from the last call, so this one didn't open. Nothing was used for it — give it a minute and try again.",
   not_entitled: "This account isn't allowed to make that kind of call. Ask your administrator.",
   maintenance: "The service is being updated. Try again in a little while.",
   update_required: "This version of Stream Live is out of date. Update to keep going.",

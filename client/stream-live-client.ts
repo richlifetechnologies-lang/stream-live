@@ -153,12 +153,25 @@ export class GatewayError extends Error {
   readonly status: number;
   readonly reason: string;
   readonly balances?: Record<string, number | null>;
+  /**
+   * Seconds the gateway asked us to wait before pressing this machine's Start again,
+   * when it refused because the video line it just used is still being released.
+   * Null for every other refusal — repeating those only wastes the customer's time.
+   */
+  readonly retryAfterSeconds: number | null;
 
-  constructor(message: string, status: number, reason: string, balances?: Record<string, number | null>) {
+  constructor(
+    message: string,
+    status: number,
+    reason: string,
+    balances?: Record<string, number | null>,
+    retryAfterSeconds: number | null = null,
+  ) {
     super(message);
     this.status = status;
     this.reason = reason;
     this.balances = balances;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -171,6 +184,7 @@ const REASON_BY_STATUS: Record<number, string> = {
   403: "not_entitled",
   409: "concurrent_limit",
   412: "update_required",
+  429: "lines_busy",
   503: "maintenance",
 };
 
@@ -717,7 +731,11 @@ export class StreamLiveClient {
     }
     if (!res.ok) {
       const reason = String(parsed?.reason ?? REASON_BY_STATUS[res.status] ?? "gateway_error");
-      throw new GatewayError(String(parsed?.error ?? `${fn} failed`), res.status, reason, parsed?.balances as never);
+      const announced = Number(parsed?.retry_after_seconds);
+      const wait = Number.isFinite(announced) && announced > 0 ? Math.round(announced) : null;
+      throw new GatewayError(
+        String(parsed?.error ?? `${fn} failed`), res.status, reason,
+        parsed?.balances as never, wait);
     }
     return parsed as Record<string, never>;
   }

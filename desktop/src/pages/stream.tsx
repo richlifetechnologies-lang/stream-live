@@ -921,6 +921,9 @@ export default function StreamPage() {
   const [isStarting, setIsStarting]  = useState(false);
   const [isClosing, setIsClosing]    = useState(false);
   const [connStep, setConnStep]       = useState<"auth"|"engine"|"retry"|null>(null);
+  // Seconds left on a wait the gateway announced for this machine. Null when nobody has
+  // asked us to hold, so the overlay keeps its old wording for a plain retry.
+  const [pacingSeconds, setPacingSeconds] = useState<number | null>(null);
   const [elapsed, setElapsed]         = useState(0);
   // Frames-per-second readout, shown below the video panel. Never on the panel:
   // that frame is what OBS and the calling apps capture. Updated straight into
@@ -1828,9 +1831,31 @@ export default function StreamPage() {
         needsVideo,
         err instanceof Error ? err.message : String(err),
         sessionId,
+        err instanceof GatewayError ? err.retryAfterSeconds : null,
       );
     }
   }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation]);
+
+  /**
+   * Sleep, counting the seconds on screen. A wait the server announced for this exact
+   * machine is not a mystery pause, so it is shown as one with a number on it - and the
+   * Cancel button is honoured in the middle of it rather than at the end.
+   */
+  const countedWait = useCallback((ms: number) => new Promise<void>(resolve => {
+    const until = Date.now() + ms;
+    setPacingSeconds(Math.ceil(ms / 1000));
+    const step = () => {
+      const left = until - Date.now();
+      if (left <= 0 || startCancelRef.current) {
+        clearInterval(t);
+        setPacingSeconds(null);
+        resolve();
+        return;
+      }
+      setPacingSeconds(Math.ceil(left / 1000));
+    };
+    const t = setInterval(step, 1000);
+  }), []);
 
   /**
    * Press of the Start button. Asks for a call, and when the video line accepts it and
@@ -1866,7 +1891,7 @@ export default function StreamPage() {
         // a wait is not an idle page, or a second press would open two calls.
         isStartingRef.current = true;
         setConnStep("retry");
-        await new Promise<void>(r => setTimeout(r, waitMs));
+        await countedWait(waitMs);
         // Cancelled, or he left the page, while we waited. Starting his call after he
         // said no to it is worse than the failure itself.
         if (startCancelRef.current) return;
@@ -1883,10 +1908,11 @@ export default function StreamPage() {
       if (f.reason === "update_required") getElectronAPI()?.checkForUpdate?.();
       toast({ title: "Cannot start", description: startFailureMessage(f), variant: "destructive" });
     } finally {
-      isStartingRef.current = false; setIsStarting(false); setConnStep(null);
+      isStartingRef.current = false; setIsStarting(false); setConnStep(null); setPacingSeconds(null);
     }
   }, [isStreaming, credsMissing, cameraReady, activeTab, selectedStyle, customPrompt, refImageB64,
-      selectedMicId, vcEnabled, vcVoiceId, attemptStart, teardownStream, toast, setLocation, account]);
+      selectedMicId, vcEnabled, vcVoiceId, attemptStart, teardownStream, toast, setLocation, account,
+      countedWait]);
 
   const handleStop = useCallback(() => teardownStream(), [teardownStream]);
 
@@ -2594,14 +2620,24 @@ export default function StreamPage() {
           <div style={{ position: "absolute", inset: 0, backdropFilter: "blur(8px)", background: "hsl(222 47% 4% / 0.88)" }} />
           <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, maxWidth: 360, width: "100%", margin: "0 16px", textAlign: "center", padding: 36, borderRadius: 20, background: "hsl(222 44% 6%)", border: "1px solid hsl(187 100% 52% / 0.22)" }}>
             <Loader2 style={{ width: 40, height: 40, color: C, animation: "spin 1s linear infinite" }} />
-            <div>
-              <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>Starting…</h3>
-              <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
-                {connStep === "engine" ? "2/2 · Connecting to AI engine…"
-                  : connStep === "retry" ? "2/2 · The video line didn't answer. Asking again…"
-                  : "1/2 · Authorizing your account…"}
-              </p>
-            </div>
+            {pacingSeconds !== null ? (
+              <div>
+                <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>One moment…</h3>
+                <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
+                  Your video line from the last call is still being released. Asking again in{" "}
+                  {pacingSeconds} second{pacingSeconds === 1 ? "" : "s"}. Nothing is being charged while you wait.
+                </p>
+              </div>
+            ) : (
+              <div>
+                <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>Starting…</h3>
+                <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
+                  {connStep === "engine" ? "2/2 · Connecting to AI engine…"
+                    : connStep === "retry" ? "2/2 · The video line didn't answer. Asking again…"
+                    : "1/2 · Authorizing your account…"}
+                </p>
+              </div>
+            )}
             <button onClick={() => { startCancelRef.current = true; void teardownStream(); }} style={{ padding: "10px 20px", borderRadius: 8, width: "100%", background: "transparent", border: "1px solid hsl(187 100% 52% / 0.25)", color: "hsl(187 100% 52% / 0.8)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
               <X style={{ width: 14, height: 14 }} /> Cancel
             </button>
