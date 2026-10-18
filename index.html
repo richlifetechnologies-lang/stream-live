@@ -325,8 +325,10 @@
   try {
     const res = await fetch("https://onhanfathvfkkliayvrn.supabase.co/functions/v1/paystack-checkout");
     const data = await res.json();
-    if (data && data.enabled === true && Array.isArray(data.packages) && data.packages.length) {
-      const cheapest = Math.min.apply(null, data.packages.map(p => Number(p.price_ghp) || 0));
+    const priced = (Array.isArray(data.packages) ? data.packages : [])
+      .filter(p => Number(p.price_ghp) > 0);
+    if (data && data.enabled === true && priced.length) {
+      const cheapest = Math.min.apply(null, priced.map(p => Number(p.price_ghp)));
       document.getElementById("buy").textContent = "Buy minutes from GH₵" + (cheapest / 100).toFixed(2);
       document.getElementById("buy").hidden = false;
     }
