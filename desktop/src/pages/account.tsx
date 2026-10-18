@@ -3,9 +3,10 @@ import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout";
 import { ArtBackdrop, Logo } from "../components/brand";
 import { useToast } from "../hooks/use-toast";
-import { gateway, useAccount, signIn, signUp, signOut } from "../lib/gateway";
+import { gateway, useAccount, useAdminContact, signIn, signUp, signOut } from "../lib/gateway";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
 import { toUserMessage } from "../lib/end-reason";
+import { ContactLine } from "../components/contact";
 import { LogIn, LogOut, UserPlus, KeyRound, Loader2, Hourglass, CreditCard } from "lucide-react";
 
 const C = "hsl(187 100% 52%)";
@@ -39,6 +40,7 @@ export default function AccountPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const account = useAccount();
+  const contact = useAdminContact();
 
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [email, setEmail] = useState("");
@@ -179,6 +181,11 @@ export default function AccountPage() {
               {busy ? <Loader2 style={{ width: 15, height: 15, animation: "spin 1s linear infinite" }} /> : authMode === "signup" ? <UserPlus style={{ width: 15, height: 15 }} /> : <LogIn style={{ width: 15, height: 15 }} />}
               {busy ? "Please wait…" : authMode === "signup" ? "Create account" : "Sign in"}
             </button>
+            {(contact?.whatsapp || contact?.telegram) && (
+              <div style={{ padding: "11px 13px", borderRadius: 11, background: "hsl(222 55% 5% / 0.7)", border: "1px solid hsl(222 40% 14%)" }}>
+                <ContactLine contact={contact} note="Trouble getting in, or want minutes before you pay? Message your administrator:" />
+              </div>
+            )}
             <div style={{ display: "flex", gap: 6, justifyContent: "center", flexWrap: "wrap", marginTop: 4 }}>
               {["Video + Audio Call", "Audio Call Only", "Video Call Only"].map(t => (
                 <span key={t} style={{

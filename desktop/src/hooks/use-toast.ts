@@ -8,6 +8,12 @@ interface Toast {
   description?: string;
   variant?: ToastVariant;
   duration?: number;
+  /**
+   * Show the administrator's WhatsApp / Telegram under this message. Only a refusal the
+   * customer cannot fix themselves earns it — the rest stay quiet, because on the pages
+   * that already carry his numbers a second copy is noise.
+   */
+  withContact?: boolean;
 }
 
 let listeners: Array<(toasts: Toast[]) => void> = [];
@@ -19,7 +25,7 @@ function dispatch(toast: Toast) {
   setTimeout(() => {
     toasts = toasts.filter((t) => t.id !== toast.id);
     listeners.forEach((l) => l(toasts));
-  }, toast.duration ?? 4000);
+  }, toast.duration ?? (toast.withContact ? 12_000 : 4_000));
 }
 
 export function useToast() {

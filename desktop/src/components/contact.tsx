@@ -93,3 +93,42 @@ export function ContactCard({ contact, title = "Contact the administrator" }: { 
     </Shell>
   );
 }
+
+function Pill({ icon: Icon, label, href, value }: {
+  icon: React.ElementType; label: string; href: string; value: string;
+}) {
+  return (
+    <a href={href} target="_blank" rel="noreferrer" title={`${label}: ${value}`}
+      style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, background: "hsl(187 100% 52% / 0.1)", border: "1px solid hsl(187 100% 52% / 0.3)", textDecoration: "none", minWidth: 0 }}>
+      <Icon style={{ width: 13, height: 13, color: C, flexShrink: 0 }} />
+      <span style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 92%)", fontFamily: "'Rajdhani',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{value}</span>
+    </a>
+  );
+}
+
+/**
+ * The handles as a line rather than a page: one tap opens the chat.
+ *
+ * A full card is easy to walk past, which is why the numbers already in the app went
+ * unseen. This is the version that sits beside a problem — the sign-in screen, a
+ * refusal, the end of the tour — where the customer actually wants them.
+ */
+export function ContactLine({ contact, note, stack = false }: {
+  contact: AdminContact | null;
+  note?: string;
+  /** The nav rail is 190px wide, so the two handles have to sit one above the other. */
+  stack?: boolean;
+}) {
+  if (!contact?.whatsapp && !contact?.telegram) return null;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
+      {note && (
+        <p style={{ fontSize: 11, color: "hsl(222 25% 58%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, margin: 0 }}>{note}</p>
+      )}
+      <div style={{ display: "flex", flexDirection: stack ? "column" : "row", gap: 6, flexWrap: "wrap" }}>
+        {contact!.whatsapp && <Pill icon={MessageCircle} label="WhatsApp" href={waLink(contact!.whatsapp)} value={contact!.whatsapp} />}
+        {contact!.telegram && <Pill icon={Send} label="Telegram" href={tgLink(contact!.telegram)} value={contact!.telegram} />}
+      </div>
+    </div>
+  );
+}

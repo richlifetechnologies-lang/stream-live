@@ -1,6 +1,8 @@
 import { Link, useLocation } from "wouter";
 import { Video, Settings, History, Hourglass, User, CreditCard } from "lucide-react";
 import { Logo } from "./brand";
+import { ContactLine } from "./contact";
+import { useAdminContact } from "../lib/gateway";
 
 /**
  * Width of the nav rail. Anything that centres itself against the window rather
@@ -8,8 +10,12 @@ import { Logo } from "./brand";
  */
 export const RAIL_W = 190;
 
+/** Pages that already carry the full contact card in their own body. */
+const HAS_CARD = ["/minutes", "/plans"];
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
+  const contact = useAdminContact();
 
   const navItems = [
     { href: "/", icon: Video, label: "Stream" },
@@ -79,6 +85,15 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             </div>
           );
         })}
+
+        {/* The administrator, always one glance away — a card on another page is
+            something a stuck customer has to go and find. The two pages that already
+            carry the full card are left alone, so the numbers never show twice. */}
+        {contact && !HAS_CARD.some(p => location.startsWith(p)) && (
+          <div style={{ marginTop: "auto", padding: "14px 12px 0", borderTop: "1px solid hsl(222 40% 9%)" }}>
+            <ContactLine contact={contact} stack note="Stuck? Message your administrator:" />
+          </div>
+        )}
       </aside>
 
       {/* Main content */}

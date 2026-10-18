@@ -1,9 +1,10 @@
 import { AppLayout } from "../components/layout";
 import { MacSetupCard } from "../components/mac-setup";
 import { useLocation, Link } from "wouter";
-import { User, Wallet, LogOut, Trash2, ArrowRight } from "lucide-react";
+import { User, Wallet, LogOut, Trash2, ArrowRight, Compass } from "lucide-react";
 import { clearCredentials } from "../lib/credentials";
 import { useAccount, signOut } from "../lib/gateway";
+import { requestTour, useTourSeen } from "../components/guided-tour";
 import { countdown } from "../lib/minutes";
 import { useToast } from "../hooks/use-toast";
 import type { Modality } from "@stream-live/client";
@@ -26,6 +27,10 @@ export default function SettingsPage() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
   const account = useAccount();
+  const seen = useTourSeen();
+
+  // The tour lives on the stream screen, because that is where the panels are.
+  const handleTour = () => { requestTour(); setLocation("/"); };
 
   const handleClearVoices = () => {
     if (!confirm("Remove your saved voices from this device?")) return;
@@ -84,8 +89,23 @@ export default function SettingsPage() {
           </p>
         </div>
 
-        {/* ── Mac output path ──────────────────────────────────────────────── */}
-        <MacSetupCard />
+        {/* ── Walk-through ─────────────────────────────────────────────────── */}
+        <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 20, marginBottom: 14 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron', monospace", marginBottom: 10 }}>
+            Walk-through
+          </p>
+          <p style={{ fontSize: 13, color: "hsl(222 25% 62%)", fontFamily: "'Rajdhani', sans-serif", lineHeight: 1.6, marginBottom: 14 }}>
+            A step-by-step tour of all three tabs: the camera, the style, the voice and the Start button.
+            Every new computer gets it once, about a minute long.{' '}
+            {seen ? "This computer has already been through it." : "This computer hasn't been through it yet."}
+          </p>
+          <button onClick={handleTour}
+            style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 18px", borderRadius: 8, background: C, border: "none", color: BG, fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani', sans-serif", cursor: "pointer" }}>
+            <Compass style={{ width: 14, height: 14 }} /> Walk me through the app
+          </button>
+        </div>
+
+        {/* ── Mac output path ──────────────────────────────────────────────── */}        <MacSetupCard />
 
         {/* ── Danger zone ──────────────────────────────────────────────────── */}
         <div style={{ background: "hsl(0 60% 7%)", border: "1px solid hsl(0 85% 40% / 0.25)", borderRadius: 14, padding: 20 }}>

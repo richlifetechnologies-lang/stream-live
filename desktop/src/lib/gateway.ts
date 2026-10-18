@@ -11,6 +11,7 @@ import {
 } from "@stream-live/client";
 import { GATEWAY_CONFIG } from "./gateway-config";
 import type { LiveLease } from "./minutes";
+import type { AdminContact } from "@stream-live/client";
 
 export type { LiveLease };
 
@@ -60,6 +61,44 @@ export function useAccount(): AccountState {
 
 export function useLease(): LiveLease | null {
   return useSyncExternalStore(subscribe, () => state.live, () => state.live);
+}
+
+/**
+ * The administrator's own WhatsApp / Telegram handles, kept for the whole app rather
+ * than fetched page by page.
+ *
+ * They arrive inside the account snapshot, so any screen that shows them needs a read
+ * it would otherwise not make — and the sign-in screen cannot read them at all, because
+ * a snapshot needs an account. Hence the last known pair is stored on this machine: a
+ * customer who signed in once and came back locked out still finds the numbers waiting.
+ */
+const CONTACT_STORAGE = "ss_admin_contact";
+
+function readStoredContact(): AdminContact | null {
+  try {
+    const raw = localStorage.getItem(CONTACT_STORAGE);
+    return raw ? (JSON.parse(raw) as AdminContact) : null;
+  } catch { return null; }
+}
+
+let adminContact: AdminContact | null = readStoredContact();
+const contactListeners = new Set<() => void>();
+
+function setAdminContact(next: AdminContact | null): void {
+  // Handles that were never published must not wipe the pair from the last account
+  // this machine saw — an empty read is not news, and the numbers on screen are real.
+  if (!next || (!next.whatsapp && !next.telegram && !next.message)) return;
+  adminContact = next;
+  try { localStorage.setItem(CONTACT_STORAGE, JSON.stringify(next)); } catch { /**/ }
+  contactListeners.forEach((l) => l());
+}
+
+export function useAdminContact(): AdminContact | null {
+  return useSyncExternalStore(
+    (cb) => { contactListeners.add(cb); return () => { contactListeners.delete(cb); }; },
+    () => adminContact,
+    () => adminContact,
+  );
 }
 
 export function beginLease(ticket: CallTicket): void {
@@ -200,6 +239,7 @@ export async function refreshBalances(): Promise<void> {
     // One snapshot carries both the buckets and the paid flag, so the upgrade copy and
     // the balances can never disagree. It speaks snake_case; the store does not.
     const s = await gateway.snapshot();
+    setAdminContact(s.contact ?? s.app?.contact ?? null);
     setState({
       paid: s.paid,
       error: null,

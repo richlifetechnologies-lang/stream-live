@@ -6,7 +6,7 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure } from "../lib/gateway";
+import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure } from "../lib/gateway";
 import { drainOf } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
@@ -18,8 +18,9 @@ import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voi
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
-  Volume2, Upload, Trash2, Video, Headphones, VideoIcon, Smartphone, CameraOff,
+  Volume2, Upload, Trash2, Video, Headphones, VideoIcon, Smartphone, CameraOff, Sparkles,
 } from "lucide-react";
+import { GuidedTour, onTourRequested, tourSeen, tourStops } from "../components/guided-tour";
 import { encode, decode } from "@msgpack/msgpack";
 
 // ─── Branding ─────────────────────────────────────────────────────────────────
@@ -1079,6 +1080,30 @@ export default function StreamPage() {
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
   const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
 
+  // The free minute is the one thing in the app that cannot be lost, and the one thing
+  // customers leave sitting there: nothing about it expires, and nothing on screen said
+  // so. Shown only on a bucket this tab can actually start a call from, and only while
+  // the account has never held anything but the trial — a paying customer has heard it.
+  const trialWaiting = account.signedIn && !account.paid && !account.live &&
+    hasMinutes(account, modalityForTab(activeTab));
+
+  // The same question asked across every bucket rather than the visible one: the tour
+  // walks all three tabs, and its list of stops must not change length underneath it.
+  const tourHasTrial = account.signedIn && !account.paid &&
+    account.wallets.some(w => !w.unlimited && w.balance > 0);
+
+  // ─── Walk-through ──────────────────────────────────────────────────────────
+  // Every machine gets it once, from its first signed-in moment, and Settings can call
+  // it back. It is not opened over a call in flight, and while it runs the tab router
+  // below stands down — nothing may move the page out from under a stop.
+  const [tourOpen, setTourOpen] = useState(false);
+  const tourContact = useAdminContact();
+  useEffect(() => {
+    if (tourSeen() || !account.signedIn || account.loading || account.live) return;
+    setTourOpen(true);
+  }, [account.signedIn, account.loading, account.live]);
+  useEffect(() => onTourRequested(() => setTourOpen(true)), []);
+
   // The lease pre-debits on the server, so this balance already reflects a call in
   // flight; an unlimited bucket has no trial left to talk about.
   const videoWallet = bucketFor(account, "video");
@@ -1094,11 +1119,14 @@ export default function StreamPage() {
   useEffect(() => {
     if (tabChosen.current || account.loading || !account.signedIn || account.wallets.length === 0) return;
     if (account.live) return;
+    // The walk-through moves between the three tabs itself; a router that follows the
+    // money would pull the page back under the stop being explained.
+    if (tourOpen) return;
     const here = modalityForTab(activeTab);
     if (hasMinutes(account, here)) return;
     const elsewhere = TABS.filter(t => t.id !== activeTab && hasMinutes(account, modalityForTab(t.id)));
     if (elsewhere.length === 1) setActiveTab(elsewhere[0].id);
-  }, [account, activeTab]);
+  }, [account, activeTab, tourOpen]);
 
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
@@ -1175,7 +1203,7 @@ export default function StreamPage() {
       if (camCountRef.current) camCountRef.current.srcObject = stream;
       cameraReadyRef.current = true;
       setCameraReady(true); enumerateDevices();
-    } catch { toast({ title: "Camera Error", description: "Could not access camera.", variant: "destructive" }); }
+    } catch { toast({ title: "Camera Error", description: "Could not access camera.", variant: "destructive", withContact: true }); }
   }, [selectedCamId, enumerateDevices, toast]);
 
   // Refs so enumerateDevices can restart the live camera without a dep cycle.
@@ -1280,14 +1308,14 @@ export default function StreamPage() {
     const api = getElectronAPI();
     if (!api?.vcamStart || !api?.vcamStop) {
       setVcamSupported(false);
-      toast({ title: "Virtual camera unavailable", description: "Run in the Stream Live desktop app on Windows, and install the Stream Live Camera driver.", variant: "destructive" });
+      toast({ title: "Virtual camera unavailable", description: "Run in the Stream Live desktop app on Windows, and install the Stream Live Camera driver.", variant: "destructive", withContact: true });
       return;
     }
     if (!vcamEnabled) {
       const r = await api.vcamStart();
       setVcamSupported(r.supported);
       if (!r.supported) {
-        toast({ title: "Virtual camera unavailable", description: r.error || "The native driver layer could not load.", variant: "destructive" });
+        toast({ title: "Virtual camera unavailable", description: r.error || "The native driver layer could not load.", variant: "destructive", withContact: true });
         return;
       }
       setVcamEnabled(true);
@@ -1406,7 +1434,7 @@ export default function StreamPage() {
     const setSinks = async (id: string) => { for (const el of els) await el.setSinkId!(id); };
     if (!on) { for (const el of els) { try { await el.setSinkId?.(""); } catch { /* ignore */ } } setCableSinkLabel(""); return; }
     if (els.some(el => typeof el.setSinkId !== "function")) {
-      toast({ title: "Audio routing unsupported", description: "This runtime can't select an output device.", variant: "destructive" });
+      toast({ title: "Audio routing unsupported", description: "This runtime can't select an output device.", variant: "destructive", withContact: true });
       setAudioRouteOn(false); return;
     }
     // 1) User-pinned output device (works even when labels are hidden).
@@ -1442,7 +1470,7 @@ export default function StreamPage() {
       description: IS_MAC
         ? `${CABLE_NAME} isn't visible to Stream Live.${diag} Install it from existential.audio/blackhole, log out and back in, then pick it in the “Audio out” dropdown. Steps: Settings → Mac Setup.`
         : `The VB-Audio cable output device isn't visible.${diag} Pick it manually from the “Audio out” dropdown in the Broadcast panel (choose the unlabeled / VB-Cable entry), or set “Speakers (VB-Audio Virtual Cable)” as your Windows default playback device.`,
-      variant: "destructive",
+      variant: "destructive", withContact: true,
     });
     setAudioRouteOn(false); return;
   }, [findCableSink, toast, manualSinkId, audioOutputs, chooseManualSink]);
@@ -1759,13 +1787,13 @@ export default function StreamPage() {
               iceGraceRef.current = null;
               if (sessionGenRef.current !== gen) return;
               void teardownStream();
-              toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive" });
+              toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
             }, 6000);
           },
           () => {
             if (sessionGenRef.current !== gen) return;
             void teardownStream();
-            toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive" });
+            toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
           },
           prompt, refImageB64,
         );
@@ -1789,7 +1817,7 @@ export default function StreamPage() {
           const el = cloneAudioRef.current;
           return !!el && !el.paused && el.readyState >= 2;
         };
-        cloner.onError = msg => toast({ title: "Voice engine problem", description: toUserMessage(msg, "The voice service had trouble. Try again."), variant: "destructive" });
+        cloner.onError = msg => toast({ title: "Voice engine problem", description: toUserMessage(msg, "The voice service had trouble. Try again."), variant: "destructive", withContact: true });
         await cloner.start(micStreamForCloner ?? micOnlyStreamRef.current!);
         clonerRef.current = cloner;
         setVcAnalyser(cloner.getAnalyser());
@@ -1809,7 +1837,7 @@ export default function StreamPage() {
         if (state.ended) {
           void teardownStream();
           const oom = state.reason === "out_of_minutes";
-          toast({ title: oom ? "Out of minutes" : "Call ended", description: endReasonMessage(state.reason), variant: "destructive" });
+          toast({ title: oom ? "Out of minutes" : "Call ended", description: endReasonMessage(state.reason), variant: "destructive", withContact: true });
           if (oom) setLocation("/minutes");
         }
       }, 45_000);
@@ -1906,7 +1934,7 @@ export default function StreamPage() {
       // A refused old build is the one case where we can fix it ourselves: ask the
       // updater for the banner instead of leaving him stuck on a message with nowhere to go.
       if (f.reason === "update_required") getElectronAPI()?.checkForUpdate?.();
-      toast({ title: "Cannot start", description: startFailureMessage(f), variant: "destructive" });
+      toast({ title: "Cannot start", description: startFailureMessage(f), variant: "destructive", withContact: true });
     } finally {
       isStartingRef.current = false; setIsStarting(false); setConnStep(null); setPacingSeconds(null);
     }
@@ -1960,7 +1988,7 @@ export default function StreamPage() {
       setUploadVoiceName("");
       toast({ title: "Voice uploaded!", description: `"${voice.name}" is ready to use.` });
     } catch (err) {
-      toast({ title: "Upload failed", description: toUserMessage(err, "Could not upload the voice. Try again."), variant: "destructive" });
+      toast({ title: "Upload failed", description: toUserMessage(err, "Could not upload the voice. Try again."), variant: "destructive", withContact: true });
     } finally { setUploadingVoice(false); }
   }, [account.signedIn, uploadVoiceName, toast]);
 
@@ -2064,7 +2092,7 @@ export default function StreamPage() {
 
     return (
       <>
-      <div style={panelStyle}>
+      <div data-tour="screen" style={panelStyle}>
         {/* AI output video — always clean, no overlay chrome.
             objectFit:"cover" on the 9:16 panel IS the portrait rectangle the frame
             pump paints, so the preview and the caller's view match exactly, and only
@@ -2224,7 +2252,15 @@ export default function StreamPage() {
   // ─── Stream button ─────────────────────────────────────────────────────────
   const canStart = !credsMissing && (needsVideo ? cameraReady : true);
   const StreamBtn = () => (
-    <div style={{ position: "fixed", left: `calc(${RAIL_W}px + (100vw - ${RAIL_W}px) / 2)`, transform: "translateX(-50%)", bottom: 18, zIndex: 60, width: `min(440px, calc(100vw - ${RAIL_W}px - 48px))`, filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.55))" }}>
+    <div data-tour="start" style={{ position: "fixed", left: `calc(${RAIL_W}px + (100vw - ${RAIL_W}px) / 2)`, transform: "translateX(-50%)", bottom: 18, zIndex: 60, width: `min(440px, calc(100vw - ${RAIL_W}px - 48px))`, filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.55))" }}>
+      {!isStreaming && trialWaiting && (
+        <div data-tour="trial" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 10, background: "hsl(187 100% 52% / 0.1)", border: "1px solid hsl(187 100% 52% / 0.3)" }}>
+          <Sparkles style={{ width: 14, height: 14, color: C, flexShrink: 0 }} />
+          <p style={{ fontSize: 12, color: "hsl(187 60% 85%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>
+            You have free minutes waiting. They don't expire — press <b style={{ color: "hsl(190 80% 96%)" }}>Start</b> whenever you're ready.
+          </p>
+        </div>
+      )}
       <MinuteMeter modality={modalityForTab(activeTab)} />
       {isStreaming ? (
         <button onClick={handleStop}
@@ -2250,7 +2286,7 @@ export default function StreamPage() {
 
   // ─── Voice cloning panel (shared between tabs) ─────────────────────────────
   const VoicePanel = () => (
-    <div style={{ background: "hsl(222 44% 6%)", border: `1px solid ${vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 11%)"}`, borderRadius: 14, padding: 16 }}>
+    <div data-tour="voice" style={{ background: "hsl(222 44% 6%)", border: `1px solid ${vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 11%)"}`, borderRadius: 14, padding: 16 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -2259,7 +2295,7 @@ export default function StreamPage() {
         </div>
         {/* Toggle */}
         <button onClick={() => {
-          if (!voiceKeySet && !vcEnabled) { toast({ title: "Out of minutes", description: "Ask your administrator to top up this bucket before using voice cloning.", variant: "destructive" }); return; }
+          if (!voiceKeySet && !vcEnabled) { toast({ title: "Out of minutes", description: "Ask your administrator to top up this bucket before using voice cloning.", variant: "destructive", withContact: true }); return; }
           setVcEnabled(v => !v);
         }}
           style={{ width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer", background: vcEnabled ? VC : "hsl(222 40% 14%)", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
@@ -2374,7 +2410,7 @@ export default function StreamPage() {
   const DeviceSelectors = ({ showCamera }: { showCamera: boolean }) => (
     <>
       {showCamera && (
-        <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+        <div data-tour="camera" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
             <Camera style={{ width: 15, height: 15, color: C }} />
           </div>
@@ -2396,7 +2432,7 @@ export default function StreamPage() {
         </div>
       )}
 
-      <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div data-tour="mic" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Mic style={{ width: 15, height: 15, color: C }} />
         </div>
@@ -2418,7 +2454,7 @@ export default function StreamPage() {
       </div>
 
       {/* Microphone handling — automatic, nothing to switch on, and live before any call */}
-      <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(187 100% 52% / 0.35)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div data-tour="micgate" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(187 100% 52% / 0.35)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Mic style={{ width: 15, height: 15, color: C }} />
         </div>
@@ -2458,7 +2494,7 @@ export default function StreamPage() {
       </button>
     );
     return (
-      <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+      <div data-tour="broadcast" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>Broadcast to Calls</p>
           <span style={{ fontSize: 9, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif" }}>Zoom · Teams · Chrome · WhatsApp</span>
@@ -2675,7 +2711,7 @@ export default function StreamPage() {
         </div>
 
         {/* ── 3 TABS ─────────────────────────────────────────────────────── */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 24, background: "hsl(222 44% 5%)", padding: 5, borderRadius: 16, border: "1px solid hsl(222 40% 10%)" }}>
+        <div data-tour="tabs" style={{ display: "flex", gap: 6, marginBottom: 24, background: "hsl(222 44% 5%)", padding: 5, borderRadius: 16, border: "1px solid hsl(222 40% 10%)" }}>
           {TABS.map(tab => {
             const active = activeTab === tab.id;
             return (
@@ -2750,7 +2786,7 @@ export default function StreamPage() {
             {/* Right sidebar */}
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
               {/* Style presets */}
-              <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+              <div data-tour="style" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 12 }}>AI Style</p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                   {STYLES.map(s => (
@@ -2762,7 +2798,7 @@ export default function StreamPage() {
                 </div>
               </div>
               {/* Custom prompt */}
-              <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+              <div data-tour="prompt" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>Custom Prompt</p>
                 <textarea value={customPrompt} onChange={e => handleCustomPromptChange(e.target.value)} placeholder={curStyle.prompt} rows={3}
                   style={{ width: "100%", padding: 10, borderRadius: 8, resize: "vertical", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, outline: "none" }}
@@ -2773,7 +2809,7 @@ export default function StreamPage() {
               {AudioSyncPanel()}
               {VoicePanel()}
               {/* Reference image */}
-              <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+              <div data-tour="ref" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>Reference Image</p>
                 {refImagePreview ? (
                   <div style={{ position: "relative" }}>
@@ -2804,7 +2840,7 @@ export default function StreamPage() {
             {/* Left */}
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {/* Waveform display */}
-              <div style={{ borderRadius: 14, overflow: "hidden", background: "hsl(222 44% 5%)", border: `1px solid ${connStatus === "connected" ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)"}`, padding: 24, boxShadow: connStatus === "connected" ? "0 0 40px hsl(265 90% 65% / 0.15)" : "none" }}>
+              <div data-tour="wave" style={{ borderRadius: 14, overflow: "hidden", background: "hsl(222 44% 5%)", border: `1px solid ${connStatus === "connected" ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)"}`, padding: 24, boxShadow: connStatus === "connected" ? "0 0 40px hsl(265 90% 65% / 0.15)" : "none" }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                     <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(265 90% 65% / 0.15)", border: "1px solid hsl(265 90% 65% / 0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -2873,7 +2909,7 @@ export default function StreamPage() {
             </div>
             {/* Right */}
             <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+              <div data-tour="style" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 12 }}>AI Style</p>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                   {STYLES.map(s => (
@@ -2884,7 +2920,7 @@ export default function StreamPage() {
                   ))}
                 </div>
               </div>
-              <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+              <div data-tour="prompt" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>Custom Prompt</p>
                 <textarea value={customPrompt} onChange={e => handleCustomPromptChange(e.target.value)} placeholder={curStyle.prompt} rows={3}
                   style={{ width: "100%", padding: 10, borderRadius: 8, resize: "vertical", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, outline: "none" }}
@@ -2892,7 +2928,7 @@ export default function StreamPage() {
                   onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
               </div>
               {AudioSyncPanel()}
-              <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+              <div data-tour="ref" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
                 <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>Reference Image</p>
                 {refImagePreview ? (
                   <div style={{ position: "relative" }}>
@@ -2918,6 +2954,18 @@ export default function StreamPage() {
 
       {/* Always-visible Start/Stop action bar (fixed, shown on every tab) */}
       {StreamBtn()}
+
+      {/* The walk-through. Never over a live or starting call — it moves the tabs about,
+          and a stop that lands mid-call would cost the customer real minutes. */}
+      {tourOpen && !isStreaming && !isStarting && !account.live && (
+        <GuidedTour
+          stops={tourStops(tourHasTrial)}
+          tab={activeTab}
+          onTab={t => setActiveTab(t)}
+          contact={tourContact}
+          onClose={() => setTourOpen(false)}
+        />
+      )}
 
       <style>{`@keyframes spin{to{transform:rotate(360deg)}} @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}`}</style>
     </AppLayout>

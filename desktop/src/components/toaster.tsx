@@ -1,10 +1,13 @@
 import { useState, useEffect } from "react";
 import { useToast } from "../hooks/use-toast";
+import { useAdminContact } from "../lib/gateway";
+import { ContactLine } from "./contact";
 import { X } from "lucide-react";
 
 export default function Toaster() {
   const { subscribe } = useToast();
-  const [toasts, setToasts] = useState<Array<{ id: string; title: string; description?: string; variant?: string }>>([]);
+  const contact = useAdminContact();
+  const [toasts, setToasts] = useState<Array<{ id: string; title: string; description?: string; variant?: string; withContact?: boolean }>>([]);
 
   useEffect(() => {
     return subscribe(setToasts);
@@ -32,6 +35,13 @@ export default function Toaster() {
               <p className="text-xs mt-0.5" style={{ color: "hsl(222 25% 60%)", fontFamily: "'Rajdhani',sans-serif" }}>
                 {t.description}
               </p>
+            )}
+            {/* The one message a customer cannot fix alone. Four seconds is not enough
+                to read a refusal and then tap a number, so these cards stay 12s. */}
+            {t.withContact && (contact?.whatsapp || contact?.telegram) && (
+              <div style={{ marginTop: 9 }}>
+                <ContactLine contact={contact} note="Tell your administrator what happened:" />
+              </div>
             )}
           </div>
         </div>
