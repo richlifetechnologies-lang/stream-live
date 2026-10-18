@@ -95,8 +95,9 @@ export default function SettingsPage() {
             Walk-through
           </p>
           <p style={{ fontSize: 13, color: "hsl(222 25% 62%)", fontFamily: "'Rajdhani', sans-serif", lineHeight: 1.6, marginBottom: 14 }}>
-            A step-by-step tour of all three tabs: the camera, the style, the voice and the Start button.
-            Every new computer gets it once, about a minute long.{' '}
+            A short tour of the Video Call tab — the camera, the style, the reference photo,
+            where your free minute sits and the Start button.{' '}
+            Every new computer gets it once, half a minute long.{' '}
             {seen ? "This computer has already been through it." : "This computer hasn't been through it yet."}
           </p>
           <button onClick={handleTour}

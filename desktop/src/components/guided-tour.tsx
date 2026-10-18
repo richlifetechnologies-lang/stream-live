@@ -2,12 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import type { AdminContact } from "@stream-live/client";
 import { ContactLine } from "./contact";
-import { CABLE_NAME, IS_MAC } from "../lib/platform";
+import { IS_MAC } from "../lib/platform";
 
 const C = "hsl(187 100% 52%)";
 
-/** What the microphone the call app must be pointed at is called on this machine. */
-const MIC = IS_MAC ? CABLE_NAME : "CABLE Output";
 /** Windows ships a camera driver; a Mac takes the picture out of OBS instead. */
 const CAM = IS_MAC ? "OBS Virtual Camera" : "Stream Live Camera";
 
@@ -61,10 +59,11 @@ export type TourTab = "video-audio" | "audio-only" | "video-only";
 /**
  * One stop of the walk-through.
  *
- * `anchor` names a panel marked with data-tour on the stream screen. A stop can belong
- * to a tab the customer is not looking at, because one walk-through has to cover all
- * three: the tour moves the page there itself and waits for the panel to appear. A panel
- * that isn't on screen shows the card in the middle rather than a ring around nothing.
+ * `anchor` names a panel marked with data-tour on the stream screen. A walk-through that
+ * moved between the three tabs turned into a tour of a call type the customer had not
+ * chosen, so it stays on the one tab a new account can actually use — the tab the free
+ * minute funds — and the page is moved there before the first card shows. A panel that
+ * isn't on screen shows the card in the middle rather than a ring around nothing.
  */
 export type TourStop = {
   tab: TourTab;
@@ -73,71 +72,42 @@ export type TourStop = {
   body: string;
 };
 
+/** The tab a new account is walked through: the one the free video minute is spent on. */
+export const TOUR_TAB: TourTab = "video-only";
+
 /** The walk-through, in the order a first call is actually set up. */
 export const TOUR_STOPS: TourStop[] = [
   {
-    tab: "video-audio", anchor: "tabs", title: "Three tabs, three kinds of call",
-    body: "Pick the tab that matches what you are joining. Video + Audio is a full AI call: your picture and a voice. Audio Call sends a voice only. Video Call sends the picture only. Every tab keeps its own camera, style and voice, so moving between them never loses what you set up.",
+    tab: TOUR_TAB, anchor: "screen", title: "Video Call: the AI picture, your own voice",
+    body: "This tab sends the picture the AI draws of you, and your normal voice — nothing about how you sound is changed or set up here. What the other person sees is drawn in this window, live, before anybody calls you. The other two tabs are the same picture or the same voice with an AI voice added, and you can try them whenever you like. Nothing is counted while you are only looking at it.",
   },
   {
-    tab: "video-audio", anchor: "screen", title: "This window is what the other person sees",
-    body: "The AI draws you here, live, before anybody calls you. The small buttons in the corner put this picture in its own window for OBS, pop it out, or fill your screen. Nothing is counted while you are only looking at it.",
+    tab: TOUR_TAB, anchor: "camera", title: "Point your own camera at yourself",
+    body: "Choose your real webcam in the Camera box. Do not pick " + CAM + " here — the AI has to see you to draw you. If the list is empty, allow Stream Live to use your camera in your computer's privacy settings.",
   },
   {
-    tab: "video-audio", anchor: "camera", title: "Point your own camera at yourself",
-    body: "Choose your real webcam in the Camera box and the microphone you speak into underneath it. Do not pick " + CAM + " here — the AI has to see you to draw you. If a list is empty, allow Stream Live to use that device in your computer's privacy settings.",
-  },
-  {
-    tab: "video-audio", anchor: "style", title: "Choose what you look like",
+    tab: TOUR_TAB, anchor: "style", title: "Choose what you look like",
     body: "One tap redraws you in that style. The box below it takes your own description in words. You can change the look during a call and it updates without hanging up.",
   },
   {
-    tab: "video-audio", anchor: "voice", title: "Your voice, or another one",
-    body: "Switch Voice Cloning on to speak with a different voice: pick one from the list, or upload 30 seconds of you talking and the AI speaks as you. Leave it off to stay on your own voice.",
-  },
-  {
-    tab: "video-audio", anchor: "ref", title: "One photo makes it look like you",
+    tab: TOUR_TAB, anchor: "ref", title: "One photo makes it look like you",
     body: "Optional, and worth the ten seconds. Upload a clear front-facing photo and the AI keeps your features instead of inventing somebody else's.",
-  },
-  {
-    tab: "video-audio", anchor: IS_MAC ? "screen" : "broadcast", title: "How the picture gets into your call",
-    body: IS_MAC
-      ? "Open the OBS button on the video window, then in OBS add a Window Capture of Stream Live and press Start Virtual Camera. In your call app choose OBS Virtual Camera as the camera and " + MIC + " as the microphone. Settings has these steps with the two free helpers to install."
-      : "This panel hands the AI picture and voice to Zoom, Teams, Meet or WhatsApp. Turn both switches on, then in your call app choose Stream Live Camera as the camera and " + MIC + " as the microphone. Nothing else in the call app needs changing.",
-  },
-  {
-    tab: "video-audio", anchor: "start", title: "Start, then join your call",
-    body: "Press Start and wait until the picture in that window is moving — that is the moment your minutes begin counting, and nothing is charged before it. Press Stop here when you are finished, and the meter above the button always shows what you have left.",
-  },
-  {
-    tab: "audio-only", anchor: "wave", title: "Audio Call: a voice, no picture",
-    body: "Use this tab when the call only needs to hear you. The upper line is your voice going in, the lower one is the AI voice coming out, so you can see it working. Your camera stays off and only your audio minutes are used.",
-  },
-  {
-    tab: "audio-only", anchor: "voice", title: "This tab is where the voice is set",
-    body: "Pick or upload the voice here and switch Voice Cloning on. Then press Start and set your call app's microphone to " + MIC + " — that is the entire setup for an audio-only call.",
-  },
-  {
-    tab: "audio-only", anchor: "start", title: "Start, and they hear the AI voice",
-    body: "Wait for the lower line to move, then join the call with its microphone set to " + MIC + ". Wear headphones: on loudspeakers the call comes straight back out of your microphone.",
-  },
-  {
-    tab: "video-only", anchor: "screen", title: "Video Call: the picture only",
-    body: "Use this tab when the call needs to see you but not hear an AI voice. Your own voice goes through the call app as normal, and this tab spends only your video minutes.",
-  },
-  {
-    tab: "video-only", anchor: "camera", title: "Your webcam goes in here",
-    body: "Pick your own camera in the Camera box. Everything the picture needs is on this tab: the camera, the style, the description and the reference photo.",
   },
   {
     // The free minute is a video minute, so this is the tab that actually carries it —
     // and the only stop that appears for an account still holding one.
-    tab: "video-only", anchor: "trial", title: "Your free minute is still waiting",
+    tab: TOUR_TAB, anchor: "trial", title: "Your free minute is still waiting",
     body: "The minute that came with your account does not run out and does not have to be used today — it sits here until you press Start. Using it leaves a small mark on the AI picture; once your administrator adds minutes, the mark is gone.",
   },
   {
-    tab: "video-only", anchor: "start", title: "Start, then pick " + CAM + " in the call",
-    body: "Press Start, wait for the picture to move, and set your call app's camera to " + CAM + ". Leave its microphone on your own device — this tab does not touch your voice.",
+    tab: TOUR_TAB, anchor: "broadcast", title: "How the picture gets into your call",
+    body: IS_MAC
+      ? "In your call app choose " + CAM + " as the camera, and leave its microphone on your own device — this tab sends your real voice, so there is nothing to route. Settings has these steps with the free helper to install."
+      : "Turn this panel's camera switch on, then in your call app choose " + CAM + " as the camera and leave its microphone on your own device. Nothing else in the call app needs changing.",
+  },
+  {
+    tab: TOUR_TAB, anchor: "start", title: "Start, then join your call",
+    body: "Press Start and wait until the picture in that window is moving — that is the moment your minutes begin counting, and nothing is charged before it. Press Stop here when you are finished, and the meter above the button always shows what you have left.",
   },
 ];
 

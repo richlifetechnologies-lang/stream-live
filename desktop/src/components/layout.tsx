@@ -36,7 +36,9 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
         display: "flex",
         flexDirection: "column",
         paddingTop: 16,
-        paddingBottom: 16,
+        // The floating card sits over the foot of this rail, so the rail keeps room clear
+        // of it — otherwise a short window would hide Settings behind the numbers.
+        paddingBottom: contact ? 132 : 16,
         gap: 4,
         flexShrink: 0,
       }}>
@@ -86,15 +88,23 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           );
         })}
 
-        {/* The administrator, always one glance away — a card on another page is
-            something a stuck customer has to go and find. The two pages that already
-            carry the full card are left alone, so the numbers never show twice. */}
-        {contact && !HAS_CARD.some(p => location.startsWith(p)) && (
-          <div style={{ marginTop: "auto", padding: "14px 12px 0", borderTop: "1px solid hsl(222 40% 9%)" }}>
-            <ContactLine contact={contact} stack note="Stuck? Message your administrator:" />
-          </div>
-        )}
       </aside>
+
+      {/* The administrator, always one glance away — a card on another page is something a
+          stuck customer has to go and find, and the bottom of a menu they have to scroll to
+          is the same problem in a different shape. So this floats over the foot of the rail:
+          it stays put while the page moves, and the two pages that already carry the full
+          card are left alone so the numbers never show twice. */}
+      {contact && !HAS_CARD.some(p => location.startsWith(p)) && (
+        <div style={{
+          position: "fixed", left: 0, bottom: 0, width: RAIL_W, zIndex: 50,
+          padding: "12px 12px 14px",
+          background: "hsl(222 50% 5%)", borderTop: "1px solid hsl(222 40% 9%)",
+          boxShadow: "0 -14px 22px hsl(226 80% 2% / 0.55)",
+        }}>
+          <ContactLine contact={contact} stack note="Stuck? Message your administrator:" />
+        </div>
+      )}
 
       {/* Main content */}
       <main style={{ flex: 1, overflowY: "auto", minWidth: 0 }}>
