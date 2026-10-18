@@ -37,3 +37,14 @@ verify_jwt = false
 # login plus the is_admin RLS policies, not by the function JWT.
 [functions.admin]
 verify_jwt = false
+
+# The buyer's page is open to someone who has not signed in, and they pay against
+# an email address rather than a session. Orders are guarded by the email existing,
+# a per-address ceiling, and Paystack being asked directly before any credit.
+[functions.paystack-checkout]
+verify_jwt = false
+
+# Paystack's own call-back. It carries a signature header checked with the secret
+# key and is re-verified against Paystack's API, never a JWT.
+[functions.paystack-webhook]
+verify_jwt = false
