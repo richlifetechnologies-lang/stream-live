@@ -1042,6 +1042,17 @@
   const mins1 = (v) => N(v).toFixed(1);
   const mins2 = (v) => N(v).toFixed(2);
   const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
+  const afterJoin = (iso) => `(after this account joined${iso ? " " + new Date(iso).toLocaleString() : ""})`;
+
+  // The trial register is read as it stands right now, so a match only explains a
+  // refusal when that minute was already drawn by the time this account joined. A
+  // minute drawn later proves the register was still empty at the sign-up moment,
+  // which means something else refused the account and the panel must not blame
+  // the one-per-computer rule for it.
+  const machineRefused = (dev, took, created, ownId) => {
+    if (!dev || !took || took.user_id === ownId) return null;
+    return (created && took.granted_at && new Date(took.granted_at) > new Date(created)) ? "late" : "before";
+  };
   const usd = (v) => (N(v) < 0 ? "-$" : "$") + Math.abs(N(v)).toFixed(2);
   const bucket = (v) => (v.unlimited ? '<span class="pill yes">Unlimited</span>' : '<span class="mono">' + clock(v.balance) + "</span>");
   const shortId = (v) => (v ? String(v).slice(0, 8) : "—");
@@ -1255,7 +1266,7 @@
       const s = subOf[id];
       return engineOf(paid.has(id), s?.engine_override ?? null, !!s?.trial_granted_at, !!ADMIN_OF[id]);
     };
-    const whyOf = (id) => {
+    const whyOf = (id, created) => {
       const s = subOf[id];
       if (paid.has(id)) return "it has been credited or bought real minutes, so the paid service for good";
       if (s?.engine_override) return "you pinned it to " + ENGINE_LABEL[s.engine_override].toLowerCase();
@@ -1264,19 +1275,25 @@
       // Never granted. Say which of these the panel can actually see, instead of a story
       // about dates that nothing here has checked.
       const dev = DEV_OF[id];
+      const took = REG_BY_DEV[dev];
       if (!hasSignupDev) return "no free minute was ever granted to it";
       if (!dev) return "no free minute was granted, and this account named no computer when it joined, so the one-per-computer rule did not refuse it";
-      if (REG_BY_DEV[dev]) return "no free minute was granted: this computer had already drawn its one";
+      if (machineRefused(dev, took, created, id) === "before")
+        return `no free minute was granted: this computer had already drawn its one (${EMAIL_OF[took.user_id] || "another account"}, ${when(took.granted_at)})`;
+      if (machineRefused(dev, took, created, id) === "late")
+        return `no free minute was granted, and the one-per-computer rule was not the reason: this computer's minute was only drawn ${when(took.granted_at)}, after this account joined ${when(created)}`;
+      if (took) return "no free minute was granted, but this computer's minute belongs to this account itself";
       return "no free minute was granted, and this computer is not in the trial register, so the refusal did not come from the one-per-computer rule";
     };
-    const devOf = (id) => {
+    const devOf = (id, created) => {
       const dev = DEV_OF[id];
       if (!dev) return "";
       const took = REG_BY_DEV[dev];
-      return `<div class="muted">joined from machine <span class="mono" title="${esc(dev)}">${esc(dev.slice(0, 12))}…</span>`
-        + (took
-          ? ` — ${esc(EMAIL_OF[took.user_id] || "another account")} drew its free minute ${esc(when(took.granted_at))}`
-          : " — not in the trial register") + "</div>";
+      const tail = !took
+        ? " — not in the trial register"
+        : ` — ${esc(EMAIL_OF[took.user_id] || "another account")} drew its free minute ${esc(when(took.granted_at))}`
+          + (machineRefused(dev, took, created, id) === "late" ? ` ${esc(afterJoin(created))}` : "");
+      return `<div class="muted">joined from machine <span class="mono" title="${esc(dev)}">${esc(dev.slice(0, 12))}…</span>${tail}</div>`;
     };
 
     // Same arithmetic the accounts table uses, kept for the Trial vs Paid tab so
@@ -1289,7 +1306,7 @@
         email: p.email,
         created: p.created_at || "",
         eng: engineOfAcct(p.id),
-        why: whyOf(p.id),
+        why: whyOf(p.id, p.created_at),
         isPaid: paid.has(p.id),
         admin: !!ADMIN_OF[p.id],
         granted: !!s?.trial_granted_at,
@@ -1328,7 +1345,7 @@
         <td><b>${esc(p.email)}</b><div class="muted">since ${esc((p.created_at || "").slice(0, 10))}</div></td>
         <td class="muted">${s ? esc(plans[s.plan_id]?.name || s.plan_id) + (bought ? "" : '<div class="muted">stamped at sign-up, nothing bought</div>') : '<span class="pill none">no subscription</span>'}</td>
         <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
-        <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id))}</div>${devOf(p.id)}</td>
+        <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id, p.created_at))}</div>${devOf(p.id, p.created_at)}</td>
         <td>${cell("video", s?.video_enabled)}</td>
         <td>${cell("audio", s?.audio_enabled)}</td>
         <td>${cell("video_audio", s?.video_audio_enabled)}</td>
@@ -1447,10 +1464,13 @@
     hasEngineCols = !pinErr;
     // The computer this account was created on, and whoever drew that machine's one free
     // minute. Asked directly, because the account may have been opened from anywhere.
-    let joinedOn = "", tookHere = null;
+    // The join date comes along with it: a register minute drawn AFTER this account joined
+    // could not have been the thing that refused it.
+    let joinedOn = "", tookHere = null, joinedAt = "";
     if (hasSignupDev) {
-      const prof = await sb.from("profiles").select("signup_device_id").eq("id", userId).maybeSingle();
+      const prof = await sb.from("profiles").select("signup_device_id, created_at").eq("id", userId).maybeSingle();
       joinedOn = (!prof.error && prof.data?.signup_device_id) || "";
+      joinedAt = (!prof.error && prof.data?.created_at) || "";
       if (joinedOn) {
         const took = await sb.from("device_trial_grants").select("user_id, minutes, granted_at")
           .eq("device_id", joinedOn).maybeSingle();
@@ -1462,7 +1482,7 @@
     }
     CUR = {
       ...snap, user_id: userId, email: EMAIL_OF[userId] || userId, pin: pin || null,
-      joined_on: joinedOn, took_here: tookHere,
+      joined_on: joinedOn, joined_at: joinedAt, took_here: tookHere,
     };
     $("acctDetail").classList.remove("hidden");
     renderAccount();
@@ -1497,14 +1517,16 @@
               ? "automatic: this is an admin account, so trial keys never serve it."
               : granted
                 ? "automatic: this account holds a granted free minute, so the trial pool serves it."
-                : c.took_here
-                  ? "automatic: no free minute was granted, because this computer had already drawn its one."
-                  : "automatic: this account was never granted a free minute, so it runs on the paid service.")
+                : machineRefused(c.joined_on, c.took_here, c.joined_at, c.user_id) === "before"
+                  ? `automatic: no free minute was granted, because this computer had already drawn its one — ${esc(EMAIL_OF[c.took_here.user_id] || "another account")} on ${esc(when(c.took_here.granted_at))}, before it joined.`
+                  : machineRefused(c.joined_on, c.took_here, c.joined_at, c.user_id) === "late"
+                    ? `automatic: no free minute was granted, and the one-per-computer rule did not refuse it — this computer's minute was only drawn ${esc(when(c.took_here.granted_at))}, ${esc(afterJoin(c.joined_at))}, so the register was still empty when it joined. Something else refused this account.`
+                    : "automatic: this account was never granted a free minute, so it runs on the paid service.")
       + (c.pin?.trial_granted_at ? `<div class="muted">free trial granted ${when(c.pin.trial_granted_at)}</div>` : "")
       + (c.joined_on
         ? `<div class="muted">joined from machine <span class="mono" title="${esc(c.joined_on)}">${esc(c.joined_on.slice(0, 16))}…</span>`
           + (c.took_here
-            ? ` — ${esc(EMAIL_OF[c.took_here.user_id] || "another account")} drew this machine's free minute ${esc(when(c.took_here.granted_at))}`
+            ? ` — ${esc(EMAIL_OF[c.took_here.user_id] || "another account")} drew this machine's free minute ${esc(when(c.took_here.granted_at))}${machineRefused(c.joined_on, c.took_here, c.joined_at, c.user_id) === "late" ? ` ${esc(afterJoin(c.joined_at))}` : ""}`
             : " — not in the trial register") + "</div>"
         : "");
   }
