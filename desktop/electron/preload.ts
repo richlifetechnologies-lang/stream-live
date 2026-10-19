@@ -46,9 +46,20 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.send("check-for-update");
   },
 
+  // Open the till in a window of the app's own. The address is never shown to the
+  // customer; it comes from the gateway and is checked in the main process first.
+  openCheckout: (page: string): void => {
+    if (typeof page === "string" && page) ipcRenderer.send("open-checkout", page);
+  },
+
   // Trigger the download
   downloadUpdate: () => {
     ipcRenderer.send("download-update");
+  },
+
+  // The till came back to the seller's page with an order: worth reading the meter again.
+  onCheckoutReceipt: (callback: () => void) => {
+    ipcRenderer.on("checkout-receipt", () => callback());
   },
 
   // Quit and install the downloaded update

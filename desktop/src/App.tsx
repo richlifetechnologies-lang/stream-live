@@ -13,7 +13,7 @@ import ObsoutPortraitPage from "./pages/obsoutp";
 import Toaster from "./components/toaster";
 import StatusBanner from "./components/status-banner";
 import { ArtBackdrop } from "./components/brand";
-import { useAccount, restore, getState } from "./lib/gateway";
+import { useAccount, restore, getState, notePaymentReceipt } from "./lib/gateway";
 
 const C = "hsl(187 100% 52%)";
 const ERR = "hsl(0 80% 62%)";
@@ -31,6 +31,7 @@ declare global {
       onUpdateDownloaded: (cb: () => void) => void;
       onUpdateStatus?: (cb: (info: UpdateStatus) => void) => void;
       onCheckCallLive?: (cb: (reply: (live: boolean) => void) => void) => void;
+      onCheckoutReceipt?: (cb: () => void) => void;
       downloadUpdate: () => void;
       quitAndInstall: () => void;
     };
@@ -289,6 +290,12 @@ export default function App() {
   // The updater asks before it quits, so installing can't drop a live call.
   useEffect(() => {
     window.electronAPI?.onCheckCallLive?.((reply) => reply(isCallLive()));
+  }, []);
+
+  // The payment window came back to the till with an order in its address: look at the
+  // meter now. The credit itself is the server's doing, never this screen's.
+  useEffect(() => {
+    window.electronAPI?.onCheckoutReceipt?.(() => notePaymentReceipt());
   }, []);
 
   return (

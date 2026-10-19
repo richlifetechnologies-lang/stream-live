@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Sparkles } from "lucide-react";
 import { gateway } from "../lib/gateway";
+import { openTill } from "../lib/shop";
 
 const GOLD = "hsl(38 100% 58%)";
 
@@ -15,8 +16,8 @@ const GOLD = "hsl(38 100% 58%)";
  * account and this leaves with the next snapshot, whether or not the money has been
  * spent yet.
  *
- * While the seller has online payment open the button goes straight to the payment
- * page — choosing a package and paying is one click away, not a form to fill in.
+ * While the seller has online payment open the button opens the payment window inside
+ * this app — choosing a package and paying is one click away, not a form to fill in.
  */
 export function WatermarkOffer({
   paid,
@@ -82,18 +83,18 @@ export function WatermarkOffer({
       </div>
 
       {page ? (
-        <a href={page} target="_blank" rel="noreferrer"
+        <button onClick={() => openTill(page)}
           style={{
-            alignSelf: "center", display: "inline-block", padding: "14px 22px", borderRadius: 11, border: "none",
+            alignSelf: "center", padding: "14px 22px", borderRadius: 11, border: "none",
             background: GOLD, color: "hsl(222 47% 6%)", fontWeight: 700, fontSize: 14,
             fontFamily: "'Orbitron', monospace", letterSpacing: "0.04em", cursor: "pointer",
-            whiteSpace: "nowrap", boxShadow: `0 0 26px ${GOLD}55`, textDecoration: "none",
+            whiteSpace: "nowrap", boxShadow: `0 0 26px ${GOLD}55`,
           }}
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.filter = "brightness(1.08)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}
         >
           Buy minutes
-        </a>
+        </button>
       ) : (
       <button
         onClick={() => (ctaOnClick ? ctaOnClick() : setLocation(ctaHref))}

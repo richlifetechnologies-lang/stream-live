@@ -4,6 +4,7 @@ import { AppLayout } from "../components/layout";
 import { ContactCard, PayCard, hasContact, hasPayment } from "../components/contact";
 import { WatermarkOffer } from "../components/watermark-offer";
 import { gateway, useAccount } from "../lib/gateway";
+import { openTill, openTillInBrowser, tillOpensInApp } from "../lib/shop";
 import { MOD_LABELS } from "../lib/minutes";
 import { toUserMessage } from "../lib/end-reason";
 import { FEATURE_LABELS, usd, type AccountSnapshot, type CheckoutInfo, type Modality, type Plan } from "@stream-live/client";
@@ -146,10 +147,10 @@ export default function PlansPage() {
                 )}
 
                 {buyable !== undefined && (
-                  <a href={shop!.page} target="_blank" rel="noreferrer"
-                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12, padding: "11px 16px", borderRadius: 10, background: C, color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 13.5, fontFamily: "'Rajdhani',sans-serif", textDecoration: "none", cursor: "pointer" }}>
+                  <button onClick={() => openTill(shop!.page)}
+                    style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12, padding: "11px 16px", borderRadius: 10, border: "none", background: C, color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 13.5, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer" }}>
                     <CreditCard style={{ width: 14, height: 14 }} /> Buy — {ghs(buyable)}
-                  </a>
+                  </button>
                 )}
 
                 {p.includes.length > 0 && (
@@ -196,9 +197,15 @@ export default function PlansPage() {
         <div style={{ ...panel, background: "transparent", border: "1px dashed hsl(222 40% 14%)" }}>
           <p style={{ fontSize: 12, color: "hsl(222 25% 48%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.6 }}>
             {online
-              ? "Buying on this screen charges through the payment page in your browser — card or mobile money — and the minutes land in your account the moment it clears. Minutes never expire. Prices and minutes are set by your administrator."
+              ? "Buying on this screen opens the payment window right here in the app — you choose the package and type your email, then the payment page takes the card or mobile money on its own screen. That window carries nothing of yours: no sign-in, no camera, no microphone, and it leaves nothing behind on the computer when it closes. The minutes land the moment the payment clears, and they never expire. Prices and minutes are set by your administrator."
               : "The minutes above land in your account when your administrator confirms the payment, and they never expire. Prices and minutes are set by them — Stream Live takes no card details, charges nothing inside the app, and there is no trial balance."}
           </p>
+          {online && tillOpensInApp() && (
+            <button onClick={() => openTillInBrowser(shop!.page)}
+              style={{ background: "none", border: "none", padding: 0, marginTop: 8, cursor: "pointer", color: "hsl(222 25% 55%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline", textAlign: "left" }}>
+              Open the payment page in my browser instead
+            </button>
+          )}
         </div>
       </div>
     </AppLayout>

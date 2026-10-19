@@ -258,6 +258,23 @@ export async function refreshBalances(): Promise<void> {
   }
 }
 
+/**
+ * The payment window has come back to the till with an order in its address.
+ *
+ * Nothing about the money is concluded here - the receipt page is the one that asks, and
+ * the answer comes from this app's own server. Only the wait changes: the meter would
+ * otherwise next look in five minutes, and somebody who has just paid should not have to
+ * sit through that, or reopen the app, to find the minutes they bought.
+ */
+export function notePaymentReceipt(): void {
+  lastReconcileAt = 0;
+  void refreshBalances();
+  // A credit can land a few seconds after the payment provider says the money is in, so
+  // the meter looks twice more before it leaves the answer to the next scheduled read.
+  setTimeout(() => void refreshBalances(), 4000);
+  setTimeout(() => void refreshBalances(), 12000);
+}
+
 export async function deviceId(): Promise<string> {
   const api = (window as unknown as { electronAPI?: { getDeviceId?: () => Promise<string> } }).electronAPI;
   if (api?.getDeviceId) {

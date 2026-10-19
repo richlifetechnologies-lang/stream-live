@@ -6,6 +6,8 @@ import os from "os";
 import path from "path";
 import crypto from "crypto";
 import { initVirtualCameraIpc, shutdownVirtualCamera } from "./virtual-camera";
+import { initCheckoutWindow, openCheckoutWindow } from "./checkout-window";
+import { isAppDocumentUrl } from "./checkout-guard";
 
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
 
@@ -607,11 +609,28 @@ async function handleLegacyInstallerUrl(win: BrowserWindow, url: string) {
   await startInAppDownload(win, url);
 }
 
+// ─── IPC: the payment window ──────────────────────────────────────────────────
+// The Buy button used to hand the customer's browser the seller's payment address. It
+// now asks for a window of the app's own: no address bar, its own session, and only ever
+// on the till page or the payment provider. Only the app's own screen may ask for it, so
+// a page inside the payment window cannot open a second till.
+ipcMain.on("open-checkout", (event, page: unknown) => {
+  if (typeof page !== "string") return;
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  const result = openCheckoutWindow(page, mainWindow);
+  if (!result.ok) logAccount(`payment window refused: ${result.reason}`);
+});
+
 // ─── Virtual camera frame feeder (UnityCapture shared-memory protocol) ────────
 // Registers vcam-start / vcam-stop / vcam-status / vcam-frame IPC. Fully guarded:
 // if the native layer is unavailable the handlers report unsupported and the app
 // keeps working exactly as before.
 initVirtualCameraIpc(ipcMain);
+// The payment window's only say in the app's own business: it has come back to the till
+// with an order, so the meter is worth another look rather than another five minutes.
+initCheckoutWindow(logAccount, () => {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("checkout-receipt");
+});
 
 // ─── Window ───────────────────────────────────────────────────────────────────
 function createWindow() {
@@ -635,19 +654,35 @@ function createWindow() {
   // Grant media/camera/mic permissions — required for WebRTC in Electron.
   // "speaker-selection" is required for selectAudioOutput(), the fallback the
   // renderer uses to route AI audio into the VB-Cable sink.
-  mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
-    const allowed = ["media", "audioCapture", "videoCapture", "displayCapture", "speaker-selection"];
-    callback(allowed.includes(permission));
+  //
+  // Only this app's own screen gets any of it. The rule used to hand these to whichever
+  // page asked, which was harmless while the app was the only page in the session — and is
+  // not the rule to keep once a payment page can be open inside the app.
+  const allowed = ["media", "audioCapture", "videoCapture", "displayCapture", "speaker-selection"];
+  const isOwnScreen = (wc: Electron.WebContents | null): boolean =>
+    !!wc && !!mainWindow && !mainWindow.isDestroyed() && wc.id === mainWindow.webContents.id;
+  mainWindow.webContents.session.setPermissionRequestHandler((wc, permission, callback) => {
+    callback(isOwnScreen(wc) && allowed.includes(permission));
   });
 
   // Required in Electron 20+ — without this the permission check fails silently
   // even after the request handler grants it, causing the camera to go black
-  mainWindow.webContents.session.setPermissionCheckHandler((_wc, permission) => {
-    const allowed = ["media", "audioCapture", "videoCapture", "displayCapture", "speaker-selection"];
-    return (allowed as string[]).includes(permission);
-  });
+  mainWindow.webContents.session.setPermissionCheckHandler((wc, permission) =>
+    isOwnScreen(wc) && allowed.includes(permission)
+  );
 
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    // This policy is written for this app's own page. It used to be stamped on every
+    // response the session made, and its allow-list names the video engines and the
+    // database — no payment host at all. Stamp it on a payment page and the provider's own
+    // scripts, pictures and bank-verification frame are blocked, so the customer stands at
+    // the till with the app appearing to have broken it. Now it lands on the app's
+    // documents only, and the payment window runs on a session of its own that this never
+    // touches.
+    if (!isAppDocumentUrl(details.url)) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
     callback({
       responseHeaders: {
         ...details.responseHeaders,
