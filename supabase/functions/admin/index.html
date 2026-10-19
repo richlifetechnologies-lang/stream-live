@@ -299,7 +299,7 @@
         </div>
         <div style="overflow:auto;margin-top:10px">
           <table id="machTable">
-            <thead><tr><th>Account</th><th>Machine</th><th>Label</th><th>Bound since</th><th>Last seen</th><th>Trial drawn here</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>Account</th><th>Machine</th><th>Label</th><th>Bound since</th><th>Last seen</th><th>Trial drawn here</th><th>Network it calls from</th><th>Status</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1051,6 +1051,13 @@
     if (!dev || !took || took.user_id === ownId) return null;
     return (created && took.granted_at && new Date(took.granted_at) > new Date(created)) ? "late" : "before";
   };
+  const netNote = (firstIp, firstAt, lastIp, lastAt) => {
+    if (!firstIp) return '<div class="muted">no network record yet, so this account has never reached the gateway</div>';
+    const moved = lastIp && lastIp !== firstIp;
+    return `<div class="muted">seen from network <span class="mono">${esc(firstIp)}</span>`
+      + (moved ? `, most recent <span class="mono">${esc(lastIp)}</span>` : "")
+      + ` (first seen ${esc(when(firstAt))}${moved ? ", latest " + esc(when(lastAt)) : ""})</div>`;
+  };
   const usd = (v) => (N(v) < 0 ? "-$" : "$") + Math.abs(N(v)).toFixed(2);
   const bucket = (v) => (v.unlimited ? '<span class="pill yes">Unlimited</span>' : '<span class="mono">' + clock(v.balance) + "</span>");
   const shortId = (v) => (v ? String(v).slice(0, 8) : "—");
@@ -1073,7 +1080,9 @@
   // Which computer each account was created on, and whether that computer is already in
   // the trial register — without these the panel cannot say why an account got no minute.
   let hasSignupDev = false;
+  let hasNetwork = false;
   let DEV_OF = {};
+  let DEV_SEEN = {};
   let REG_BY_DEV = {};
   let CUR = null;
 
@@ -1201,9 +1210,16 @@
       : sb.from("profiles").select(cols)
     ).order("created_at", { ascending: false }).limit(q ? 40 : 60);
     // signup_device_id only exists once the one-trial-per-computer migration has run, and
-    // naming a missing column fails the whole select, so fall back rather than lose the list.
-    let { data: profs, error } = await askProf(profCols + ", signup_device_id");
+    // the network columns only once the network record has run; naming a missing column
+    // fails the whole select, so each is dropped in turn rather than losing the list.
+    let { data: profs, error } = await askProf(profCols
+      + ", signup_device_id, network_first_ip, network_first_at, network_last_ip, network_last_at");
     hasSignupDev = !error;
+    hasNetwork = !error;
+    if (error) {
+      ({ data: profs, error } = await askProf(profCols + ", signup_device_id"));
+      hasSignupDev = !error;
+    }
     if (error) ({ data: profs, error } = await askProf(profCols));
     if (error) return msg("acctMsg", error.message);
     ACCT_ROWS = profs || [];
@@ -1225,6 +1241,27 @@
       if (!reg.error) {
         (reg.data || []).forEach((r) => { REG_BY_DEV[r.device_id] = r; });
         await emailsOf(Object.values(REG_BY_DEV).map((r) => r.user_id));
+      }
+    }
+    // Accounts created by a build that never reported a computer carry no sign-up machine at
+    // all, which left their rows blank while everyone else's showed one. Their calls did bind
+    // a machine, so read that as the second source: the earliest is the computer they actually
+    // streamed from, and a register row for it says who holds that computer's minute.
+    DEV_SEEN = {};
+    const seenRes = await sb.from("devices")
+      .select("user_id, device_id, first_seen, revoked")
+      .in("user_id", ids).order("first_seen", { ascending: true }).limit(400);
+    if (!seenRes.error) {
+      (seenRes.data || []).forEach((r) => { if (r.device_id && !DEV_SEEN[r.user_id]) DEV_SEEN[r.user_id] = r; });
+      const stillWanted = [...new Set(Object.values(DEV_SEEN).map((d) => d.device_id))]
+        .filter((d) => !REG_BY_DEV[d]);
+      if (stillWanted.length) {
+        const reg2 = await sb.from("device_trial_grants")
+          .select("device_id, user_id, minutes, granted_at").in("device_id", stillWanted);
+        if (!reg2.error) {
+          (reg2.data || []).forEach((r) => { REG_BY_DEV[r.device_id] = r; });
+          await emailsOf((reg2.data || []).map((r) => r.user_id));
+        }
       }
     }
     const subCols = "user_id, plan_id, status, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions";
@@ -1275,7 +1312,8 @@
       const dev = DEV_OF[id];
       const took = REG_BY_DEV[dev];
       if (!hasSignupDev) return "no free minute was ever granted to it";
-      if (!dev) return "no free minute was granted, and this account named no computer when it joined, so the one-per-computer rule did not refuse it";
+      if (!dev) return "no free minute was granted, and this account never named a computer when it joined, so the one-per-computer rule did not refuse it"
+        + (DEV_SEEN[id] ? " (its computer is only known from its calls)" : "");
       if (machineRefused(dev, took, created, id) === "before")
         return `no free minute was granted: this computer had already drawn its one (${EMAIL_OF[took.user_id] || "another account"}, ${when(took.granted_at)})`;
       if (machineRefused(dev, took, created, id) === "late")
@@ -1285,14 +1323,25 @@
     };
     const devOf = (id, created) => {
       const dev = DEV_OF[id];
-      if (!dev) return "";
-      const took = REG_BY_DEV[dev];
+      const seen = DEV_SEEN[id];
+      const code = dev || (seen && seen.device_id) || "";
+      if (!code) return '<div class="muted">no computer code has ever come from this account, not at sign-up and not on a call, so the one-per-computer rule cannot bind it</div>';
+      const took = REG_BY_DEV[code];
       const tail = !took
         ? " — not in the trial register"
-        : ` — ${esc(EMAIL_OF[took.user_id] || "another account")} drew its free minute ${esc(when(took.granted_at))}`
-          + (machineRefused(dev, took, created, id) === "late" ? ` ${esc(afterJoin(created))}` : "");
-      return `<div class="muted">joined from machine <span class="mono" title="${esc(dev)}">${esc(dev.slice(0, 12))}…</span>${tail}</div>`;
+        : took.user_id === id
+          ? ` — this account holds this computer's minute (drawn ${esc(when(took.granted_at))})`
+          : ` — ${esc(EMAIL_OF[took.user_id] || "another account")} drew its free minute ${esc(when(took.granted_at))}`
+            + (machineRefused(code, took, created, id) === "late" ? ` ${esc(afterJoin(created))}` : "");
+      const src = dev ? "joined from machine " : "never named a computer at sign-up; its calls came from machine ";
+      return `<div class="muted">${src}<span class="mono" title="${esc(code)}">${esc(code.slice(0, 12))}…</span>`
+        + (dev || !seen || !seen.revoked ? "" : " (that call binding was revoked)") + tail + "</div>";
     };
+    // Two accounts on one computer code are only the same machine if they also phone in
+    // from the same place. This is the line that tells those two stories apart.
+    const netOf = (p) => (hasNetwork
+      ? netNote(p.network_first_ip, p.network_first_at, p.network_last_ip, p.network_last_at)
+      : "");
 
     // Same arithmetic the accounts table uses, kept for the Trial vs Paid tab so
     // the two views can never disagree about who is on which service.
@@ -1343,7 +1392,7 @@
         <td><b>${esc(p.email)}</b><div class="muted">since ${esc((p.created_at || "").slice(0, 10))}</div></td>
         <td class="muted">${s ? esc(plans[s.plan_id]?.name || s.plan_id) + (bought ? "" : '<div class="muted">stamped at sign-up, nothing bought</div>') : '<span class="pill none">no subscription</span>'}</td>
         <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
-        <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id, p.created_at))}</div>${devOf(p.id, p.created_at)}</td>
+        <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id, p.created_at))}</div>${devOf(p.id, p.created_at)}${netOf(p)}</td>
         <td>${cell("video", s?.video_enabled)}</td>
         <td>${cell("audio", s?.audio_enabled)}</td>
         <td>${cell("video_audio", s?.video_audio_enabled)}</td>
@@ -1464,23 +1513,37 @@
     // minute. Asked directly, because the account may have been opened from anywhere.
     // The join date comes along with it: a register minute drawn AFTER this account joined
     // could not have been the thing that refused it.
-    let joinedOn = "", tookHere = null, joinedAt = "";
+    let joinedOn = "", tookHere = null, joinedAt = "", cameFrom = "", net = null;
     if (hasSignupDev) {
-      const prof = await sb.from("profiles").select("signup_device_id, created_at").eq("id", userId).maybeSingle();
-      joinedOn = (!prof.error && prof.data?.signup_device_id) || "";
-      joinedAt = (!prof.error && prof.data?.created_at) || "";
-      if (joinedOn) {
-        const took = await sb.from("device_trial_grants").select("user_id, minutes, granted_at")
-          .eq("device_id", joinedOn).maybeSingle();
-        if (!took.error && took.data) {
-          await emailsOf([took.data.user_id]);
-          tookHere = took.data;
-        }
+      const netCols = ", network_first_ip, network_first_at, network_last_ip, network_last_at";
+      let prof = await sb.from("profiles")
+        .select("signup_device_id, created_at" + netCols).eq("id", userId).maybeSingle();
+      if (prof.error) {
+        prof = await sb.from("profiles").select("signup_device_id, created_at").eq("id", userId).maybeSingle();
+      } else net = prof.data;
+      joinedOn = prof.data?.signup_device_id || "";
+      joinedAt = prof.data?.created_at || "";
+    }
+    // An account whose sign-up build reported no computer still bound one on its first call,
+    // so the machine is not unknown for it - it just did not travel with the sign-up.
+    if (!joinedOn) {
+      const seen = await sb.from("devices").select("device_id, first_seen")
+        .eq("user_id", userId).order("first_seen", { ascending: true }).limit(1).maybeSingle();
+      if (!seen.error && seen.data?.device_id) cameFrom = seen.data.device_id;
+    }
+    const machine = joinedOn || cameFrom;
+    if (machine) {
+      const took = await sb.from("device_trial_grants").select("user_id, minutes, granted_at")
+        .eq("device_id", machine).maybeSingle();
+      if (!took.error && took.data) {
+        await emailsOf([took.data.user_id]);
+        tookHere = took.data;
       }
     }
     CUR = {
       ...snap, user_id: userId, email: EMAIL_OF[userId] || userId, pin: pin || null,
-      joined_on: joinedOn, joined_at: joinedAt, took_here: tookHere,
+      joined_on: joinedOn, joined_at: joinedAt, came_from: cameFrom, machine: machine,
+      took_here: tookHere, net: net,
     };
     $("acctDetail").classList.remove("hidden");
     renderAccount();
@@ -1519,14 +1582,19 @@
                   ? `automatic: no free minute was granted, because this computer had already drawn its one — ${esc(EMAIL_OF[c.took_here.user_id] || "another account")} on ${esc(when(c.took_here.granted_at))}, before it joined.`
                   : machineRefused(c.joined_on, c.took_here, c.joined_at, c.user_id) === "late"
                     ? `automatic: no free minute was granted, and the one-per-computer rule did not refuse it — this computer's minute was only drawn ${esc(when(c.took_here.granted_at))}, ${esc(afterJoin(c.joined_at))}, so the register was still empty when it joined. Something else refused this account.`
-                    : "automatic: this account was never granted a free minute, so it runs on the paid service.")
+                    : c.joined_on
+                      ? "automatic: this account was never granted a free minute, so it runs on the paid service."
+                      : "automatic: this account was never granted a free minute, and it never named a computer when it joined, so the one-per-computer rule cannot have refused it - only the trial switch or the minute figure could have.")
       + (c.pin?.trial_granted_at ? `<div class="muted">free trial granted ${when(c.pin.trial_granted_at)}</div>` : "")
-      + (c.joined_on
-        ? `<div class="muted">joined from machine <span class="mono" title="${esc(c.joined_on)}">${esc(c.joined_on.slice(0, 16))}…</span>`
+      + (c.machine
+        ? `<div class="muted">${c.joined_on ? "joined from machine " : "never named a computer at sign-up; its calls came from machine "}<span class="mono" title="${esc(c.machine)}">${esc(c.machine.slice(0, 16))}…</span>`
           + (c.took_here
-            ? ` — ${esc(EMAIL_OF[c.took_here.user_id] || "another account")} drew this machine's free minute ${esc(when(c.took_here.granted_at))}${machineRefused(c.joined_on, c.took_here, c.joined_at, c.user_id) === "late" ? ` ${esc(afterJoin(c.joined_at))}` : ""}`
+            ? (c.took_here.user_id === c.user_id
+              ? ` — this account holds this computer's minute (drawn ${esc(when(c.took_here.granted_at))})`
+              : ` — ${esc(EMAIL_OF[c.took_here.user_id] || "another account")} drew this machine's free minute ${esc(when(c.took_here.granted_at))}${machineRefused(c.joined_on, c.took_here, c.joined_at, c.user_id) === "late" ? ` ${esc(afterJoin(c.joined_at))}` : ""}`)
             : " — not in the trial register") + "</div>"
-        : "");
+        : '<div class="muted">no computer code has ever come from this account, not at sign-up and not on a call</div>')
+      + (c.net ? netNote(c.net.network_first_ip, c.net.network_first_at, c.net.network_last_ip, c.net.network_last_at) : "");
   }
 
   function renderAccount() {
@@ -1762,7 +1830,7 @@
   // everyone, because the two jobs that need it are both cross-account: working out
   // which machine a complaint came from, and seeing whether that machine has already
   // drawn the free minute before a newer account on it asks for one.
-  let MACH_ROWS = [], REG_ROWS = [];
+  let MACH_ROWS = [], REG_ROWS = [], NET_OF = {};
 
   async function loadMachines() {
     const [dev, reg] = await Promise.all([
@@ -1776,6 +1844,19 @@
     MACH_ROWS = dev.data || [];
     REG_ROWS = reg.error ? [] : (reg.data || []);
     await emailsOf(MACH_ROWS.map((r) => r.user_id).concat(REG_ROWS.map((r) => r.user_id)));
+    // One computer code shared by two accounts is only the same computer if they phone in
+    // from the same place, so this tab needs the address next to the machine, not just on
+    // the account screen.
+    NET_OF = {};
+    const who = [...new Set(MACH_ROWS.map((r) => r.user_id).concat(REG_ROWS.map((r) => r.user_id)))].slice(0, 300);
+    if (who.length) {
+      const prof = await sb.from("profiles")
+        .select("id, network_first_ip, network_first_at, network_last_ip").in("id", who).limit(300);
+      if (!prof.error) {
+        hasNetwork = true;
+        (prof.data || []).forEach((p) => { NET_OF[p.id] = p; });
+      }
+    }
     stamp("machWhen");
     renderMachines();
     renderReg();
@@ -1804,6 +1885,12 @@
       // The register is keyed on the machine alone, so the account it names is the one
       // that took this machine's single free minute — usually, but not always, this row's.
       const g = REG_ROWS.find((x) => x.device_id === r.device_id);
+      const n = NET_OF[r.user_id];
+      const moved = n && n.network_last_ip && n.network_last_ip !== n.network_first_ip;
+      const net = !n || !n.network_first_ip
+        ? `<span class="muted">${hasNetwork ? "never called" : "—"}</span>`
+        : `<span class="mono">${esc(n.network_first_ip)}</span>`
+          + (moved ? ` <span class="muted">now <span class="mono">${esc(n.network_last_ip)}</span></span>` : "");
       return `<tr>
         <td><b>${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</b></td>
         <td class="mono">${esc(r.device_id)}</td>
@@ -1811,12 +1898,13 @@
         <td class="muted">${when(r.first_seen)}</td>
         <td class="muted">${when(r.last_seen)}</td>
         <td>${g ? `${mins(g.minutes)} · ${esc(EMAIL_OF[g.user_id] || shortId(g.user_id))}` : '<span class="muted">never</span>'}</td>
+        <td>${net}</td>
         <td>${r.revoked ? '<span class="pill rejected">revoked</span>' : '<span class="pill active">bound</span>'}</td>
         <td style="white-space:nowrap">${r.revoked
           ? `<button data-mact="restore" data-user="${r.user_id}" data-dev="${esc(r.device_id)}">Allow again</button>`
           : `<button data-mact="revoke" data-user="${r.user_id}" data-dev="${esc(r.device_id)}" class="danger">Revoke</button>`}</td></tr>`;
     }).join("")
-      || `<tr><td colspan="8" class="muted">${MACH_ROWS.length ? "No machine matches that filter." : "No machine has bound yet — they bind on the first call."}</td></tr>`;
+      || `<tr><td colspan="9" class="muted">${MACH_ROWS.length ? "No machine matches that filter." : "No machine has bound yet — they bind on the first call."}</td></tr>`;
   }
 
   function renderReg() {

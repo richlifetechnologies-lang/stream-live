@@ -126,12 +126,37 @@ async function mintDecartToken(userId: string, ttlSeconds: number, billMinutes: 
   });
 }
 
+/**
+ * The caller's address as the platform saw it. A forwarded-for header can carry a chain
+ * somebody typed, so only the first entry is taken and only when it is shaped like a
+ * bare IPv4 or IPv6 address; anything else is treated as no address at all.
+ */
+function requestIp(req: Request): string {
+  const raw = req.headers.get("x-forwarded-for")
+    || req.headers.get("x-real-ip")
+    || req.headers.get("cf-connecting-ip")
+    || "";
+  const first = raw.split(",")[0].trim();
+  return /^[0-9a-fA-F:.]{3,45}$/.test(first) ? first : "";
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return preflight();
   if (req.method !== "POST") return fail("method not allowed", 405);
 
   try {
     const user = await requireUser(req);
+    // Recorded ahead of every gate below: a call that is about to be refused is precisely
+    // the one that has to be diagnosable afterwards, and the address is the only thing that
+    // separates "two accounts, one computer" from "two computers that share a name".
+    const ip = requestIp(req);
+    if (ip) {
+      try {
+        await adminClient().rpc("sl_note_network", { p_user: user.id, p_ip: ip });
+      } catch {
+        // Bookkeeping never gets to refuse a call.
+      }
+    }
     const body = await req.json().catch(() => ({}));
 
     const appId = typeof body.appId === "string" ? body.appId.trim() : "";
