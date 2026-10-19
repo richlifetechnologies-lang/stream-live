@@ -1061,6 +1061,11 @@
   let hasEngineCols = false;
   let hasTrialCols = false;
   let hasTrialCfg = false;
+  // Which computer each account was created on, and whether that computer is already in
+  // the trial register — without these the panel cannot say why an account got no minute.
+  let hasSignupDev = false;
+  let DEV_OF = {};
+  let REG_BY_DEV = {};
   let CUR = null;
 
   function msg(el, text, cls = "err") { $(el).innerHTML = text ? `<div class="${cls}">${esc(text)}</div>` : ""; }
@@ -1182,9 +1187,15 @@
   async function loadAccounts() {
     const q = ($("acctSearch").value || "").trim();
     const profCols = "id, email, created_at, is_admin";
-    let build = sb.from("profiles").select(profCols).order("created_at", { ascending: false }).limit(60);
-    if (q) build = sb.from("profiles").select(profCols).ilike("email", "%" + q + "%").order("created_at", { ascending: false }).limit(40);
-    const { data: profs, error } = await build;
+    const askProf = (cols) => (q
+      ? sb.from("profiles").select(cols).ilike("email", "%" + q + "%")
+      : sb.from("profiles").select(cols)
+    ).order("created_at", { ascending: false }).limit(q ? 40 : 60);
+    // signup_device_id only exists once the one-trial-per-computer migration has run, and
+    // naming a missing column fails the whole select, so fall back rather than lose the list.
+    let { data: profs, error } = await askProf(profCols + ", signup_device_id");
+    hasSignupDev = !error;
+    if (error) ({ data: profs, error } = await askProf(profCols));
     if (error) return msg("acctMsg", error.message);
     ACCT_ROWS = profs || [];
     if (!ACCT_ROWS.length) {
@@ -1193,6 +1204,20 @@
     }
     const ids = ACCT_ROWS.map((p) => p.id);
     ACCT_ROWS.forEach((p) => { EMAIL_OF[p.id] = p.email; ADMIN_OF[p.id] = !!p.is_admin; });
+    DEV_OF = {};
+    ACCT_ROWS.forEach((p) => { if (p.signup_device_id) DEV_OF[p.id] = p.signup_device_id; });
+    REG_BY_DEV = {};
+    const joinedOn = Object.values(DEV_OF);
+    if (joinedOn.length) {
+      const reg = await sb.from("device_trial_grants")
+        .select("device_id, user_id, minutes, granted_at").in("device_id", joinedOn);
+      // The register may be unreadable on an old database; the list still renders, only
+      // the refused-because line is missing.
+      if (!reg.error) {
+        (reg.data || []).forEach((r) => { REG_BY_DEV[r.device_id] = r; });
+        await emailsOf(Object.values(REG_BY_DEV).map((r) => r.user_id));
+      }
+    }
     const subCols = "user_id, plan_id, status, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions";
     const [subsRes, balRes, paidRes] = await Promise.all([
       (async () => {
@@ -1235,8 +1260,23 @@
       if (paid.has(id)) return "it has been credited or bought real minutes, so the paid service for good";
       if (s?.engine_override) return "you pinned it to " + ENGINE_LABEL[s.engine_override].toLowerCase();
       if (ADMIN_OF[id]) return "it is an admin account, so trial keys never serve it";
-      if (!s?.trial_granted_at) return "it joined before the free trial existed, so nobody promised it a free minute";
-      return "it holds a granted free trial minute";
+      if (s?.trial_granted_at) return "it holds a granted free trial minute";
+      // Never granted. Say which of these the panel can actually see, instead of a story
+      // about dates that nothing here has checked.
+      const dev = DEV_OF[id];
+      if (!hasSignupDev) return "no free minute was ever granted to it";
+      if (!dev) return "no free minute was granted, and this account named no computer when it joined, so the one-per-computer rule did not refuse it";
+      if (REG_BY_DEV[dev]) return "no free minute was granted: this computer had already drawn its one";
+      return "no free minute was granted, and this computer is not in the trial register, so the refusal did not come from the one-per-computer rule";
+    };
+    const devOf = (id) => {
+      const dev = DEV_OF[id];
+      if (!dev) return "";
+      const took = REG_BY_DEV[dev];
+      return `<div class="muted">joined from machine <span class="mono" title="${esc(dev)}">${esc(dev.slice(0, 12))}…</span>`
+        + (took
+          ? ` — ${esc(EMAIL_OF[took.user_id] || "another account")} drew its free minute ${esc(when(took.granted_at))}`
+          : " — not in the trial register") + "</div>";
     };
 
     // Same arithmetic the accounts table uses, kept for the Trial vs Paid tab so
@@ -1281,13 +1321,14 @@
       };
       const credited = MODALITIES.reduce((a, m) => a + N(w[m]?.total_credited), 0);
       const spent = MODALITIES.reduce((a, m) => a + N(w[m]?.total_spent), 0);
+      const bought = paid.has(p.id);
       const eng = engineOfAcct(p.id);
       const pin = s?.engine_override ? ' <span class="pill n" title="you pinned this account">pinned</span>' : "";
       return `<tr data-user="${p.id}">
         <td><b>${esc(p.email)}</b><div class="muted">since ${esc((p.created_at || "").slice(0, 10))}</div></td>
-        <td class="muted">${s ? esc(plans[s.plan_id]?.name || s.plan_id) : '<span class="pill none">no subscription</span>'}</td>
-        <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` : "—"}</td>
-        <td><span class="pill ${ENGINE_PILL[eng]}">${ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id))}</div></td>
+        <td class="muted">${s ? esc(plans[s.plan_id]?.name || s.plan_id) + (bought ? "" : '<div class="muted">stamped at sign-up, nothing bought</div>') : '<span class="pill none">no subscription</span>'}</td>
+        <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
+        <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id))}</div>${devOf(p.id)}</td>
         <td>${cell("video", s?.video_enabled)}</td>
         <td>${cell("audio", s?.audio_enabled)}</td>
         <td>${cell("video_audio", s?.video_audio_enabled)}</td>
@@ -1404,7 +1445,25 @@
       .select("engine_override, engine_override_by, engine_override_at, trial_granted_at")
       .eq("user_id", userId).maybeSingle();
     hasEngineCols = !pinErr;
-    CUR = { ...snap, user_id: userId, email: EMAIL_OF[userId] || userId, pin: pin || null };
+    // The computer this account was created on, and whoever drew that machine's one free
+    // minute. Asked directly, because the account may have been opened from anywhere.
+    let joinedOn = "", tookHere = null;
+    if (hasSignupDev) {
+      const prof = await sb.from("profiles").select("signup_device_id").eq("id", userId).maybeSingle();
+      joinedOn = (!prof.error && prof.data?.signup_device_id) || "";
+      if (joinedOn) {
+        const took = await sb.from("device_trial_grants").select("user_id, minutes, granted_at")
+          .eq("device_id", joinedOn).maybeSingle();
+        if (!took.error && took.data) {
+          await emailsOf([took.data.user_id]);
+          tookHere = took.data;
+        }
+      }
+    }
+    CUR = {
+      ...snap, user_id: userId, email: EMAIL_OF[userId] || userId, pin: pin || null,
+      joined_on: joinedOn, took_here: tookHere,
+    };
     $("acctDetail").classList.remove("hidden");
     renderAccount();
     await Promise.all([loadAssignments(), loadLedger(userId), renderEnginePin()]);
@@ -1438,8 +1497,16 @@
               ? "automatic: this is an admin account, so trial keys never serve it."
               : granted
                 ? "automatic: this account holds a granted free minute, so the trial pool serves it."
-                : "automatic: this account was never granted a free minute, so it runs on the paid service.")
-      + (c.pin?.trial_granted_at ? `<div class="muted">free trial granted ${when(c.pin.trial_granted_at)}</div>` : "");
+                : c.took_here
+                  ? "automatic: no free minute was granted, because this computer had already drawn its one."
+                  : "automatic: this account was never granted a free minute, so it runs on the paid service.")
+      + (c.pin?.trial_granted_at ? `<div class="muted">free trial granted ${when(c.pin.trial_granted_at)}</div>` : "")
+      + (c.joined_on
+        ? `<div class="muted">joined from machine <span class="mono" title="${esc(c.joined_on)}">${esc(c.joined_on.slice(0, 16))}…</span>`
+          + (c.took_here
+            ? ` — ${esc(EMAIL_OF[c.took_here.user_id] || "another account")} drew this machine's free minute ${esc(when(c.took_here.granted_at))}`
+            : " — not in the trial register") + "</div>"
+        : "");
   }
 
   function renderAccount() {
@@ -1447,7 +1514,9 @@
     const plans = Object.fromEntries(PLAN_ROWS.map((p) => [p.id, p]));
     $("detTitle").textContent = c.email;
     const status = c.status === "none" ? '<span class="pill none">no subscription</span>' : `<span class="pill ${c.status}">${c.status}</span>`;
-    $("detSummary").innerHTML = `Plan <b>${esc(plans[c.plan_id]?.name || c.plan_id || "—")}</b> · status ${status} ${c.status === "active" ? "" : '<span class="muted">(calls are refused unless active)</span>'} · open leases <b>${(c.open_sessions || []).length}</b> of ${c.max_concurrent_sessions ?? 1} allowed · minutes never expire`;
+    // undefined = this account was never listed, so the panel does not claim anything.
+    const bought = PAID_OF[c.user_id];
+    $("detSummary").innerHTML = `Plan <b>${esc(plans[c.plan_id]?.name || c.plan_id || "—")}</b> · status ${status} ${c.status === "active" ? "" : '<span class="muted">(calls are refused unless active)</span>'}${bought === false ? ' <span class="muted">— both stamped at sign-up, nothing bought</span>' : ""} · open leases <b>${(c.open_sessions || []).length}</b> of ${c.max_concurrent_sessions ?? 1} allowed · minutes never expire`;
 
     $("swVideo").checked = c.modalities?.video === true;
     $("swAudio").checked = c.modalities?.audio === true;
