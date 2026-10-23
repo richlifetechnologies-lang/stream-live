@@ -134,10 +134,14 @@ export function markMedia(): void {
     void gateway.markMedia()
       .then((lease) => { if (lease?.ended) endLease(); })
       .catch(() => {
-        if (tries > 0 && state.live?.sessionId === prev.sessionId) setTimeout(() => send(tries - 1), 3_000);
+        if (tries > 0 && state.live?.sessionId === prev.sessionId) setTimeout(() => send(tries - 1), 5_000);
       });
   };
-  send(3);
+  // The gateway only bills from this stamp, so it closes a video call that never sent one.
+  // Knocking for two minutes covers any stretch of bad network a real first frame could
+  // survive, and it is one small idempotent request — a call that is working stops after the
+  // first answer.
+  send(24);
 }
 
 export function updateLease(sessionId: string, lease: LeaseState): void {

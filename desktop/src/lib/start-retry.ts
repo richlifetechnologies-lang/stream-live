@@ -30,7 +30,6 @@ export const START_RETRY_WAITS_MS = [10_000, 30_000];
  * the machine, and each ask reopens a lease.
  */
 export const PACED_RE_ASKS = 1;
-
 /** A announced wait shorter than this is not worth a pause; longer than that is not his day. */
 export const PACED_WAIT_MIN_MS = 5_000;
 export const PACED_WAIT_MAX_MS = 240_000;
@@ -91,11 +90,17 @@ export function classifyStartFailure(
  *
  * A call that never showed a frame is not billed, so a repeat costs the account nothing
  * but a few seconds of waiting — which is still cheaper than the "cannot start" message.
- * When the server announced a wait, its number is used, once.
+ * When the server announced a wait, its number is used, and `waitsUsed` says how many of
+ * them this press has already obeyed.
+ *
+ * The announced number is the whole point of the wait, so it is taken wherever in the
+ * press it turns up: a machine that failed its first ask for a reason that had nothing to
+ * do with timing can still be told "come back in two minutes" on its second, and throwing
+ * that away would leave the customer with a flat failure and a wait he never saw.
  */
-export function startRetryWaitMs(f: StartFailure, tryIndex: number): number | null {
+export function startRetryWaitMs(f: StartFailure, tryIndex: number, waitsUsed = 0): number | null {
   if (!f.retryable) return null;
-  if (f.waitMs !== null) return tryIndex < PACED_RE_ASKS ? f.waitMs : null;
+  if (f.waitMs !== null) return waitsUsed >= PACED_RE_ASKS ? null : f.waitMs;
   if (tryIndex + 1 >= START_TRIES) return null;
   return START_RETRY_WAITS_MS[tryIndex] ?? null;
 }

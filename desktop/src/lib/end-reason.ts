@@ -26,6 +26,9 @@ const REASON_COPY: Record<string, string> = {
   engine_no_answer: "The video line accepted your call and then never produced a picture, so we ended it and gave your minutes back. Nothing was used. Try again in a minute — if it keeps happening, tell your administrator, who can see exactly what the video service answered.",
 
   lease_expired: "We lost track of your call and ended it, so you weren't over-charged. Try again.",
+  // The gateway only bills from the moment a picture arrives, so a call that never reported
+  // one is closed rather than renewed for ever. Nothing was ever owed on it.
+  no_picture: "Your call never showed a picture, so we ended it and gave back everything it had set aside. Nothing was used. Try again — if it keeps happening, tell your administrator, who can see exactly what the video service answered.",
   no_lease: "Your call was ended because its booking lapsed. Try starting again.",
   session_not_found: "We couldn't find your session any more, so the call stopped. Try again.",
   connection_lost: "Your internet connection dropped, so the call ended. Check your network and try again.",

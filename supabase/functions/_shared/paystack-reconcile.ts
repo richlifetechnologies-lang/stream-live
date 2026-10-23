@@ -53,11 +53,42 @@ export function moneyReturned(txn: PaystackTxn): boolean {
   return refundState(txn) !== null || String(txn.status ?? "").toLowerCase() === "reversed";
 }
 
-/** The sentence written on the order, in the payer's own words. */
+/** The cause, in the payer's own words, of a payment that is no longer money we have. */
 export function returnedWhy(txn: PaystackTxn): string {
   return String(txn.status ?? "").toLowerCase() === "reversed"
-    ? "Paystack reversed this payment back to the payer's wallet, so no minutes were added"
-    : "Paystack refunded this payment to the payer, so no minutes were added";
+    ? "Paystack reversed this payment back to the payer's wallet"
+    : "Paystack refunded this payment to the payer";
+}
+
+/**
+ * Money that came back takes its minutes with it.
+ *
+ * The database owns that arithmetic, because it is the only thing that knows what was actually
+ * delivered: the take-back works from the ledger entries the delivery wrote with this order's
+ * reference on them. It is safe to call twice - an order that was never credited is simply
+ * closed as returned, and one already closed does nothing.
+ *
+ * A failure here never guesses at a number. The order is left exactly as it stands and the
+ * reason comes back in words, because taking minutes from someone who did pay would be worse
+ * than a refund the seller settles once, in the open.
+ */
+export async function clawBack(reference: string, why: string, paystackId = ""): Promise<string> {
+  const { data, error } = await adminClient().rpc("sl_paystack_clawback", {
+    p_reference: reference, p_reason: why,
+  });
+  if (error) {
+    console.error(`paystack clawback ${reference}: ${error.message}`);
+    return `the take-back could not run: ${error.message}`;
+  }
+  const res = (data ?? {}) as Record<string, unknown>;
+  if (res.ok !== true) {
+    console.error(`paystack clawback ${reference} refused: ${String(res.error ?? "no reason")}`);
+    return `the take-back refused: ${String(res.error ?? "no reason")}`;
+  }
+  if (res.deduped === true) return "this order was already closed as returned";
+  if (res.clawed === true) return `minutes taken back: ${JSON.stringify(res.taken)}`;
+  if (res.orphan === true) return "no account was recorded on this order, so there was nothing to take back";
+  return "nothing had been credited on this order, so nothing was owed";
 }
 
 /** Writes the refund onto the order so the seller's Payments tab and the receipt both say so. */
@@ -66,8 +97,8 @@ export async function markRefunded(
   why: string,
   paystackId = "",
 ): Promise<void> {
-  // A credited order is left alone on purpose: the minutes were already delivered, and
-  // clawing them back or double-marking is the seller's call, not this code's.
+  // This one only closes an order that never delivered anything. A credited order belongs to
+  // clawBack above, which takes the minutes back from the ledger entries the delivery wrote.
   const patch: Record<string, unknown> = { status: "refunded", note: why };
   // Paystack's own number is what the seller searches his till with, and a closed order
   // never got one until a re-check asked - the receipt has to be able to show it.
@@ -144,8 +175,9 @@ export async function settleByReference(reference: string): Promise<Outcome> {
   // arrives as its own state, so this has to be settled before anything decides the money
   // is here.
   if (moneyReturned(txn)) {
-    await markRefunded(reference, returnedWhy(txn), String(txn.id ?? ""));
-    return { ...base, result: "refunded", detail: "Paystack says this payment went back to the payer, so nothing is owed on it." };
+    const why = returnedWhy(txn);
+    const did = await clawBack(reference, why, String(txn.id ?? ""));
+    return { ...base, result: "refunded", detail: `Paystack put this money back with the payer; ${did}.` };
   }
   if (txn.status !== "success") {
     // Not yet, or never. Pending mobile money is a normal wait and must not be marked failed.

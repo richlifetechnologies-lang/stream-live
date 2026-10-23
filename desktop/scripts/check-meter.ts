@@ -9,24 +9,38 @@ const eq = (label: string, got: number | string | null, want: number | string | 
   if (!ok) fail.push(label);
 };
 
-// 100.000 minutes at 1x, read 30 s ago → 29.5 credit minutes drained since.
+// A video call that found its picture 30 seconds ago. The wallet held 105.000 when
+// the call opened and the gateway's last read said this call had already cost 4.000,
+// so 30 seconds at 1x is 0.5 more on top of that.
+const at = Date.now();
 const lease: LiveLease = {
   sessionId: "s", modality: "video_audio", balance: 100, unlimited: false, billedMinutes: 4,
-  startBalance: 105, startedAt: Date.now() - 600_000, observedAt: Date.now() - 30_000,
+  startBalance: 105, startedAt: at - 600_000, observedAt: at - 30_000, mediaAt: at - 30_000,
   leaseExpiresAt: null, lowBalance: false,
 };
-const at = Date.now();
 const d = drainOf(lease, 1, at);
-eq("drain after 30s @1x", d.remaining, 100 - 0.5);
-eq("used this call", d.used, 4 + 0.5);
-eq("on air", Math.round(d.live), 10);
+eq("drain after 30s @1x", d.remaining, 105 - 4.5);
+eq("used this call", d.used, 4.5);
+eq("on air counts from the picture", d.live, 0.5);
+eq("so it is not waiting", d.waiting, false);
+
+// A video call with no picture yet spends nothing and shows nothing spent, however
+// long it has been connected - this is what the server's no-picture bound measures.
+const dark = drainOf({ ...lease, mediaAt: null }, 1, at);
+eq("no picture: used stays at the pre-debit", dark.used, 4);
+eq("no picture: countdown has not moved", dark.remaining, 101);
+eq("no picture: it is waiting", dark.waiting, true);
+// An audio call has no picture to wait for, so it bills from the dial-tone.
+const voice = drainOf({ ...lease, modality: "audio", mediaAt: null }, 1, at);
+eq("audio is never waiting", voice.waiting, false);
+eq("audio is on air from the call start", voice.live, 10);
 
 // A 1.5x bucket burns a real minute as 1.5 credit minutes.
-const fast = drainOf({ ...lease, balance: 60 }, 1.5, at);
+const fast = drainOf({ ...lease, startBalance: 60, billedMinutes: 0 }, 1.5, at);
 eq("drain after 30s @1.5x", fast.remaining, 60 - 0.75);
 
 // Never below zero, whatever the drift.
-eq("floors at zero", drainOf({ ...lease, balance: 0.1 }, 1, at).remaining, 0);
+eq("floors at zero", drainOf({ ...lease, startBalance: 0.1, billedMinutes: 0 }, 1, at).remaining, 0);
 
 // Unlimited buckets report null, not a countdown.
 eq("unlimited stays null", drainOf({ ...lease, unlimited: true, balance: null }, 1, at).remaining, null);

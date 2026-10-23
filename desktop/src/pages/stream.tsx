@@ -1907,14 +1907,16 @@ export default function StreamPage() {
     startCancelRef.current = false;
     try {
       let last: StartFailure | null = null;
+      let waitsUsed = 0;
       for (let i = 0; i < START_TRIES; i++) {
         const failure = await attemptStart(activeTab, needsVideo, needsVoice);
         if (!failure) return;
         last = failure;
         // Write it down while it is still true what the engine said.
         if (failure.sessionId) reportCallFailure(failure.sessionId, failure.stage, failure.detail);
-        const waitMs = startRetryWaitMs(failure, i);
+        const waitMs = startRetryWaitMs(failure, i, waitsUsed);
         if (waitMs === null) break;
+        if (failure.waitMs !== null) waitsUsed++;
         // The failed attempt ran a teardown, which released the page's "starting" flag;
         // a wait is not an idle page, or a second press would open two calls.
         isStartingRef.current = true;

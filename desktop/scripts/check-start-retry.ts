@@ -72,9 +72,15 @@ ok("a voice-side failure is not retried",
 const paced = classifyStartFailure("lines_busy", true, "gateway refused (lines_busy)", "sess-4", 47);
 eq("an announced wait is worth asking again", paced.retryable, true);
 eq("the wait is the server's own number", startRetryWaitMs(paced, 0), 47_000);
-eq("and it is asked exactly once more", startRetryWaitMs(paced, 1), null);
+eq("and it is asked exactly once more", startRetryWaitMs(paced, 1, 1), null);
 eq("the paced refusal still carries its session", paced.sessionId, "sess-4");
 eq("the paced press is one re-ask long", PACED_RE_ASKS, 1);
+
+// The number is what the customer is waiting for, so it is taken wherever in the press it
+// turns up. An earlier ask that died for its own reasons does not spend the paced one.
+eq("a wait arriving on the second ask is still obeyed", startRetryWaitMs(paced, 1), 47_000);
+eq("and on the third", startRetryWaitMs(paced, 2), 47_000);
+eq("but only ever once per press", startRetryWaitMs(paced, 0, PACED_RE_ASKS), null);
 
 // Clamped at both ends: a one-second pause is not worth a screen, and an hour is not his day.
 eq("a wait too short is raised", startRetryWaitMs(classifyStartFailure("lines_busy", true, "x", null, 1), 0), PACED_WAIT_MIN_MS);
