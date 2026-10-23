@@ -39,9 +39,16 @@ declare
   -- Whatever the request claims to be signed in as, from either place Supabase puts it.
   -- The whole claims object is only parsed when it is shaped like one, because this
   -- function runs on every write to the table and a cast that failed would fail the write.
-  v_sub     text := nullif(current_setting('request.jwt.claim.sub', true), ''),
-  v_claims  text := nullif(current_setting('request.jwt.claims', true), '');
+  --
+  -- Declared empty and filled in the body rather than declared with their values. The
+  -- managed database endpoint that runs migrations breaks a declaration list whose items
+  -- carry initialisers, and this exact shape is what the other two migrations this morning
+  -- used and got through on the first try. Same words, same moment of reading.
+  v_sub     text;
+  v_claims  text;
 begin
+  v_sub    := nullif(current_setting('request.jwt.claim.sub', true), '');
+  v_claims := nullif(current_setting('request.jwt.claims', true), '');
   if v_sub is null and v_claims is not null and left(btrim(v_claims), 1) = '{' then
     v_sub := nullif(v_claims::jsonb ->> 'sub', '');
   end if;
@@ -76,7 +83,12 @@ create trigger profiles_owner_columns_locked before update on public.profiles
 -- Same rule, stated where a policy can state it: a writer who is not already an
 -- administrator may not leave the flag set on the row they write. is_admin is security
 -- definer over profiles, so naming it inside a profiles policy cannot recurse.
+--
+-- The flag is named bare, not as new.is_admin. A trigger gets a record called new to read what
+-- was written; a policy has no such word, and asking for one is refused as a column that does
+-- not exist. Bare columns inside a write policy already mean the values being written, which is
+-- exactly what is wanted here.
 drop policy if exists profiles_update_own on public.profiles;
 create policy profiles_update_own on public.profiles
   for update using (auth.uid() = id)
-  with check (auth.uid() = id and (not new.is_admin or public.is_admin(auth.uid())));
+  with check (auth.uid() = id and (not is_admin or public.is_admin(auth.uid())));
