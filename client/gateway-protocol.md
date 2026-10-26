@@ -52,11 +52,21 @@ wallet unless the trial was granted.
 ```ts
 const ticket = await client.startCall(tab, deviceId);
 // { sessionId, token, modality, leaseExpiresAt, expiresInSeconds,
-//   unlimited, balance, leaseMinutes, wallet }
+//   unlimited, balance, leaseMinutes, wallet, serverTimeMs }
 ```
 
 Request body: `{ appId, deviceId, tab, appVersion }`, where `tab` is
 `video-only | audio-only | video-audio`; the modality is derived from it.
+
+Every answer the gateway gives carries `serverTimeMs` — its own clock at the moment it
+answered. A computer whose clock runs hours ahead reads the call pass booked one round
+trip earlier as already spent and never asks for the call, which is indistinguishable
+from a dead video line to anything read off that computer, so the app takes its time from
+this stamp instead.
+
+`POST server-time` is that stamp on its own — `{}` in, `{ ok, serverTimeMs }` out, no session
+and no wallet behind it. The app asks it when it opens, because a machine that is hours ahead
+also reads its own login ticket as spent, and that decision is taken long before any call.
 
 The gateway has already debited one chunk of minutes by the time this returns, and
 `token` is a fal JWT that expires with the lease. **`token` is `null` on the Audio

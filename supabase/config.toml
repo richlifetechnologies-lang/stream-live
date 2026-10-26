@@ -27,6 +27,11 @@ verify_jwt = false
 [functions.lease]
 verify_jwt = false
 
+# The app asks for the gateway's clock when it opens, before anyone has signed in. It
+# answers with a number and nothing else — no session, no wallet, no key.
+[functions.server-time]
+verify_jwt = false
+
 [functions.proxy-voice]
 verify_jwt = false
 

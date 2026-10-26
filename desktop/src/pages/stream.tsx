@@ -6,13 +6,14 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure } from "../lib/gateway";
+import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure, noteClockSkew } from "../lib/gateway";
 import { drainOf } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
 import { START_TRIES, classifyStartFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
+import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
 import {
@@ -1737,6 +1738,14 @@ export default function StreamPage() {
       sessionId = ticket.sessionId;
       engine = ticket.engine ?? null;
       sessionIdRef.current = ticket.sessionId;
+      // The pass the gateway just handed out is checked against the clock on this machine, so
+      // a computer running hours ahead reads a minutes-old pass as already spent and never
+      // asks for the call at all. From here the app keeps the gateway's time — and it must
+      // take it before the lease is booked, because that booking stamps the machine's own
+      // reading once and every timer then reads it against the corrected one.
+      const skew = alignClock(ticket.serverTimeMs);
+      if (skew !== null) noteClockSkew(skew);
+
       beginLease(ticket);
 
       setConnStep("engine");
@@ -1873,10 +1882,15 @@ export default function StreamPage() {
       // in "Could not start the call. Please try again." with nothing left behind: the
       // engine's own words now go to the gateway's log table, and repeating the ask is
       // what the measurements say actually gets a call through.
+      // Recorded beside the engine's own words so the panel can tell a machine whose clock was
+      // hours off from a video line that genuinely stopped answering.
+      const offMs = clockSkewMs();
       return classifyStartFailure(
         err instanceof GatewayError ? err.reason : null,
         needsVideo,
-        err instanceof Error ? err.message : String(err),
+        (err instanceof Error ? err.message : String(err))
+          + (offMs === null || Math.abs(offMs) < CLOCK_NOTICE_MS
+            ? "" : ` [machine clock ${describeClockSkew(offMs)} real time]`),
         sessionId,
         err instanceof GatewayError ? err.retryAfterSeconds : null,
         engine,

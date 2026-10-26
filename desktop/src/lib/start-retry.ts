@@ -132,6 +132,20 @@ export function startRetryWaitMs(f: StartFailure, tryIndex: number, waitsUsed = 
 }
 
 /**
+ * The one refusal a repeat can never fix, read out of the engine's own words.
+ *
+ * A call pass is booked seconds before the dial and lives minutes, so a pass the engine
+ * reports as expired more than an hour ago cannot have been spent by time passing: only a
+ * machine whose clock is hours away from real time reads it that way. That sentence is the
+ * clock's signature, and it is worth a different message from a dead video line because the
+ * customer can fix it himself.
+ */
+export function clockRefusedThePass(detail: string): boolean {
+  const m = /expired (\d+) s ago/i.exec(detail);
+  return m !== null && Number(m[1]) * 1000 > 3_600_000;
+}
+
+/**
  * The sentence shown when this press of Start is finished with.
  *
  * A gateway reason always maps to its own plain sentence. A call that opened and died is
@@ -139,5 +153,8 @@ export function startRetryWaitMs(f: StartFailure, tryIndex: number, waitsUsed = 
  * that says so. Nothing here can return the engine's own words.
  */
 export function startFailureMessage(f: StartFailure): string {
+  // The machine's clock, not the video line: say which, because they are fixed in different
+  // places and only one of them is somewhere the customer can reach.
+  if (f.stage === "engine" && clockRefusedThePass(f.detail)) return endReasonMessage("clock_skew");
   return endReasonMessage(f.reason ?? (f.stage === "engine" ? "engine_no_answer" : null));
 }

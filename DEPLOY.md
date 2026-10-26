@@ -63,7 +63,12 @@ supabase functions deploy lease
 supabase functions deploy proxy-voice
 supabase functions deploy admin-api
 supabase functions deploy admin
+supabase functions deploy server-time
 ```
+
+`server-time` answers with nothing but the gateway's clock, and the desktop app asks it the
+moment it opens — before anyone signs in. Deploy it with the rest: a build that cannot reach
+it falls back to the machine's own time, which is the thing that was refusing calls.
 
 `admin` serves the panel HTML from `supabase/functions/admin/html.ts`. If you edit
 `index.html`, regenerate first:

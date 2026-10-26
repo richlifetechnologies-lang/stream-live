@@ -30,6 +30,11 @@ const REASON_COPY: Record<string, string> = {
   // one is closed rather than renewed for ever. Nothing was ever owed on it.
   no_picture: "Your call never showed a picture, so we ended it and gave back everything it had set aside. Nothing was used. Try again — if it keeps happening, tell your administrator, who can see exactly what the video service answered.",
   no_lease: "Your call was ended because its booking lapsed. Try starting again.",
+  // The video software checks the call pass against the clock on the machine it runs on. A
+  // computer set hours away from real time therefore reads a minutes-old pass as already
+  // spent and never asks for the call - which looks exactly like a dead video line, and is
+  // fixed somewhere the customer can reach.
+  clock_skew: "Your computer's clock is running hours away from real time, and that is what stopped the call - the video line was never asked for it. Turn on automatic time in your computer's settings, then start again.",
   session_not_found: "We couldn't find your session any more, so the call stopped. Try again.",
   connection_lost: "Your internet connection dropped, so the call ended. Check your network and try again.",
   signed_out: "You were signed out. Please sign in again.",

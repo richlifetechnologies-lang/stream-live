@@ -10,6 +10,7 @@ import {
   type Wallet,
 } from "@stream-live/client";
 import { GATEWAY_CONFIG } from "./gateway-config";
+import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "./clock-sync";
 import type { LiveLease } from "./minutes";
 import type { AdminContact } from "@stream-live/client";
 
@@ -231,6 +232,45 @@ export function reportCallFailure(sessionId: string | null, stage: string, detai
   logAccount(`call failure reported (${stage}): ${detail}`);
 }
 
+// Once per program run: a machine that is hours off stays hours off, and the log is
+// interesting for its first entry, not its hundredth.
+let clockSkewLogged = false;
+
+/**
+ * Write a machine's clock error where the operator reads it, never on the customer's
+ * screen. The app works from the gateway's clock, so there is nothing for the person
+ * holding that computer to do.
+ */
+export function noteClockSkew(skewMs: number): void {
+  if (Math.abs(skewMs) < CLOCK_NOTICE_MS || clockSkewLogged || !getState().signedIn) return;
+  clockSkewLogged = true;
+  void gateway.raw
+    .rpc("sl_report_call_failure", {
+      p_session_id: null,
+      p_stage: "clock skew",
+      p_detail: `This computer reads ${describeClockSkew(skewMs)} real time. The app is working from the gateway's clock, so calls are unaffected.`,
+    })
+    .then(() => undefined, () => undefined);
+}
+
+/**
+ * Take the gateway's clock as the app's own, before this machine makes a single decision
+ * with its own time. A computer running ahead refuses its call pass before it dials, and
+ * a customer has no way to tell that from a dead video line — so the correction happens in
+ * silence and nothing is asked of the person holding the computer.
+ */
+export async function syncClockWithServer(): Promise<number | null> {
+  const skew = alignClock(await gateway.serverTime());
+  if (skew !== null) noteClockSkew(skew);
+  return skew;
+}
+
+/** The boot reading is taken before anyone is signed in, so it is written up once we know. */
+function reportMeasuredSkew(): void {
+  const skew = clockSkewMs();
+  if (skew !== null) noteClockSkew(skew);
+}
+
 export async function refreshBalances(): Promise<void> {
   if (!state.signedIn) return;
   try {
@@ -293,6 +333,7 @@ export async function restore(): Promise<Session | null> {
   const session = await gateway.restoreSession();
   if (!session) { setState({ signedIn: false, email: null, wallets: [], loading: false, paid: true }); return null; }
   setState({ signedIn: true, email: session.user.email ?? null, loading: false });
+  reportMeasuredSkew();
   await refreshBalances();
   return session;
 }
@@ -300,6 +341,7 @@ export async function restore(): Promise<Session | null> {
 export async function signIn(email: string, password: string): Promise<Session> {
   const session = await gateway.signIn(email, password);
   setState({ signedIn: true, email: session.user.email ?? null, loading: false });
+  reportMeasuredSkew();
   await refreshBalances();
   return session;
 }
@@ -312,6 +354,7 @@ export async function signUp(email: string, password: string, displayName?: stri
   const session = await gateway.signUp(email, password, displayName, await deviceId());
   if (session) {
     setState({ signedIn: true, email: session.user.email ?? null, loading: false });
+    reportMeasuredSkew();
     await refreshBalances();
   }
   return session;

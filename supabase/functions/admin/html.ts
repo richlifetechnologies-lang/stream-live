@@ -222,7 +222,7 @@ export const ADMIN_HTML = `<!doctype html>
 
         <div class="card">
           <h2 style="font-size:14px;margin:0 0 4px">Credit minutes into a bucket</h2>
-          <p class="muted" style="margin:0 0 12px">The user paid you outside the software; you credit the bucket. Deducting is a negative grant (corrections, refunds reversed). Both write an append-only ledger row and go through <code>admin-api</code>. A reason is required.</p>
+          <p class="muted" style="margin:0 0 12px">The user paid you outside the software; you credit the bucket. Type the amount the way the meter shows it (1:44) or as plain minutes (60) — the line under the box repeats it in both units and previews the balance the click leaves. Deducting is a negative grant (corrections, refunds reversed); <b>Empty this bucket to 0:00</b> takes the exact stored amount so nothing is left over. Both write an append-only ledger row and go through <code>admin-api</code>. A reason is required.</p>
           <div class="row" style="margin-bottom:14px;align-items:center">
             <div style="flex:1 1 260px"><label style="margin-top:0">Or credit a whole package in one go</label><select id="gPackage"></select></div>
             <div style="flex:0 0 auto"><button id="packageBtn" style="margin-top:20px">Credit this package</button></div>
@@ -230,14 +230,16 @@ export const ADMIN_HTML = `<!doctype html>
           </div>
           <div class="row">
             <div><label>Credit which bucket</label><select id="gModality"></select></div>
-            <div><label>Minutes to add</label><input id="gMinutes" type="number" min="0" step="0.5" placeholder="60" /></div>
+            <div><label>Time to add — type 1:44 (1 min 44 sec) or 60 (60 min)</label><input id="gMinutes" type="text" inputmode="numeric" autocomplete="off" placeholder="1:44" style="width:110px" /></div>
             <div style="flex:2 1 260px"><label>Reason (required — audit trail)</label><input id="gReason" placeholder="e.g. Interac e-transfer ref 8842" /></div>
           </div>
+          <div class="muted" id="gMinHint" style="margin:-4px 0 10px"></div>
           <div class="row" style="margin-top:12px;align-items:center">
             <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gUnlimited" /> Set unlimited</label></div>
             <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gClearUnlimited" /> Clear unlimited</label></div>
             <div style="flex:0 0 auto"><button id="grantBtn" class="primary">Credit minutes</button></div>
             <div style="flex:0 0 auto"><button id="deductBtn" class="danger">Deduct</button></div>
+            <div style="flex:0 0 auto"><button id="zeroBtn" class="danger">Empty this bucket to 0:00</button></div>
           </div>
           <div id="grantMsg"></div>
         </div>
@@ -1041,6 +1043,25 @@ export const ADMIN_HTML = `<!doctype html>
   const clock = (v) => { const total = Math.max(0, Math.floor(N(v) * 60)); return Math.floor(total / 60) + ":" + String(total % 60).padStart(2, "0"); };
   const mins1 = (v) => N(v).toFixed(1);
   const mins2 = (v) => N(v).toFixed(2);
+  // The meter shows a balance as 1:44, so the box that moves money has to read 1:44
+  // too. A bare number stays decimal minutes, because packages are written that way.
+  // Seconds are rounded UP to the stored three decimals: 104/60 is 1.7333…, and the
+  // nearest rounding (1.733) displays as 1:43, which would under-deduct by a second
+  // all over again. The server clamps a bucket at zero, so overshoot is harmless.
+  const parseMin = (raw) => {
+    const s = String(raw ?? "").trim().replace(",", ".");
+    if (!s) return null;
+    const up = (n) => Math.ceil(n * 1000) / 1000;
+    if (s.includes(":")) {
+      const p = s.split(":");
+      if (p.length !== 2) return null;
+      const m = Number(p[0]), sec = Number(p[1]);
+      if (!Number.isFinite(m) || m < 0 || !Number.isFinite(sec) || sec < 0 || sec >= 60) return null;
+      return up((m * 60 + sec) / 60);
+    }
+    const n = Number(s);
+    return Number.isFinite(n) && n >= 0 ? up(n) : null;
+  };
   const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
   const afterJoin = (iso) => \`(after this account joined\${iso ? " " + new Date(iso).toLocaleString() : ""})\`;
 
@@ -1631,6 +1652,7 @@ export const ADMIN_HTML = `<!doctype html>
     showPackageHint();
     $("gMinutes").value = ""; $("gReason").value = "";
     $("gUnlimited").checked = false; $("gClearUnlimited").checked = false;
+    refreshMinHint();
 
     $("deviceTable").querySelector("tbody").innerHTML = (c.devices || []).map((d, i) => \`<tr data-dev="\${i}">
       <td class="mono">\${esc(d.device_id)}</td><td>\${esc(d.label || "—")}</td><td class="muted">\${when(d.last_seen)}</td>
@@ -1731,8 +1753,15 @@ export const ADMIN_HTML = `<!doctype html>
     } catch (err) { msg("detMsg", err.message); }
   };
 
+  function bucketOf(modality) {
+    return (CUR?.wallets || []).find((w) => w.modality === modality) || null;
+  }
+
   function grantPayload(sign) {
-    const minutes = N($("gMinutes").value) * sign;
+    const typed = ($("gMinutes").value || "").trim();
+    const amount = parseMin(typed);
+    if (typed && amount === null) throw new Error('Type it the way the meter shows it (1:44) or as plain minutes (60). Seconds must be 0-59.');
+    const minutes = (amount || 0) * sign;
     const reason = $("gReason").value.trim();
     if (!minutes && !$("gUnlimited").checked && !$("gClearUnlimited").checked) throw new Error("Enter how many minutes, or use the unlimited switches.");
     if (reason.length < 3) throw new Error("A reason is required (audit trail).");
@@ -1742,6 +1771,22 @@ export const ADMIN_HTML = `<!doctype html>
     if ($("gClearUnlimited").checked) unlimited = false;
     return { action: "grant", userId: CUR.user_id, modality: $("gModality").value, minutes, reason, unlimited };
   }
+
+  function refreshMinHint() {
+    const el = $("gMinHint");
+    const typed = ($("gMinutes").value || "").trim();
+    const amount = parseMin(typed);
+    if (!CUR || amount === null) { el.textContent = ""; return; }
+    const m = $("gModality").value;
+    const w = bucketOf(m);
+    if (w?.unlimited) { el.textContent = MOD_LABEL[m] + " is unlimited on this account, so the meter does not move."; return; }
+    const bal = N(w?.balance);
+    const after = Math.max(0, bal - amount);
+    el.textContent = \`\${mins2(amount)} min = \${clock(amount)} on the meter. \${MOD_LABEL[m]} reads \${clock(bal)} now\`
+      + (amount > bal ? ", and a deduct lands it on exactly 0:00." : \`, so a deduct leaves \${clock(after)} and a credit makes it \${clock(bal + amount)}.\`);
+  }
+  $("gMinutes").oninput = refreshMinHint;
+  $("gModality").onchange = refreshMinHint;
 
   $("grantBtn").onclick = async () => {
     if (!CUR) return msg("grantMsg", "Open an account first.");
@@ -1763,11 +1808,32 @@ export const ADMIN_HTML = `<!doctype html>
     if (!CUR) return msg("grantMsg", "Open an account first.");
     let payload;
     try { payload = grantPayload(-1); } catch (err) { return msg("grantMsg", err.message); }
-    const why = \`\${MOD_LABEL[payload.modality]} −\${mins(Math.abs(payload.minutes))} min · \${payload.reason}\`;
+    const w = bucketOf(payload.modality);
+    const bal = N(w?.balance);
+    const meter = w?.unlimited ? "this bucket is unlimited" : \`meter \${clock(bal)} → \${clock(Math.max(0, bal - Math.abs(payload.minutes)))}\`;
+    const why = \`\${MOD_LABEL[payload.modality]} −\${mins2(Math.abs(payload.minutes))} min (= \${clock(Math.abs(payload.minutes))}) · \${meter} · \${payload.reason}\`;
     if (!confirm("Deduct from " + CUR.email + "?\\n\\n" + why + "\\n\\nThis cannot be undone from the panel — a correction is a new ledger row.")) return;
     try {
       const res = await api(payload);
       msg("grantMsg", \`Deducted. New balance \${clock(res.balance)} on the meter.\`, "ok");
+      await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
+    } catch (err) { msg("grantMsg", err.message); }
+  };
+
+  // A hand-typed amount can always miss the seconds the meter rounded down; this
+  // takes the exact stored figure so the bucket lands on zero.
+  $("zeroBtn").onclick = async () => {
+    if (!CUR) return msg("grantMsg", "Open an account first.");
+    const m = $("gModality").value;
+    const w = bucketOf(m);
+    if (w?.unlimited) return msg("grantMsg", MOD_LABEL[m] + " is unlimited on this account — clear unlimited first, then empty it.");
+    const bal = N(w?.balance);
+    if (bal <= 0) return msg("grantMsg", MOD_LABEL[m] + " is already at 0:00 on this account.", "ok");
+    const reason = ($("gReason").value.trim() || "bucket emptied by hand");
+    if (!confirm(\`Empty the \${MOD_LABEL[m]} bucket on \${CUR.email}?\\n\\nThe meter reads \${clock(bal)}; all \${mins2(bal)} min come off and it lands on exactly 0:00.\\n\\nReason: \${reason}\`)) return;
+    try {
+      const res = await api({ action: "grant", userId: CUR.user_id, modality: m, minutes: -bal, reason, unlimited: null });
+      msg("grantMsg", \`Emptied. New balance \${clock(res.balance)} on the meter.\`, "ok");
       await Promise.all([openAccount(CUR.user_id), loadAccounts()]);
     } catch (err) { msg("grantMsg", err.message); }
   };

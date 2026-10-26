@@ -48,6 +48,13 @@ export type CallTicket = {
   unlimited: boolean;
   leaseMinutes: number;
   expiresInSeconds: number;
+  /**
+   * The gateway's own clock, in milliseconds since the epoch, at the moment it answered.
+   * A machine whose clock runs ahead refuses its call pass before dialling and reports it
+   * as a dead video line, so the app needs a time that did not come from that machine.
+   * Null on a gateway that has not been updated yet.
+   */
+  serverTimeMs: number | null;
 };
 
 export type LeaseState = {
@@ -531,6 +538,9 @@ export class StreamLiveClient {
       appVersion: this.cfg.appVersion,
     });
     this.sessionId = res.sessionId;
+    // An older gateway stamps no time at all, and a stamp of zero is not a time: taking
+    // either as one would report the machine's clock as wrong by fifty years.
+    const serverMs = Number(res.serverTimeMs);
     return {
       sessionId: res.sessionId,
       token: res.token ?? null,
@@ -541,7 +551,32 @@ export class StreamLiveClient {
       unlimited: res.unlimited === true,
       leaseMinutes: Number(res.leaseMinutes ?? 0),
       expiresInSeconds: Number(res.expiresInSeconds ?? 120),
+      serverTimeMs: Number.isFinite(serverMs) && serverMs > 0 ? serverMs : null,
     } satisfies CallTicket;
+  }
+
+  /**
+   * The gateway's clock in milliseconds since the epoch, or null if it would not answer.
+   * Asked before sign-in, so it carries the anonymous key and no session. A machine whose
+   * clock runs ahead refuses its own call pass before it dials and reads as a dead video
+   * line, so every timed decision the app makes is taken against this number instead.
+   */
+  async serverTime(): Promise<number | null> {
+    try {
+      const res = await fetch(`${this.cfg.supabaseUrl}/functions/v1/server-time`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${this.cfg.supabaseAnonKey}`,
+        },
+        body: "{}",
+      });
+      if (!res.ok) return null;
+      const ms = Number((await res.json() as { serverTimeMs?: unknown }).serverTimeMs);
+      return Number.isFinite(ms) && ms > 0 ? ms : null;
+    } catch {
+      return null;
+    }
   }
 
   /**
