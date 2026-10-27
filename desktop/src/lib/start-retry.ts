@@ -25,6 +25,16 @@ export const START_TRIES = 3;
 export const START_RETRY_WAITS_MS = [10_000, 30_000];
 
 /**
+ * A free-trial press asks once and stops.
+ *
+ * The re-ask was built for the paid line, whose refusals are a slot being busy a few seconds
+ * longer than the last call held it. The trial has never been measured failing that way, and a
+ * customer spending forty seconds watching "retrying" on a call that is simply not starting is
+ * a worse screen than one honest sentence at the thirteen-second mark.
+ */
+export const TRIAL_START_TRIES = 1;
+
+/**
  * When the server announces a wait, the press asks exactly once more, after that wait.
  * Repeating a paced refusal would be the app arguing with a number that was measured on
  * the machine, and each ask reopens a lease.
@@ -41,6 +51,12 @@ export type StartFailure = {
   detail: string;
   reason?: string;
   sessionId: string | null;
+  /**
+   * Which video line the gateway put this call on, as it answered. The trial line and the paid
+   * line fail for different reasons, so the press that has to decide whether to ask again needs
+   * to know which one it is holding - and only the gateway's own answer says so.
+   */
+  engine: string | null;
   /**
    * Milliseconds the server asked this machine to wait before it presses again, or null
    * when it announced no wait. It is a number the gateway measured on this exact machine,
@@ -67,6 +83,7 @@ export function classifyStartFailure(
   detail: string,
   sessionId: string | null,
   waitSeconds: number | null = null,
+  engine: string | null = null,
 ): StartFailure {
   const announced = Number(waitSeconds);
   const waitMs = Number.isFinite(announced) && announced > 0
@@ -79,10 +96,19 @@ export function classifyStartFailure(
       detail: `gateway refused (${pReason})`,
       reason: pReason,
       sessionId,
+      engine,
       waitMs,
     };
   }
-  return { retryable: needsVideo, stage: needsVideo ? "engine" : "voice", detail, sessionId, waitMs: null };
+  return { retryable: needsVideo, stage: needsVideo ? "engine" : "voice", detail, sessionId, engine, waitMs: null };
+}
+
+/**
+ * How many asks this press may make. The trial line asks once; everything else keeps the
+ * paid line's three, which is what the measurements behind the table above were taken on.
+ */
+export function startTriesFor(f: StartFailure): number {
+  return f.engine === "decart" ? TRIAL_START_TRIES : START_TRIES;
 }
 
 /**
@@ -98,10 +124,10 @@ export function classifyStartFailure(
  * do with timing can still be told "come back in two minutes" on its second, and throwing
  * that away would leave the customer with a flat failure and a wait he never saw.
  */
-export function startRetryWaitMs(f: StartFailure, tryIndex: number, waitsUsed = 0): number | null {
+export function startRetryWaitMs(f: StartFailure, tryIndex: number, waitsUsed = 0, tries = START_TRIES): number | null {
   if (!f.retryable) return null;
   if (f.waitMs !== null) return waitsUsed >= PACED_RE_ASKS ? null : f.waitMs;
-  if (tryIndex + 1 >= START_TRIES) return null;
+  if (tryIndex + 1 >= tries) return null;
   return START_RETRY_WAITS_MS[tryIndex] ?? null;
 }
 

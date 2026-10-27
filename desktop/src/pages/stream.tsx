@@ -12,7 +12,7 @@ import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
-import { START_TRIES, classifyStartFailure, startFailureMessage, startRetryWaitMs, type StartFailure } from "../lib/start-retry";
+import { START_TRIES, classifyStartFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
 import {
@@ -805,6 +805,21 @@ async function _startVideoSession(token: string, localStream: MediaStream, onRem
 // rebuilt here from the SDK's events, so the pump that feeds the virtual camera,
 // the prompt updates and the teardown code never learn there is more than one
 // engine. The one rule: nothing here may put a provider name on the screen.
+/**
+ * One readable line out of whatever the video pipeline answered with: an Error, a bare string,
+ * or the close event's own object carrying a code and a reason. Whitespace flattened and capped,
+ * because this goes into a log column and a customer's file, not onto a screen.
+ */
+function _engineWords(e: unknown): string {
+  let s: string;
+  if (e instanceof Error) s = `${e.name}: ${e.message}`;
+  else if (typeof e === "string") s = e;
+  else {
+    try { s = JSON.stringify(e) ?? String(e); } catch { s = String(e); }
+  }
+  return s.replace(/\s+/g, " ").slice(0, 280);
+}
+
 async function _startTrialVideoSession(
   token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void,
   onConnectionState: (state: RTCPeerConnectionState) => void, onDisconnect: () => void,
@@ -847,11 +862,13 @@ async function _startTrialVideoSession(
     );
   });
   if ("err" in opened) {
-    // The SDK's own wording names the service and its hostnames. That belongs in
-    // the console, never on the screen, so everything becomes our prefixed
-    // sentence — which toUserMessage recognises and replaces with a plain one.
+    // The engine's own wording names the service and its hostnames, so it may never be put on
+    // the screen — but throwing it away entirely was worse: the sentence the customer reads
+    // points at his administrator, who could not see anything at all. Only this branch's
+    // message reaches the panel and the log file, never a customer's screen, because the toast
+    // is built from the failure's reason code and not from this text.
     console.warn("[video] could not start the call:", opened.err);
-    throw new Error(`${APP}: could not start the call`);
+    throw new Error(`${APP}: could not start the call (${_engineWords(opened.err)})`);
   }
   const rc = opened.client;
 
@@ -1711,12 +1728,14 @@ export default function StreamPage() {
     // clears the page's copy of it before the failure reaches the caller — so it is
     // held here too, for the record of what the video service answered.
     let sessionId: string | null = null;
+    let engine: string | null = null;
     setConnStep("auth"); setConnStatus("connecting");
     try {
       // Open the metered lease first: nothing touches WebRTC until the gateway
       // confirms this account and bucket can pay for the call.
       const ticket = await gateway.startCall(tabName, await deviceId());
       sessionId = ticket.sessionId;
+      engine = ticket.engine ?? null;
       sessionIdRef.current = ticket.sessionId;
       beginLease(ticket);
 
@@ -1860,6 +1879,7 @@ export default function StreamPage() {
         err instanceof Error ? err.message : String(err),
         sessionId,
         err instanceof GatewayError ? err.retryAfterSeconds : null,
+        engine,
       );
     }
   }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation]);
@@ -1908,13 +1928,16 @@ export default function StreamPage() {
     try {
       let last: StartFailure | null = null;
       let waitsUsed = 0;
-      for (let i = 0; i < START_TRIES; i++) {
+      let tries = START_TRIES;
+      for (let i = 0; i < tries; i++) {
         const failure = await attemptStart(activeTab, needsVideo, needsVoice);
         if (!failure) return;
         last = failure;
+        // Which line the gateway put this call on decides how many more asks it is worth.
+        tries = startTriesFor(failure);
         // Write it down while it is still true what the engine said.
         if (failure.sessionId) reportCallFailure(failure.sessionId, failure.stage, failure.detail);
-        const waitMs = startRetryWaitMs(failure, i, waitsUsed);
+        const waitMs = startRetryWaitMs(failure, i, waitsUsed, tries);
         if (waitMs === null) break;
         if (failure.waitMs !== null) waitsUsed++;
         // The failed attempt ran a teardown, which released the page's "starting" flag;
