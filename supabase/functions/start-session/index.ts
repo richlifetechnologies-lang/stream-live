@@ -20,6 +20,13 @@ import { runWithKeys } from "../_shared/keys.ts";
 /** Fallback when app_config has no lease TTL yet; the JWT must outlive one heartbeat. */
 const DEFAULT_TOKEN_TTL_SECONDS = 120;
 
+/**
+ * A customer stands at a spinner while these two handshakes are in flight, so a vendor
+ * that goes quiet instead of refusing has to be given up on. 15 seconds, the same figure
+ * the payment calls already hold.
+ */
+const UPSTREAM_TIMEOUT_MS = 15_000;
+
 /** Reasons that mean "ask the administrator for minutes", not "you did something wrong". */
 const STATUS_BY_REASON: Record<string, number> = {
   out_of_minutes: 402,
@@ -57,6 +64,7 @@ async function mintFalToken(userId: string, appId: string, ttlSeconds: number) {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Key ${key.secret}` },
       body: JSON.stringify({ allowed_apps: allowedApps, token_expiration: expiration }),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
     });
     if (!res.ok) {
       return { ok: false, status: res.status, detail: `fal token error (${res.status}) ${(await res.text().catch(() => "")).slice(0, 200)}` };
@@ -102,6 +110,7 @@ async function mintDecartToken(userId: string, ttlSeconds: number, billMinutes: 
         method: "POST",
         headers: { "X-API-KEY": key.secret, "content-type": "application/json" },
         body: JSON.stringify({ expiresIn, allowedModels: ["lucy-2.5"] }),
+        signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
       });
     } catch (err) {
       return { ok: false, detail: `decart unreachable: ${err instanceof Error ? err.message : String(err)}` };

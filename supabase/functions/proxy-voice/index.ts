@@ -19,6 +19,13 @@ import { runWithKeys } from "../_shared/keys.ts";
 /** Deno's clock vs Postgres' now(): refuse a lease only past a small skew window. */
 const LEASE_SKEW_MS = 10_000;
 
+/**
+ * How long to wait for the voice service to begin answering. This is a time-to-first-answer
+ * deadline and nothing more: the timer is disarmed the moment the service starts talking,
+ * because a timer left running would also fire in the middle of a live voice.
+ */
+const FIRST_BYTE_TIMEOUT_MS = 15_000;
+
 const ELEVEN_BASE = "https://api.elevenlabs.io";
 
 const INFER_PREFIXES = ["/v1/speech-to-speech/", "/v1/text-to-speech/"];
@@ -108,15 +115,27 @@ Deno.serve(async (req: Request) => {
 
     const proxied = await runWithKeys<Response>(user.id, "elevenlabs", async (key) => {
       const { headers, payload } = upstreamPayload(body);
-      const upstream = await fetch(ELEVEN_BASE + path, {
-        method,
-        headers: {
-          "xi-api-key": key.secret,
-          Accept: body.isStream ? "audio/mpeg" : "application/json",
-          ...headers,
-        },
-        body: method === "POST" ? payload : undefined,
-      });
+      // A timer that simply expires would fire during the audio as well as before it, so the
+      // deadline is held on a controller that is disarmed the moment the service answers.
+      const ac = new AbortController();
+      const armed = setTimeout(() => ac.abort(), FIRST_BYTE_TIMEOUT_MS);
+      let upstream: Response;
+      try {
+        upstream = await fetch(ELEVEN_BASE + path, {
+          method,
+          headers: {
+            "xi-api-key": key.secret,
+            Accept: body.isStream ? "audio/mpeg" : "application/json",
+            ...headers,
+          },
+          body: method === "POST" ? payload : undefined,
+          signal: ac.signal,
+        });
+      } catch (err) {
+        clearTimeout(armed);
+        return { ok: false, detail: `elevenlabs did not answer: ${err instanceof Error ? err.message : String(err)}` };
+      }
+      clearTimeout(armed);
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "");
         return { ok: false, status: upstream.status, detail: detail.slice(0, 300) };
