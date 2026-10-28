@@ -63,7 +63,15 @@ export type LeaseState = {
   balance: number | null;
   unlimited: boolean;
   leaseExpiresAt: string | null;
+  /** Wallet minutes this call has been charged for, all windows together. */
   billedMinutes: number | null;
+  /**
+   * Seconds of airtime the window the last renewal just bought pays for, counted from the
+   * instant that window starts. Null when nothing is being counted down against this call:
+   * an unlimited bucket, a video call whose picture has not reached the screen, or a renewal
+   * that never reached the wallet. `null` is not `0` — zero tells the app to cut the call.
+   */
+  fundedSeconds: number | null;
   lowBalance: boolean;
 };
 
@@ -609,6 +617,7 @@ export class StreamLiveClient {
             unlimited: false,
             leaseExpiresAt: null,
             billedMinutes: null,
+            fundedSeconds: null,
             lowBalance: false,
           });
         });
@@ -645,6 +654,9 @@ export class StreamLiveClient {
       unlimited: res.unlimited === true,
       leaseExpiresAt: res.leaseExpiresAt ?? null,
       billedMinutes: res.billedMinutes === undefined ? null : Number(res.billedMinutes),
+      fundedSeconds: res.fundedSeconds === null || res.fundedSeconds === undefined
+        ? null
+        : Number(res.fundedSeconds),
       lowBalance: res.lowBalance === true,
     } satisfies LeaseState;
   }
@@ -667,6 +679,8 @@ export class StreamLiveClient {
       unlimited: res.unlimited === true,
       leaseExpiresAt: null,
       billedMinutes: res.billedMinutes === undefined ? null : Number(res.billedMinutes),
+      // A close buys no window, so there is nothing to count down from.
+      fundedSeconds: null,
       lowBalance: false,
     } satisfies LeaseState;
   }

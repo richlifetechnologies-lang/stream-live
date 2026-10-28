@@ -7,7 +7,7 @@
 // the wallet ran dry.
 //
 // Body: { sessionId: string, action?: "renew"|"media"|"end" }   (end === action:"end")
-// Resp: { ended, balance, unlimited, leaseExpiresAt, billedMinutes, lowBalance }
+// Resp: { ended, balance, unlimited, leaseExpiresAt, billedMinutes, fundedSeconds, lowBalance }
 import { preflight, json, fail } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { adminClient } from "../_shared/db.ts";
@@ -36,7 +36,7 @@ Deno.serve(async (req: Request) => {
     if (!session || session.user_id !== user.id) return fail("session not found", 404);
 
     if (session.ended_at || session.settled) {
-      return json({ ended: true, balance: null, unlimited: false, leaseExpiresAt: null, billedMinutes: null, lowBalance: false });
+      return json({ ended: true, balance: null, unlimited: false, leaseExpiresAt: null, billedMinutes: null, fundedSeconds: null, lowBalance: false });
     }
 
     const res = await updateLease(sessionId, action);
@@ -49,6 +49,9 @@ Deno.serve(async (req: Request) => {
       // a fresh one counted from this request.
       leaseExpiresAt: action === "media" ? session.lease_expires_at : res.expiresAt,
       billedMinutes: res.billed,
+      // How long the window this renewal just bought pays for airtime, counted from the
+      // instant it starts. Null when nothing is being counted down against this call.
+      fundedSeconds: res.fundedSeconds,
       lowBalance: res.balance !== null && res.balance <= LOW_BALANCE_MINUTES,
     });
   } catch (err) {

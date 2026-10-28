@@ -111,6 +111,9 @@ export function beginLease(ticket: CallTicket): void {
       balance: ticket.balance,
       unlimited: ticket.unlimited,
       billedMinutes: 0,
+      // The gateway has pre-paid a window with this call's opening, but it says how long
+      // that window runs on the first renewal, so the bound stays unknown until then.
+      fundedUntilAt: null,
       startBalance: (ticket.balance ?? 0) + ticket.leaseMinutes,
       startedAt: now,
       observedAt: now,
@@ -148,12 +151,21 @@ export function markMedia(): void {
 export function updateLease(sessionId: string, lease: LeaseState): void {
   const prev = state.live;
   if (!prev || prev.sessionId !== sessionId) return;
+  // The gateway names the seconds its new window pays for from the instant that window
+  // starts, so this machine's clock only ever has to count from the moment the answer was
+  // read. A renewal that names none (an unlimited bucket, a picture not yet on screen, an
+  // answer that closed the call) leaves the previous bound standing rather than inventing
+  // a deadline of now.
+  const funded = lease.fundedSeconds === null
+    ? prev.fundedUntilAt
+    : Date.now() + lease.fundedSeconds * 1000;
   setState({
     live: {
       ...prev,
       balance: lease.balance,
       unlimited: lease.unlimited,
       billedMinutes: lease.billedMinutes ?? prev.billedMinutes,
+      fundedUntilAt: funded,
       observedAt: Date.now(),
       leaseExpiresAt: lease.leaseExpiresAt,
       lowBalance: lease.lowBalance,

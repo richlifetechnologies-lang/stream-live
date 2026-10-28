@@ -144,11 +144,16 @@ export async function startLease(
  *
  * `media` moves no money: the database only records when the picture arrived, which is
  * where a video window is billed from. A lease that never got one is refunded in full.
+ *
+ * A renewal also says how many seconds the window it just bought pays for. It comes back
+ * null when nothing is being counted down against - an unlimited bucket, or a video call
+ * whose picture has not reached the screen yet - and null has to stay null, because zero
+ * seconds means "cut the call now" to the app.
  */
 export async function updateLease(
   sessionId: string,
   action: "renew" | "end" | "media",
-): Promise<{ ok: boolean; ended: boolean; reason?: string; error?: string; balance: number | null; expiresAt: string | null; billed: number | null; ttlSeconds: number; unlimited: boolean }> {
+): Promise<{ ok: boolean; ended: boolean; reason?: string; error?: string; balance: number | null; expiresAt: string | null; billed: number | null; fundedSeconds: number | null; ttlSeconds: number; unlimited: boolean }> {
   const db = adminClient();
   const data = unwrap(await db.rpc("sl_lease", { p_session_id: sessionId, p_action: action }));
 
@@ -161,6 +166,9 @@ export async function updateLease(
     balance: data.balance === null || data.balance === undefined ? null : Number(data.balance),
     expiresAt: data.ended === true ? null : new Date(Date.now() + ttl * 1000).toISOString(),
     billed: data.billed_minutes === undefined ? null : Number(data.billed_minutes),
+    fundedSeconds: data.funded_seconds === null || data.funded_seconds === undefined
+      ? null
+      : Number(data.funded_seconds),
     ttlSeconds: ttl,
     unlimited: data.unlimited === true,
   };

@@ -18,6 +18,13 @@ export type LiveLease = {
   unlimited: boolean;
   /** Wallet minutes this call has been charged for so far. */
   billedMinutes: number;
+  /**
+   * The instant the airtime the gateway has already paid for runs out, on this machine's
+   * clock, or null while the gateway has not named one. The gateway only bills whole windows
+   * it pre-pays, so past this instant the call is on air for nothing: the countdown below is
+   * an estimate of the same bound, and this one is the server's own number.
+   */
+  fundedUntilAt: number | null;
   /** What the bucket held when the call opened, so the bar can show the drain. */
   startBalance: number;
   startedAt: number;
@@ -77,4 +84,34 @@ export function countdown(mins: number | null): string {
   if (mins === null) return "∞";
   const total = Math.max(0, Math.floor(mins * 60));
   return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/**
+ * The second this call has to stop, on this machine's clock, or a past second for one that
+ * has already run out.
+ *
+ * The gateway buys each window in front of the call and answers a renewal with the seconds
+ * that window pays for, counted from the instant it starts - and a renewal never buys more
+ * than the wallet holds. So that answer is the real bound, and it moves only when a
+ * heartbeat reaches the wallet: lose the heartbeat and the call stops with the airtime that
+ * was actually paid for, instead of running unbilled until the engine gives up.
+ *
+ * Before the first renewal - and for a video call still waiting for its picture, where the
+ * server names no bound because nothing is being spent - there is only the meter's own
+ * estimate, so that is what gets armed. `minFundedMs` keeps a call opened on the last sliver
+ * of change on screen for its first seconds rather than dropping it like a failure.
+ */
+export function stopDeadlineAt(
+  lease: LiveLease,
+  burnRate: number,
+  now: number,
+  minFundedMs: number,
+): number {
+  const drain = drainOf(lease, burnRate, now);
+  const airStart = lease.modality === "audio" ? lease.startedAt : (lease.mediaAt ?? lease.startedAt);
+  // Only an unlimited bucket reports a null countdown, and the caller does not arm a timer
+  // for one, so this never has to time anything but a real number of minutes.
+  const remaining = drain.remaining ?? 0;
+  const paidUntil = lease.fundedUntilAt ?? (now + (remaining * 60_000) / burnRate);
+  return Math.max(paidUntil, airStart + minFundedMs);
 }

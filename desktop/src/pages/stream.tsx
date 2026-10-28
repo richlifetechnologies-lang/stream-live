@@ -7,7 +7,7 @@ import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
 import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure, noteClockSkew } from "../lib/gateway";
-import { drainOf } from "../lib/minutes";
+import { stopDeadlineAt } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
@@ -1697,15 +1697,20 @@ export default function StreamPage() {
   // run out. A call that has not shown a frame spends nothing, so its deadline is
   // measured from the frame; and a call opened on the last sliver of change gets
   // its first few seconds rather than a drop that looks like a crash.
+  //
+  // The gateway now names that second itself: each renewal answers with the seconds the
+  // window it just bought pays for, and a renewal only ever buys what the wallet still
+  // holds. So this is the server's own bound, and the countdown is used only while the
+  // server has not given one - before the first renewal, on an unlimited bucket, or on a
+  // video call still waiting for its picture. When a heartbeat is lost the bound stops
+  // moving and the call ends at the second the paid-for airtime does, instead of streaming
+  // on unbilled until the engine gives up.
   useEffect(() => {
     const MIN_FUNDED_MS = 10_000;
     const lease = account.live;
     if (!isStreaming || !lease || lease.unlimited) return;
     const burn = bucketFor(account, lease.modality)?.burnRate ?? 1;
-    const drain = drainOf(lease, burn, Date.now());
-    if (drain.remaining === null) return;
-    const airStart = lease.modality === "audio" ? lease.startedAt : (lease.mediaAt ?? lease.startedAt);
-    const stopAt = Math.max(Date.now() + (drain.remaining * 60_000) / burn, airStart + MIN_FUNDED_MS);
+    const stopAt = stopDeadlineAt(lease, burn, Date.now(), MIN_FUNDED_MS);
     const id = setTimeout(() => {
       if (!sessionIdRef.current) return;
       void teardownStream();
