@@ -16,6 +16,7 @@ import { START_TRIES, classifyStartFailure, startFailureMessage, startRetryWaitM
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
+import { DEFAULT_HOLD, LipSyncEstimator, MAX_HOLD } from "../lib/lipsync";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
@@ -130,10 +131,10 @@ function isVirtualMicLabel(label: string) {
 // purpose. One shared delay could never line the two up, because the picture lags
 // the sound by however long the engine takes to render - delaying both by the same
 // number shifts the whole call later and leaves the gap exactly as wide as it was.
+// How long that hold is stays the app's own measurement, and the rules for making
+// it live in the lip-sync module so they can be replayed offline.
 
 const WINDOW_MS  = 60;
-const MAX_DELAY  = 3.5;      // the most the cable will ever hold your voice back
-const DEFAULT_DELAY = 0.8;
 // How fast the gate fades rather than snaps. A hard switch on and off at the sample rate
 // clicks on every word, and a click inside a call is a complaint.
 const GATE_RAMP  = 0.015;
@@ -180,13 +181,6 @@ const FACE = {
   y0: Math.round(OFF_H * 0.12), y1: Math.round(OFF_H * 0.72),
 };
 
-// How long the pipeline keeps collecting before it stops re-deciding. Once real
-// measurements are in they beat the default, and the figure is then held - a number
-// that wanders every second is how callers end up hearing your voice before the
-// mouth makes it.
-const COLLECT_TICKS = Math.round((20 * 1000) / WINDOW_MS);
-const HIST_TICKS    = Math.round((6 * 1000) / WINDOW_MS);
-
 class AudioSyncPipeline {
   private audioCtx:   AudioContext | null = null;
   private analyser:   AnalyserNode  = null!;
@@ -207,16 +201,11 @@ class AudioSyncPipeline {
   // nothing here depends on anyone understanding what a switch does.
   private gate = new VoiceGate();
 
-  // Face-movement history, the quiet-room baseline rebuilt from it, and the gap between
-  // a word and the picture that answered it.
-  private motion:     number[] = [];
-  private onsetAt:    number | null = null;
-  private lags:       number[] = [];
-  private tickCount  = 0;
-  private wasTalking = false;
+  // Face-movement history and the gap between a word and the picture that answered it,
+  // held in one place so the rule that decides it can be replayed offline.
+  private sync = new LipSyncEstimator();
+  private startedAt = 0;
 
-  detectedDelay = DEFAULT_DELAY;
-  measured = false;
   vuLevel = 0;
   onUpdate?: (delay: number, vu: number, measured: boolean, state: GateState) => void;
 
@@ -255,7 +244,7 @@ class AudioSyncPipeline {
       const engineDest = ctx.createMediaStreamDestination();
       // The same voice gated and held back, to the virtual microphone: the copy callers and OBS
       // hear, and the only thing the measured delay is applied to.
-      const delay = ctx.createDelay(MAX_DELAY + 0.5); delay.delayTime.value = this.detectedDelay;
+      const delay = ctx.createDelay(MAX_HOLD + 0.5); delay.delayTime.value = this.sync.hold;
       const cableDest = ctx.createMediaStreamDestination();
       src.connect(highpass);
       highpass.connect(analyser);          // measurement only - it feeds nothing that plays
@@ -266,21 +255,28 @@ class AudioSyncPipeline {
       this.engineDest = engineDest; this.cableDest = cableDest;
       this.offCanvas = new OffscreenCanvas(OFF_W, OFF_H);
       this.offCtx = this.offCanvas.getContext("2d")!;
+      this.startedAt = performance.now() / 1000;
       this.timer = setInterval(() => this._tick(), WINDOW_MS);
       return { engine: engineDest.stream, cable: cableDest.stream };
     } catch { return null; }
   }
 
   // Movement inside the face band only: how much the picture changed since the
-  // previous sample, as 0..1.
-  private _faceMotion(): number {
-    if (!this.offCtx || !this.videoEl || this.videoEl.paused || this.videoEl.readyState < 2) return 0;
+  // previous sample, as 0..1, and whether there was a picture to compare at all.
+  private _faceMotion(): { motion: number; picture: boolean } {
+    if (!this.offCtx || !this.videoEl || this.videoEl.paused || this.videoEl.readyState < 2) {
+      // Forget the last frame while the picture is gone, so the first frame of a
+      // reconnect is compared with a frame of the same picture and not with the
+      // moment the call died.
+      this.prevPixels = null;
+      return { motion: 0, picture: false };
+    }
     try {
       this.offCtx.drawImage(this.videoEl, 0, 0, OFF_W, OFF_H);
       const frame = this.offCtx.getImageData(0, 0, OFF_W, OFF_H);
       const prev = this.prevPixels;
       this.prevPixels = new Uint8ClampedArray(frame.data);
-      if (!prev) return 0;
+      if (!prev) return { motion: 0, picture: true };
       let sum = 0, n = 0;
       for (let y = FACE.y0; y < FACE.y1; y++) {
         for (let x = FACE.x0; x < FACE.x1; x++) {
@@ -291,33 +287,12 @@ class AudioSyncPipeline {
           n++;
         }
       }
-      return n ? sum / (n * 3 * 255) : 0;
-    } catch { return 0; }
-  }
-
-  private _push(hist: number[], v: number) {
-    hist.push(v);
-    if (hist.length > HIST_TICKS) hist.shift();
-  }
-
-  // The quietest recent movement: what the picture does when nobody is talking. A
-  // flickering background or a moving shoulder is not lip movement, so an answer is
-  // only an answer if it beats this.
-  private _floorOf(hist: number[]): number {
-    let lo = 1;
-    for (const v of hist) if (v < lo) lo = v;
-    return lo;
-  }
-
-  private _median(xs: number[]): number {
-    if (!xs.length) return 0;
-    const s = [...xs].sort((a, b) => a - b);
-    return s[Math.floor(s.length / 2)];
+      return { motion: n ? sum / (n * 3 * 255) : 0, picture: true };
+    } catch { return { motion: 0, picture: false }; }
   }
 
   private _tick() {
     if (!this.analyser || !this.videoEl) return;
-    this.tickCount++;
     this.analyser.getByteFrequencyData(this.freqData);
     // Only the band a voice lives in. Room noise is broadband, and mixing it with the
     // voice leaves almost nothing to tell your words apart from an empty room.
@@ -327,51 +302,26 @@ class AudioSyncPipeline {
     if (this.gateNode && this.audioCtx) {
       this.gateNode.gain.setTargetAtTime(this.gate.muted ? 0 : 1, this.audioCtx.currentTime, GATE_RAMP);
     }
-    const move = this._faceMotion();
-    this._push(this.motion, move);
-
-    // The first couple of samples have no previous frame to compare.
-    if (this.tickCount <= 2) { this.onUpdate?.(this.detectedDelay, this.vuLevel, this.measured, gateState(this.gate)); return; }
-
-    // The current sample is an answer to something said earlier, so it is excluded
-    // from the baseline it is compared against.
-    const mFloor = this._floorOf(this.motion.slice(1));
-    const moveAt = Math.max(mFloor + 0.004, mFloor * 2.2);
-    const now = (this.tickCount * WINDOW_MS) / 1000;
-
-    // The gate holds itself open for a beat after your voice drops, so a word cannot
-    // start until there has genuinely been a pause. That is what makes this a start
-    // rather than the middle of a sentence, and it is why there is nothing to time
-    // twice.
-    if (this.gate.talking && !this.wasTalking) this.onsetAt = now;
-    this.wasTalking = this.gate.talking;
-
-    if (this.onsetAt !== null && move > moveAt) {
-      const lag = now - this.onsetAt;
-      // That small is the same frame flickering, not lips moving; that large is the
-      // next sentence rather than the one being answered.
-      if (lag >= 0.12 && lag <= MAX_DELAY) this.lags.push(lag);
-      this.onsetAt = null;
-      if (this.lags.length) {
-        this.detectedDelay = Math.max(0.1, Math.min(MAX_DELAY, this._median(this.lags)));
-        this.measured = true;
-        if (this.delayNode) this.delayNode.delayTime.value = this.detectedDelay;
-      }
-    } else if (this.onsetAt !== null && now - this.onsetAt > MAX_DELAY) {
-      this.onsetAt = null;   // nothing answered that word; wait for the next one
-    }
-
-    // After the collecting window the figure holds, measured or not.
-    if (this.tickCount <= COLLECT_TICKS && this.delayNode) {
-      this.delayNode.delayTime.value = this.detectedDelay;
-    }
-    this.onUpdate?.(this.detectedDelay, this.vuLevel, this.measured, gateState(this.gate));
+    const face = this._faceMotion();
+    const held = this.sync.hold;
+    this.sync.push({
+      talking: this.gate.talking,
+      motion: face.motion,
+      picture: face.picture,
+      at: performance.now() / 1000 - this.startedAt,
+    });
+    // The cable moves when the figure moves, and for no other reason: a hold that is
+    // re-written every sample makes the voice wobble even when nothing was learned.
+    if (this.sync.hold !== held && this.delayNode) this.delayNode.delayTime.value = this.sync.hold;
+    this.onUpdate?.(this.sync.hold, this.vuLevel, this.sync.measured, gateState(this.gate));
   }
 
   // What the cloned voice records. Not the raw microphone: a clone built from a room
   // full of television and traffic comes out carrying that noise, and there is no
   // switch anywhere that would explain it to the customer afterwards.
   getMicStream() { return this.engineDest?.stream ?? this.micStream; }
+
+  get hold() { return this.sync.hold; }
 
   stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -380,9 +330,8 @@ class AudioSyncPipeline {
     this.engineDest = null; this.cableDest = null; this.gateNode = null;
     this.delayNode = null; this.analyser = null!;
     this.gate.reset();
-    this.motion = []; this.lags = []; this.prevPixels = null;
-    this.onsetAt = null; this.wasTalking = false;
-    this.tickCount = 0; this.measured = false; this.detectedDelay = DEFAULT_DELAY;
+    this.sync.reset();
+    this.prevPixels = null;
     this.vuLevel = 0;
   }
 }
@@ -409,7 +358,7 @@ class VoiceCloningEngine {
   private audioCtx:   AudioContext  | null = null;
   private nextPlayAt = 0;
   private running    = false;
-  private videoDelay = DEFAULT_DELAY;
+  private videoDelay = DEFAULT_HOLD;
   private analyserNode: AnalyserNode | null = null;
   private voiceBus: GainNode | null = null;
   private outDest: MediaStreamAudioDestinationNode | null = null;
@@ -967,7 +916,7 @@ export default function StreamPage() {
   const [refImagePreview, setRefImagePreview] = usePerTabState<string|null>(activeTab, null);
 
   // ── Audio sync ────────────────────────────────────────────────────────────
-  const [syncDelay, setSyncDelay]     = useState(DEFAULT_DELAY);
+  const [syncDelay, setSyncDelay]     = useState(DEFAULT_HOLD);
   const [syncMeasured, setSyncMeasured] = useState(false);
   const [audioActive, setAudioActive] = useState(false);
 
@@ -1666,7 +1615,7 @@ export default function StreamPage() {
         if (r.current && !r.current.closed) try { r.current.postMessage("stream-live-clear", "*"); } catch { /**/ }
       });
       setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
-      setAudioActive(false); setSyncDelay(DEFAULT_DELAY); setSyncMeasured(false);
+      setAudioActive(false); setSyncDelay(DEFAULT_HOLD); setSyncMeasured(false);
       paintMic(0, "silent");
       setVcActive(false); setVcVu(0); setVcAnalyser(null);
       // Refund the prepaid chunk only after the call is locally dead. Waiting for
@@ -1844,7 +1793,7 @@ export default function StreamPage() {
         const cloner = new VoiceCloningEngine();
         cloner.call    = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
         cloner.voiceId = vcVoiceId;
-        cloner.setVideoDelay(syncPipeRef.current?.detectedDelay ?? DEFAULT_DELAY);
+        cloner.setVideoDelay(syncPipeRef.current?.hold ?? DEFAULT_HOLD);
         cloner.onVu    = v => setVcVu(v);
         cloner.playerLive = () => {
           const el = cloneAudioRef.current;
@@ -2629,13 +2578,19 @@ export default function StreamPage() {
   };
 
   // ─── Audio sync status panel ───────────────────────────────────────────────
+  // The figure on this card is the app's own measurement, so the card says which of the
+  // two it is showing: a timed figure, or the fact that it has not timed anything yet.
+  // A standing guess printed as a number was how a call could run the whole way out of
+  // sync while the card looked settled.
   const AudioSyncPanel = () => (
     <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
         <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>Audio Sync</p>
         <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 20, background: audioActive ? "hsl(187 100% 52% / 0.12)" : "hsl(222 40% 9%)", border: `1px solid ${audioActive ? "hsl(187 100% 52% / 0.35)" : "hsl(222 40% 14%)"}` }}>
           {audioActive ? <Wifi style={{ width: 10, height: 10, color: C }} /> : <WifiOff style={{ width: 10, height: 10, color: "hsl(222 25% 40%)" }} />}
-          <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: audioActive ? C : "hsl(222 25% 40%)" }}>{audioActive ? "SYNCED" : "IDLE"}</span>
+          <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: audioActive ? C : "hsl(222 25% 40%)" }}>
+            {!audioActive ? "IDLE" : syncMeasured ? "SYNCED" : "LISTENING"}
+          </span>
         </div>
       </div>
       {audioActive ? (
@@ -2646,8 +2601,16 @@ export default function StreamPage() {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)" }}>
             <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>Lip-sync delay</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace" }}>{syncDelay.toFixed(2)}s{syncMeasured ? "" : " est."}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: syncMeasured ? C : "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace" }}>
+              {syncMeasured ? `${syncDelay.toFixed(2)}s` : "not timed yet"}
+            </span>
           </div>
+          {!syncMeasured && (
+            <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
+              Timing your voice against the avatar&apos;s mouth. It settles once the call has
+              heard a few words with a pause after them.
+            </p>
+          )}
         </div>
       ) : (
         <p style={{ fontSize: 12, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
