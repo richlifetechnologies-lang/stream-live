@@ -139,6 +139,9 @@ const WINDOW_MS  = 60;
 // How fast the gate fades rather than snaps. A hard switch on and off at the sample rate
 // clicks on every word, and a click inside a call is a complaint.
 const GATE_RAMP  = 0.015;
+// How fast the hold slides to a new figure. Snapping it skips or replays exactly the difference in
+// seconds of his speech, so a mid-call change would cost everyone on the call a word.
+const HOLD_RAMP  = 0.05;
 const MIC_CHECK_SECONDS = 8;   // long enough to learn a room, short enough to hand the mic back
 
 // How long the cable will wait for the cloned voice before putting his natural microphone
@@ -354,7 +357,9 @@ class AudioSyncPipeline {
     });
     // The cable moves when the figure moves, and for no other reason: a hold that is
     // re-written every sample makes the voice wobble even when nothing was learned.
-    if (this.sync.hold !== held && this.delayNode) this.delayNode.delayTime.value = this.sync.hold;
+    if (this.sync.hold !== held && this.delayNode && this.audioCtx) {
+      this.delayNode.delayTime.setTargetAtTime(this.sync.hold, this.audioCtx.currentTime, HOLD_RAMP);
+    }
     this.onUpdate?.(this.sync.hold, this.vuLevel, this.sync.measured, this.sync.live,
       gateState(this.gate), this.cableVu, this.sync.reason);
   }
