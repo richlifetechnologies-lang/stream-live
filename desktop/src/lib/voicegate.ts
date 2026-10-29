@@ -2,13 +2,14 @@
 //
 // Every customer answers "is noise cancellation on?" differently, and most never look. So the
 // app learns two things from the call itself - what THIS room sounds like when they are quiet,
-// and how loud THEIR voice actually is - and drives the level meter, the microphone gate and the
-// lip-sync speech detection from that one pair of numbers.
+// and how loud THEIR voice actually is - and drives the level meter, the microphone gate and how
+// far the AI is let in from that one pair of numbers.
 //
 // The gate closes the copy of your voice that goes out to your callers - the virtual microphone -
-// so a fan or a television is not carried down the line as if it were you. It is deliberately NOT
-// in front of the AI's ears: the avatar must react to you the instant you open your mouth, and a
-// level detector that has decided wrongly can then never be the reason a call goes silent.
+// so a fan or a television is not carried down the line as if it were you. It never closes in front
+// of the AI's ears, only turns that leg down: the avatar must react to you the instant you open
+// your mouth, and a level detector that has decided wrongly can then never be the reason a call
+// goes silent.
 
 // Fractions of the customer's own dynamic range (between their silence and their loudest speech).
 const OPEN_FRAC  = 0.30;   // this far above the room floor counts as speaking

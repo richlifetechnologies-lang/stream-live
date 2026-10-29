@@ -16,7 +16,8 @@ import { START_TRIES, classifyStartFailure, startFailureMessage, startRetryWaitM
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
-import { DEFAULT_HOLD, LipSyncEstimator, MAX_HOLD } from "../lib/lipsync";
+import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../lib/lipsync";
+import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
@@ -148,6 +149,29 @@ const CLONE_ALIVE_SECONDS = 20;
 
 // What the card says, in the customer's own terms. No threshold figures and no device names: he
 // needs to know whether the app is hearing him, and whether it is holding the room back.
+// What the timing card says, in the state it is actually in. The badge and the sentence are the same
+// four cases: a figure it found, a picture that keeps up, a picture missing or frozen, and a call it is
+// still watching. Nothing here stops a call or asks anyone to do anything before they dial.
+type SyncState = SyncReason | "live";
+const SYNC_BADGE: Record<SyncState, string> = {
+  measured:  "SYNCED",
+  live:      "IN STEP",
+  picture:   "NO PICTURE",
+  movement:  "STILL PICTURE",
+  waiting:   "MEASURING",
+};
+const SYNC_WORDS: Record<SyncState, string> = {
+  measured:  "Your voice is held back by that much, so callers hear each word at the moment the "
+           + "avatar's mouth makes it. It is re-checked for the whole call.",
+  live:      "Your picture keeps up with your voice, so nothing is held back.",
+  picture:   "There is no avatar picture to hear your voice in yet. Nothing is held back until there "
+           + "is, and the voice stays level with the picture.",
+  movement:  "The avatar picture is not moving at all, so there is nothing to line your voice up "
+           + "against. Nothing is held back, and the voice stays level with the picture.",
+  waiting:   "Listening for your voice in the avatar's mouth. It needs about twenty seconds of talking "
+           + "before it holds your voice back, and until then the voice stays level with the picture.",
+};
+
 const MIC_CARD_WORDS: Record<GateState, string> = {
   silent:   "Not listening yet — check your microphone is allowed",
   learning: "Learning how your room sounds — speak normally",
@@ -171,27 +195,30 @@ function micAudioConstraints(deviceId: string | undefined, sampleRate?: number):
   return c;
 }
 
-// The face band of the AI picture, as fractions of the small frame we sample.
-// Whole-frame movement is useless for timing lips: shoulders, background flicker and
-// gesture all move at once, and a search over that smears every speech onset into a
-// match. The mouth sits in the middle-upper part of the frame.
-const OFF_W = 80, OFF_H = 45;
-const FACE = {
-  x0: Math.round(OFF_W * 0.25), x1: Math.round(OFF_W * 0.80),
-  y0: Math.round(OFF_H * 0.12), y1: Math.round(OFF_H * 0.72),
-};
+// The avatar's picture is sampled through ../lib/face-motion, which is also what the offline checks
+// replay, so the figures the timing runs on are the ones that were proved rather than ones the page
+// invented. What is held back on the cable is measured after the hold, on its own bar: the bar on
+// screen has to be the bar OBS gets, or it tells the customer a lie about his own call.
+// What the AI's ears are turned down to while the app is convinced it is not his voice. Half, and
+// never zero: this leg has to stay open, because a detector that decides wrongly about a quiet
+// person or a loud one-off sound would otherwise silence the avatar completely - the one failure no
+// customer can be talked around, and the reason this leg has never carried the gate itself.
+const ENGINE_DUCK = 0.5;
 
 class AudioSyncPipeline {
   private audioCtx:   AudioContext | null = null;
   private analyser:   AnalyserNode  = null!;
+  private cableAnalyser: AnalyserNode | null = null;
   private gateNode:   GainNode      | null = null;
+  private engineNode: GainNode      | null = null;
   private delayNode:  DelayNode     | null = null;
   private engineDest: MediaStreamAudioDestinationNode | null = null;
   private cableDest:  MediaStreamAudioDestinationNode | null = null;
   private freqData:   Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  private cableData:  Uint8Array<ArrayBuffer> = new Uint8Array(0);
   private offCanvas:  OffscreenCanvas | null = null;
   private offCtx:     OffscreenCanvasRenderingContext2D | null = null;
-  private prevPixels: Uint8ClampedArray | null = null;
+  private prevAvatar: Uint8ClampedArray | null = null;
   private timer:      ReturnType<typeof setInterval> | null = null;
   private videoEl:    HTMLVideoElement | null = null;
   private micStream:  MediaStream | null = null;
@@ -207,9 +234,12 @@ class AudioSyncPipeline {
   private startedAt = 0;
 
   vuLevel = 0;
-  onUpdate?: (delay: number, vu: number, measured: boolean, live: boolean, state: GateState) => void;
+  cableVu = 0;
+  onUpdate?: (delay: number, vu: number, measured: boolean, live: boolean, state: GateState,
+              cableVu: number, reason: SyncReason) => void;
 
-  async start(videoEl: HTMLVideoElement, micDeviceId?: string): Promise<{ engine: MediaStream; cable: MediaStream } | null> {
+  async start(videoEl: HTMLVideoElement, micDeviceId?: string):
+    Promise<{ engine: MediaStream; cable: MediaStream } | null> {
     this.videoEl = videoEl;
     try {
       this.micStream = await navigator.mediaDevices.getUserMedia({
@@ -237,23 +267,31 @@ class AudioSyncPipeline {
       // The gate sits on the outgoing copy only. It closes what your callers hear, never what
       // the AI hears: a level detector can be wrong about a quiet voice or a loud one-off sound,
       // and when it is, gating the AI's ears silences the avatar completely - the one failure no
-      // customer can be talked around. The decision is taken before the hold so it travels with
-      // the same copy of your voice the delay then moves.
+      // customer can be talked around. What the AI gets is turned DOWN while it is not his voice,
+      // which cannot mute a call however wrong it is, and the decision is taken before the hold so
+      // it travels with the same copy of your voice the delay then moves.
       const gateNode = ctx.createGain(); gateNode.gain.value = 1;
-      // Your voice, undelayed and never held back, to the AI: it starts reacting as you speak.
+      const engineNode = ctx.createGain(); engineNode.gain.value = 1;
+      // Your voice, undelayed, to the AI: it starts reacting as you speak.
       const engineDest = ctx.createMediaStreamDestination();
       // The same voice gated and held back, to the virtual microphone: the copy callers and OBS
       // hear, and the only thing the measured delay is applied to.
       const delay = ctx.createDelay(MAX_HOLD + 0.5); delay.delayTime.value = this.sync.hold;
       const cableDest = ctx.createMediaStreamDestination();
+      // Measured on the far side of the gate and the hold, so the second bar on the card is the
+      // signal OBS is actually handed and not the sound of the room.
+      const cableAnalyser = ctx.createAnalyser(); cableAnalyser.fftSize = 512;
+      cableAnalyser.minDecibels = -90; cableAnalyser.maxDecibels = -10;
+      this.cableData = new Uint8Array(cableAnalyser.frequencyBinCount);
       src.connect(highpass);
       highpass.connect(analyser);          // measurement only - it feeds nothing that plays
-      highpass.connect(engineDest);
+      highpass.connect(engineNode); engineNode.connect(engineDest);
       highpass.connect(gateNode);
-      gateNode.connect(delay); delay.connect(cableDest);
+      gateNode.connect(delay); delay.connect(cableDest); delay.connect(cableAnalyser);
       this.audioCtx = ctx; this.analyser = analyser; this.gateNode = gateNode; this.delayNode = delay;
+      this.engineNode = engineNode; this.cableAnalyser = cableAnalyser;
       this.engineDest = engineDest; this.cableDest = cableDest;
-      this.offCanvas = new OffscreenCanvas(OFF_W, OFF_H);
+      this.offCanvas = new OffscreenCanvas(FRAME_W, FRAME_H);
       this.offCtx = this.offCanvas.getContext("2d")!;
       this.startedAt = performance.now() / 1000;
       this.timer = setInterval(() => this._tick(), WINDOW_MS);
@@ -261,33 +299,21 @@ class AudioSyncPipeline {
     } catch { return null; }
   }
 
-  // Movement inside the face band only: how much the picture changed since the
-  // previous sample, as 0..1, and whether there was a picture to compare at all.
-  private _faceMotion(): { motion: number; picture: boolean } {
-    if (!this.offCtx || !this.videoEl || this.videoEl.paused || this.videoEl.readyState < 2) {
-      // Forget the last frame while the picture is gone, so the first frame of a
-      // reconnect is compared with a frame of the same picture and not with the
-      // moment the call died.
-      this.prevPixels = null;
+  // Movement inside the avatar's mouth band since the previous sample, and whether there was a picture
+  // to compare at all. The last frame is forgotten whenever the picture goes, so the first frame of a
+  // reconnect is compared with a frame of the same picture and not with the moment it died - which is
+  // the largest movement a call will ever show.
+  private _motion(el: HTMLVideoElement | null): { motion: number; picture: boolean } {
+    if (!this.offCtx || !el || el.paused || el.readyState < 2) {
+      this.prevAvatar = null;
       return { motion: 0, picture: false };
     }
     try {
-      this.offCtx.drawImage(this.videoEl, 0, 0, OFF_W, OFF_H);
-      const frame = this.offCtx.getImageData(0, 0, OFF_W, OFF_H);
-      const prev = this.prevPixels;
-      this.prevPixels = new Uint8ClampedArray(frame.data);
-      if (!prev) return { motion: 0, picture: true };
-      let sum = 0, n = 0;
-      for (let y = FACE.y0; y < FACE.y1; y++) {
-        for (let x = FACE.x0; x < FACE.x1; x++) {
-          const i = (y * OFF_W + x) * 4;
-          sum += Math.abs(frame.data[i] - prev[i])
-               + Math.abs(frame.data[i+1] - prev[i+1])
-               + Math.abs(frame.data[i+2] - prev[i+2]);
-          n++;
-        }
-      }
-      return { motion: n ? sum / (n * 3 * 255) : 0, picture: true };
+      this.offCtx.drawImage(el, 0, 0, FRAME_W, FRAME_H);
+      const frame = this.offCtx.getImageData(0, 0, FRAME_W, FRAME_H).data;
+      const motion = bandMotion(frame, this.prevAvatar, AVATAR_BAND);
+      this.prevAvatar = new Uint8ClampedArray(frame);
+      return { motion, picture: true };
     } catch { return { motion: 0, picture: false }; }
   }
 
@@ -299,21 +325,38 @@ class AudioSyncPipeline {
     const level = voiceBandLevel(this.freqData, 48000);
     this.gate.update(level, WINDOW_MS / 1000);
     this.vuLevel = this.gate.vu(level);
-    if (this.gateNode && this.audioCtx) {
-      this.gateNode.gain.setTargetAtTime(this.gate.muted ? 0 : 1, this.audioCtx.currentTime, GATE_RAMP);
+    if (this.audioCtx) {
+      const t = this.audioCtx.currentTime;
+      // His words travel out unless the gate is shut; the AI hears them either way, just further
+      // away. Both err towards being heard, because a wrongly-shut microphone is a silent call.
+      if (this.gateNode) this.gateNode.gain.setTargetAtTime(this.gate.muted ? 0 : 1, t, GATE_RAMP);
+      if (this.engineNode) {
+        this.engineNode.gain.setTargetAtTime(this.gate.armed && !this.gate.talking ? ENGINE_DUCK : 1, t, GATE_RAMP);
+      }
     }
-    const face = this._faceMotion();
+    // What the callers get, after the gate and after the hold, on the same scale as his own bar.
+    if (this.cableAnalyser) {
+      this.cableAnalyser.getByteFrequencyData(this.cableData);
+      this.cableVu = this.gate.vu(voiceBandLevel(this.cableData, 48000));
+    }
+    // The two series the figure comes from: how loud he is and how much the avatar's mouth is moving.
+    // His own camera is not part of this - the engine animates the mouth from his voice, so his voice is
+    // the witness that cannot be a coincidence, and the call needs no pause in it to be measured. The
+    // level is the raw microphone, before the gate: a hold that depended on the gate's decision would be
+    // timed against a copy of the voice that never reaches anyone.
+    const avatar = this._motion(this.videoEl);
     const held = this.sync.hold;
     this.sync.push({
-      talking: this.gate.talking,
-      motion: face.motion,
-      picture: face.picture,
+      motion: avatar.motion,
+      voice: this.vuLevel / 100,
+      picture: avatar.picture,
       at: performance.now() / 1000 - this.startedAt,
     });
     // The cable moves when the figure moves, and for no other reason: a hold that is
     // re-written every sample makes the voice wobble even when nothing was learned.
     if (this.sync.hold !== held && this.delayNode) this.delayNode.delayTime.value = this.sync.hold;
-    this.onUpdate?.(this.sync.hold, this.vuLevel, this.sync.measured, this.sync.live, gateState(this.gate));
+    this.onUpdate?.(this.sync.hold, this.vuLevel, this.sync.measured, this.sync.live,
+      gateState(this.gate), this.cableVu, this.sync.reason);
   }
 
   // What the cloned voice records. Not the raw microphone: a clone built from a room
@@ -328,11 +371,11 @@ class AudioSyncPipeline {
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null; }
     this.micStream?.getTracks().forEach(t => t.stop()); this.micStream = null;
     this.engineDest = null; this.cableDest = null; this.gateNode = null;
-    this.delayNode = null; this.analyser = null!;
+    this.engineNode = null; this.delayNode = null; this.analyser = null!; this.cableAnalyser = null;
     this.gate.reset();
     this.sync.reset();
-    this.prevPixels = null;
-    this.vuLevel = 0;
+    this.prevAvatar = null;
+    this.vuLevel = 0; this.cableVu = 0;
   }
 }
 
@@ -358,7 +401,7 @@ class VoiceCloningEngine {
   private audioCtx:   AudioContext  | null = null;
   private nextPlayAt = 0;
   private running    = false;
-  private videoDelay = DEFAULT_HOLD;
+  private videoDelay = FALLBACK_HOLD;
   private analyserNode: AnalyserNode | null = null;
   private voiceBus: GainNode | null = null;
   private outDest: MediaStreamAudioDestinationNode | null = null;
@@ -916,9 +959,10 @@ export default function StreamPage() {
   const [refImagePreview, setRefImagePreview] = usePerTabState<string|null>(activeTab, null);
 
   // ── Audio sync ────────────────────────────────────────────────────────────
-  const [syncDelay, setSyncDelay]     = useState(DEFAULT_HOLD);
+  const [syncDelay, setSyncDelay]     = useState(FALLBACK_HOLD);
   const [syncMeasured, setSyncMeasured] = useState(false);
   const [syncLive, setSyncLive]       = useState(false);
+  const [syncReason, setSyncReason]   = useState<SyncReason>("waiting");
   const [audioActive, setAudioActive] = useState(false);
 
   // ── The microphone card ───────────────────────────────────────────────────
@@ -931,6 +975,12 @@ export default function StreamPage() {
   const paintMic = useCallback((pct: number, state: GateState) => {
     if (micFillRef.current) micFillRef.current.style.width = Math.max(0, Math.min(100, Math.round(pct))) + "%";
     if (micWordRef.current) micWordRef.current.textContent = MIC_CARD_WORDS[state];
+  }, []);
+  // The held copy gets its own bar, painted the same way: the number on screen has to be the
+  // signal OBS is handed, or the card only shows the sound of the room.
+  const cableFillRef = useRef<HTMLDivElement | null>(null);
+  const paintCable = useCallback((pct: number) => {
+    if (cableFillRef.current) cableFillRef.current.style.width = Math.max(0, Math.min(100, Math.round(pct))) + "%";
   }, []);
   const [micChecking, setMicChecking] = useState(false);
 
@@ -1616,8 +1666,9 @@ export default function StreamPage() {
         if (r.current && !r.current.closed) try { r.current.postMessage("stream-live-clear", "*"); } catch { /**/ }
       });
       setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
-      setAudioActive(false); setSyncDelay(DEFAULT_HOLD); setSyncMeasured(false); setSyncLive(false);
+      setAudioActive(false); setSyncDelay(FALLBACK_HOLD); setSyncMeasured(false); setSyncLive(false); setSyncReason("waiting");
       paintMic(0, "silent");
+      paintCable(0);
       setVcActive(false); setVcVu(0); setVcAnalyser(null);
       // Refund the prepaid chunk only after the call is locally dead. Waiting for
       // that round-trip first left Stop unresponsive — and an unreached one is
@@ -1713,11 +1764,15 @@ export default function StreamPage() {
 
       if (needsVideo) {
         const pipe = new AudioSyncPipeline();
-        pipe.onUpdate = (delay, vu, measured, live, state) => {
-          setSyncDelay(delay); setSyncMeasured(measured); setSyncLive(live);
+        pipe.onUpdate = (delay, vu, measured, live, state, cable, reason) => {
+          setSyncDelay(delay); setSyncMeasured(measured); setSyncLive(live); setSyncReason(reason);
           paintMic(vu, state);
+          paintCable(cable);
           clonerRef.current?.setVideoDelay(delay);
         };
+        // The camera is sampled from its own always-present sink rather than from the
+        // picture-in-picture box, which portrait hides - a timing rule that only works in one
+        // orientation is a rule that reports "not measured" to half the customers.
         const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined);
         syncPipeRef.current = pipe;
         if (streams) {
@@ -1794,7 +1849,7 @@ export default function StreamPage() {
         const cloner = new VoiceCloningEngine();
         cloner.call    = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
         cloner.voiceId = vcVoiceId;
-        cloner.setVideoDelay(syncPipeRef.current?.hold ?? DEFAULT_HOLD);
+        cloner.setVideoDelay(syncPipeRef.current?.hold ?? FALLBACK_HOLD);
         cloner.onVu    = v => setVcVu(v);
         cloner.playerLive = () => {
           const el = cloneAudioRef.current;
@@ -2579,10 +2634,10 @@ export default function StreamPage() {
   };
 
   // ─── Audio sync status panel ───────────────────────────────────────────────
-  // The figure on this card is the app's own measurement, so the card says which of the
-  // two it is showing: a timed figure, or the fact that it has not timed anything yet.
-  // A standing guess printed as a number was how a call could run the whole way out of
-  // sync while the card looked settled.
+  // This card shows a measurement or it shows why there isn't one, and never a number that was
+  // assumed. It also re-titles itself for the state it is in, because "MEASURING" on a call that is
+  // running perfectly and "MEASURING" on a call that has no picture to compare are two different
+  // problems and the customer has to be able to tell them apart from across the room.
   const AudioSyncPanel = () => (
     <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
@@ -2590,7 +2645,7 @@ export default function StreamPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 20, background: audioActive ? "hsl(187 100% 52% / 0.12)" : "hsl(222 40% 9%)", border: `1px solid ${audioActive ? "hsl(187 100% 52% / 0.35)" : "hsl(222 40% 14%)"}` }}>
           {audioActive ? <Wifi style={{ width: 10, height: 10, color: C }} /> : <WifiOff style={{ width: 10, height: 10, color: "hsl(222 25% 40%)" }} />}
           <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: audioActive ? C : "hsl(222 25% 40%)" }}>
-            {!audioActive ? "IDLE" : (syncMeasured || syncLive) ? "SYNCED" : "LISTENING"}
+            {!audioActive ? "IDLE" : SYNC_BADGE[syncLive ? "live" : syncReason]}
           </span>
         </div>
       </div>
@@ -2603,25 +2658,30 @@ export default function StreamPage() {
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)" }}>
             <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>Lip-sync delay</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: syncMeasured || syncLive ? C : "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace" }}>
-              {syncLive ? "none needed" : syncMeasured ? `${syncDelay.toFixed(2)}s` : "not timed yet"}
+              {syncLive ? "none needed" : syncMeasured ? `${syncDelay.toFixed(2)}s` : "not measured"}
             </span>
           </div>
-          {syncLive && (
-            <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-              Your picture keeps up with your voice, so nothing is held back.
-            </p>
-          )}
-          {!syncMeasured && !syncLive && (
-            <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-              Timing your voice against the avatar&apos;s mouth. It settles once the call has
-              heard a few words with a pause after them.
-            </p>
-          )}
+          {/* The copy that OBS is handed, measured after the gate and after the hold. The
+              microphone bar on the card above can only ever show the sound of the room, so this
+              is the one that proves what your callers are actually getting. */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em" }}>Voice going out to your callers</span>
+              <span style={{ fontSize: 10, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>after the delay</span>
+            </div>
+            <div style={{ height: 6, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden" }}>
+              <div ref={cableFillRef} style={{ height: "100%", width: "0%", borderRadius: 3, transition: "width 0.06s linear", background: C }} />
+            </div>
+          </div>
+          <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
+            {SYNC_WORDS[syncLive ? "live" : syncReason]}
+          </p>
         </div>
       ) : (
         <p style={{ fontSize: 12, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-          The AI hears you the moment you speak. The voice your callers hear is timed to
-          the avatar&apos;s mouth when streaming starts.
+          The AI hears you the moment you speak. Once a call starts, this card finds how late the
+          avatar&apos;s mouth is behind your voice and holds your voice out to your callers by exactly
+          that much. Until it has measured, nothing is held back.
         </p>
       )}
     </div>
