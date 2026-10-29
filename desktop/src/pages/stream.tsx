@@ -207,7 +207,7 @@ class AudioSyncPipeline {
   private startedAt = 0;
 
   vuLevel = 0;
-  onUpdate?: (delay: number, vu: number, measured: boolean, state: GateState) => void;
+  onUpdate?: (delay: number, vu: number, measured: boolean, live: boolean, state: GateState) => void;
 
   async start(videoEl: HTMLVideoElement, micDeviceId?: string): Promise<{ engine: MediaStream; cable: MediaStream } | null> {
     this.videoEl = videoEl;
@@ -313,7 +313,7 @@ class AudioSyncPipeline {
     // The cable moves when the figure moves, and for no other reason: a hold that is
     // re-written every sample makes the voice wobble even when nothing was learned.
     if (this.sync.hold !== held && this.delayNode) this.delayNode.delayTime.value = this.sync.hold;
-    this.onUpdate?.(this.sync.hold, this.vuLevel, this.sync.measured, gateState(this.gate));
+    this.onUpdate?.(this.sync.hold, this.vuLevel, this.sync.measured, this.sync.live, gateState(this.gate));
   }
 
   // What the cloned voice records. Not the raw microphone: a clone built from a room
@@ -918,6 +918,7 @@ export default function StreamPage() {
   // ── Audio sync ────────────────────────────────────────────────────────────
   const [syncDelay, setSyncDelay]     = useState(DEFAULT_HOLD);
   const [syncMeasured, setSyncMeasured] = useState(false);
+  const [syncLive, setSyncLive]       = useState(false);
   const [audioActive, setAudioActive] = useState(false);
 
   // ── The microphone card ───────────────────────────────────────────────────
@@ -1615,7 +1616,7 @@ export default function StreamPage() {
         if (r.current && !r.current.closed) try { r.current.postMessage("stream-live-clear", "*"); } catch { /**/ }
       });
       setIsStreaming(false); setConnStatus("idle"); setConnStep(null); setElapsed(0);
-      setAudioActive(false); setSyncDelay(DEFAULT_HOLD); setSyncMeasured(false);
+      setAudioActive(false); setSyncDelay(DEFAULT_HOLD); setSyncMeasured(false); setSyncLive(false);
       paintMic(0, "silent");
       setVcActive(false); setVcVu(0); setVcAnalyser(null);
       // Refund the prepaid chunk only after the call is locally dead. Waiting for
@@ -1712,8 +1713,8 @@ export default function StreamPage() {
 
       if (needsVideo) {
         const pipe = new AudioSyncPipeline();
-        pipe.onUpdate = (delay, vu, measured, state) => {
-          setSyncDelay(delay); setSyncMeasured(measured);
+        pipe.onUpdate = (delay, vu, measured, live, state) => {
+          setSyncDelay(delay); setSyncMeasured(measured); setSyncLive(live);
           paintMic(vu, state);
           clonerRef.current?.setVideoDelay(delay);
         };
@@ -2589,7 +2590,7 @@ export default function StreamPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 20, background: audioActive ? "hsl(187 100% 52% / 0.12)" : "hsl(222 40% 9%)", border: `1px solid ${audioActive ? "hsl(187 100% 52% / 0.35)" : "hsl(222 40% 14%)"}` }}>
           {audioActive ? <Wifi style={{ width: 10, height: 10, color: C }} /> : <WifiOff style={{ width: 10, height: 10, color: "hsl(222 25% 40%)" }} />}
           <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: audioActive ? C : "hsl(222 25% 40%)" }}>
-            {!audioActive ? "IDLE" : syncMeasured ? "SYNCED" : "LISTENING"}
+            {!audioActive ? "IDLE" : (syncMeasured || syncLive) ? "SYNCED" : "LISTENING"}
           </span>
         </div>
       </div>
@@ -2601,11 +2602,16 @@ export default function StreamPage() {
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)" }}>
             <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>Lip-sync delay</span>
-            <span style={{ fontSize: 13, fontWeight: 700, color: syncMeasured ? C : "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace" }}>
-              {syncMeasured ? `${syncDelay.toFixed(2)}s` : "not timed yet"}
+            <span style={{ fontSize: 13, fontWeight: 700, color: syncMeasured || syncLive ? C : "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace" }}>
+              {syncLive ? "none needed" : syncMeasured ? `${syncDelay.toFixed(2)}s` : "not timed yet"}
             </span>
           </div>
-          {!syncMeasured && (
+          {syncLive && (
+            <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
+              Your picture keeps up with your voice, so nothing is held back.
+            </p>
+          )}
+          {!syncMeasured && !syncLive && (
             <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
               Timing your voice against the avatar&apos;s mouth. It settles once the call has
               heard a few words with a pause after them.

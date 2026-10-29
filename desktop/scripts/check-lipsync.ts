@@ -144,4 +144,77 @@ const throttled = call({ lag: 2.0, wordStarts: turns(8, 14, 3.0), seconds: 60, d
 is("a throttled timer still times the call", throttled.measured, true);
 near("...and does not read it as a slower engine", throttled.hold, 2.0, 0.6);
 
+// ─── A picture that keeps up with his voice ────────────────────────────────────
+// The other half of the complaint: an avatar whose mouth moves WITH the speaker, not after
+// them. There is no gap there to time, so the old standing guess held the voice 0.8 seconds
+// behind a picture that was already level - which a customer reads as his audio running slow.
+const mirror = call({ lag: 0, wordStarts: turns(4, 14, 2.0), seconds: 45 });
+is("a mouth that moves with the word is recognised as live", mirror.live, true);
+is("...and that is not dressed up as a timed figure", mirror.measured, false);
+near("...and the voice is no longer held back", mirror.hold, 0, 0.001);
+
+// It waits for the half minute, though: dropping the hold early would run the voice ahead of
+// an engine that is merely unmeasured so far.
+const tooEarly = call({ lag: 0, wordStarts: turns(4, 8, 2.0), seconds: 20 });
+is("the same call at twenty seconds has not given up its guess", tooEarly.live, false);
+near("...and still holds what it always held", tooEarly.hold, DEFAULT_HOLD, 0.001);
+
+// Nobody speaking is not a live picture, and a still image is not one either.
+const silent = call({ lag: 0, wordStarts: [], seconds: 60, jitter: 0.02 });
+is("an empty room is not called live", silent.live, false);
+near("...and the guess stays", silent.hold, DEFAULT_HOLD, 0.001);
+
+// The dangerous one: a slow engine whose user never pauses. His words have no clean start to
+// time, and a mouth that answers a word three seconds later must never be read as keeping up.
+// Falling to nothing here is exactly the complaint 1.8.16 was built to fix.
+const noPause = call({ lag: 2.4, wordStarts: turns(4, 20, 0.2), seconds: 60 });
+is("a slow engine with no pause in the speech is not called live", noPause.live, false);
+near("...and keeps the guess rather than cutting the voice ahead", noPause.hold, DEFAULT_HOLD, 0.001);
+
+// A real answer anywhere in the call outranks the live reading, and a call that starts live and
+// then slows down is followed the same way a drifting engine is.
+const thenSlow = new LipSyncEstimator();
+{
+  const dt = 0.06, word = 0.4;
+  const starts = turns(4, 24, 3.0);
+  for (let i = 0; i * dt <= 95; i++) {
+    const at = i * dt;
+    const heard = starts.some(w => at >= w && at < w + word);
+    // Each word is answered by the lag that was in force when HE said it: live for the first
+    // half minute, then the line slows to a two second answer.
+    const moving = starts.some(w => {
+      const lag = w < 34 ? 0 : 2.0;
+      return at >= w + lag && at < w + lag + word;
+    });
+    thenSlow.push({ talking: heard, motion: moving ? 0.09 : 0.01, picture: true, at });
+  }
+}
+is("a call that turns slow after reading live is re-timed", thenSlow.live, false);
+is("...and is measured on the answers", thenSlow.measured, true);
+near("...at the figure they give", thenSlow.hold, 2.0, 0.15);
+
+// A new call starts clean: nothing carries over from the last one.
+const fresh = new LipSyncEstimator();
+fresh.push({ talking: true, motion: 0.09, picture: true, at: 1 });
+fresh.reset();
+is("a reset drops the live reading", fresh.live, false);
+near("...and the held figure", fresh.hold, DEFAULT_HOLD, 0.001);
+
+// The half minute is counted from the picture, not from the dial-tone: a call whose avatar
+// arrives twenty seconds in has only been watched for part of that time.
+const lateMirror = call({ lag: 0, wordStarts: turns(4, 40, 2.0), seconds: 38, pictureFrom: 20 });
+is("a live picture that lands late has not had its half minute yet", lateMirror.live, false);
+near("...so the guess still stands", lateMirror.hold, DEFAULT_HOLD, 0.001);
+const lateMirrorLong = call({ lag: 0, wordStarts: turns(4, 40, 2.0), seconds: 60, pictureFrom: 20 });
+is("...and it is called live once the picture has been watched that long", lateMirrorLong.live, true);
+
+// The honest limit: someone reading a script without a single break gives the app no word
+// starts to work from, so even a live picture is never declared live. The voice stays on the
+// guess - wrong, but the safer of the two wrong answers, because a genuinely slow engine
+// sounds the same way from here.
+const monotone = call({ lag: 0, wordStarts: turns(4, 1, 0), seconds: 60, word: 56 });
+is("speech with no pause in it at all is not called live", monotone.live, false);
+is("...and is not timed either", monotone.measured, false);
+near("...so it keeps the guess", monotone.hold, DEFAULT_HOLD, 0.001);
+
 console.log(fail.length ? `FAILED: ${fail.join(", ")}` : "all lip-sync rules pass");
