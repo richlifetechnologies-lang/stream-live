@@ -162,7 +162,7 @@ const SYNC_BADGE: Record<SyncState, string> = {
 };
 const SYNC_WORDS: Record<SyncState, string> = {
   measured:  "Your voice is held back by that much, so callers hear each word at the moment the "
-           + "avatar's mouth makes it. It is re-checked for the whole call.",
+           + "avatar's mouth makes it. Once it has found this, it keeps it for the rest of the call.",
   live:      "Your picture keeps up with your voice, so nothing is held back.",
   picture:   "There is no avatar picture to hear your voice in yet. Nothing is held back until there "
            + "is, and the voice stays level with the picture.",

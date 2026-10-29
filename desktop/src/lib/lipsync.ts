@@ -24,16 +24,34 @@
 //
 // What makes each figure trustworthy is not a threshold someone set at a desk. Every half second of
 // the call votes for the delay it likes best, and the app only believes it when ONE vote keeps winning
-// over the last thirty seconds - and gives that figure up again if the votes later split, because an
-// answer that only looked unanimous from one end of the window is not an answer. A moving background,
-// a still avatar or one lucky window spreads its votes over several figures and none of them holds.
-// And because a pool of votes is a memory, the figure has to be showing in the last twenty seconds of
-// windows as well: each half second is re-compared at whatever the call has committed to, and unless that
-// reading averages something, the answer belonged to a stretch of the call that is now gone and is given
-// up. Without that second witness, an avatar animating off a rhythm of its own ended four of eight
-// conversations holding a figure it had invented, and a picture later than the cable can reach three of
-// eight; with it, two of eight and three of eight. The calls with nothing to correlate at all - no
-// picture, a frozen picture, nobody speaking - hold nothing in eight of eight.
+// over the last thirty seconds. A moving background, a still avatar or one lucky window spreads its
+// votes over several figures and none of them holds.
+// And because a pool of votes is a memory, a figure has to be showing in the last twenty seconds of
+// windows before the app COMMITS it: each half second is re-compared at whatever the call is leaning to,
+// and unless that reading averages something, the answer belonged to a stretch of the call that is now
+// gone and is never committed. Without that second witness an avatar animating off a rhythm of its own
+// invented a figure in four conversations of eight. With it, and with the figure then kept (below), the
+// second witness decides the commit only: re-measured after that change, seven of eight of those
+// conversations and eight of eight of the ones whose picture is later than the cable can ever hold do
+// still commit once, and now stand by it. The calls with nothing to correlate at all - no picture, a
+// frozen picture, nobody speaking - commit in none of the eight, and hold nothing.
+//
+// Once a figure IS committed it is kept for the rest of that call, until the video stops. That is the
+// owner's decision, taken on 2026-10-29 after his own machine was watched through a real call, and it is
+// the right one for the calls that work: the cable's hold going back to nothing slides every caller's voice forward by the whole figure in
+// the middle of a sentence, which is a worse fault than a figure that has stopped being re-confirmed. The
+// twenty-second witness goes quiet for ordinary reasons - a long gap in his speech, a stretch of quiet, a
+// picture that briefly stops repainting - and none of those means the engine changed. What still moves the
+// number is a new figure the votes agree on: an engine that slows down mid-call is followed to the new
+// figure, because the pool decides and a stale commit does not block it. The cost was measured after the
+// change, over eight conversations of each class, and it is not small: an avatar animating off a rhythm of
+// its own lines up a figure in SEVEN conversations of eight and a picture later than the cable can reach in
+// EIGHT of eight, and every one of those now stands for the rest of the call instead of expiring. What each
+// of those calls would have got otherwise is the voice running early for the second half of it, so the two
+// failures are "a couple of seconds late on a call that was never lined up" and "a jump back to nothing in
+// the middle of a sentence", and he picked the first. The three classes with genuinely nothing to correlate
+// - no picture, a frozen picture, nobody speaking - still commit in none of the eight, because there is no
+// figure for them to keep.
 //
 // Both series are stripped of everything slower than a couple of seconds before being compared, over
 // the exact stretch being measured. A slow drift is not timing information. The removal is done as the
@@ -59,7 +77,8 @@
 // The other limit is a picture that repaints slowly, and it is stated as it was measured. A smooth picture
 // is timed by about twenty seconds of the call; one repainted ten to twelve times a second by forty-five;
 // then the votes thin out. Eight repaints a second: found in two calls out of two, at about a minute, and
-// given up again before the end. Six and five: one call in two each, at a minute and a half. Four: one in
+// given up again before the end (before the figure was made to last the call, which is how it now is).
+// Six and five: one call in two each, at a minute and a half. Four: one in
 // three. Three: none in three. What those calls get is nothing held, which is his voice level with his
 // avatar - the same outcome as a call with nothing wrong with it. Two ways to close the gap were tried
 // and both cost more than they bought, and they are recorded on the numbers themselves rather than left
@@ -176,14 +195,18 @@ const ALIAS_SHARE = 0.4;
 // which is not a rule, that is a coin. The spread is the difference that is actually in the pictures.
 const MIN_KEEP_SHARE = 0.5;
 const MIN_KEEP_SPAN = 12;
-// ...and the answer has to be in the windows being read NOW, not only remembered by the pool. Every half
-// second the window just compared is re-read at whatever figure the call has committed to, and the last
-// twenty seconds of those readings are averaged. Measured over eight conversations of each class: the
+// ...and an answer has to be in the windows being read NOW, not only remembered by the pool, before the
+// app commits to it. Every half second the window just compared is re-read at whatever figure the call is
+// leaning to, and the last twenty seconds of those readings are averaged. (Once committed, a figure is not
+// taken back for a weak stretch - see the top of the file; this witness decides the commit, and a fresh
+// figure the votes agree on still replaces it.) Measured over eight conversations of each class: the
 // calls with no copy of him in them - an avatar on a rhythm of its own, a picture later than the cable can
 // ever reach - average 0.00 to 0.23 there, because their luck was one window that has since gone out of
-// the pool while the picture answers at no lag at all. Real engines average 0.36 to 0.51. At this line the
-// made-up figures that survive are the two and three conversations in eight recorded at the top of the
-// file; the calls with nothing to correlate at all are refused eight times out of eight.
+// the pool while the picture answers at no lag at all. Real engines average 0.36 to 0.51. This line is
+// what keeps most made-up figures off the cable; re-measured over eight conversations of each class after
+// the keep rule went in, it still lets seven of eight avatar-on-a-rhythm calls and eight of eight
+// past-the-ceiling calls commit once - see the top of the file for what that costs. The calls with
+// nothing to correlate at all are refused eight times out of eight.
 // It is an average over twenty seconds rather than this window on its own, and that is the whole difference
 // between a rule and a wobble. A real engine's present match falls under any single-window line for seconds
 // at a time, because his speech has gaps: read from one window at 0.40, a 4.4 s engine lost the figure it
@@ -330,7 +353,10 @@ export class LipSyncEstimator {
     this.lastPassBin = -1;
     this.envR = 0;
     this.envV = 0;
-    if (!this.measured) this.reason = "picture";
+    // The picture is HERE, it just has not been watched long enough yet. Saying "no picture" over a live
+    // one is what a customer reads as a broken call: measured on his machine, the card said NO PICTURE for
+    // the first 15 s of a call whose avatar was running at 15 pictures a second the whole way through.
+    if (!this.measured) this.reason = "waiting";
   }
 
   private _write(bin: number, remote: number, voice: number): void {
@@ -344,7 +370,8 @@ export class LipSyncEstimator {
   private _measure(hi: number, at: number): void {
     const lo = Math.max(this.firstBin, hi - WINDOW_BINS + 1);
     if (this.firstBin < 0 || hi - lo + 1 < MIN_WATCHED_BINS) {
-      if (!this.measured) this.reason = "picture";
+      // A picture is on screen, there is just not enough of the call behind it yet.
+      if (!this.measured) this.reason = "waiting";
       return;
     }
     const n = hi - lo + 1;
@@ -361,7 +388,7 @@ export class LipSyncEstimator {
       this.readV[i] = lastV;
       seen++;
     }
-    if (seen < MIN_WATCHED_BINS) { if (!this.measured) this.reason = "picture"; return; }
+    if (seen < MIN_WATCHED_BINS) { if (!this.measured) this.reason = "waiting"; return; }
 
     // One enormous sample can carry a correlation by itself. Capping each series at its own
     // ninety-fifth percentile leaves the pattern of the movement and takes the outlier's vote away.
@@ -398,8 +425,9 @@ export class LipSyncEstimator {
 
     // One answer, voted for again and again, is the engine's delay. Everything else - a busy background,
     // an avatar on its own rhythm, a window that got lucky once - spreads its votes across several
-    // figures and is refused by the numbers below rather than by a guess. And an answer that only looked
-    // unanimous from one end of the window is given up again, rather than kept because it was once found.
+    // figures and is refused by the numbers below rather than by a guess. An answer that only looked
+    // unanimous from one end of the window is never committed; one that WAS committed is not un-made,
+    // because the cable going back to nothing mid-call is heard by everyone on it.
     const a = this._analyse(this.votes);
     const won = this._dominant(a);
     // What the window being read NOW says at the answer the pool has - recorded whatever the pool
@@ -415,11 +443,14 @@ export class LipSyncEstimator {
     // one a whole word behind does. The card still has to be told, so it is measured, and live.
     const keeps = !!won && won.median <= LIVE_LAG;
     if (!won || (!keeps && (this.kept.length < KEEP_READS || mean < KEEP_R))) {
-      if (this.measured) {
-        this.hold = FALLBACK_HOLD;
-        this.measured = false;
-        this.live = false;
-      }
+      // A figure this call has already committed is KEPT until the video stops. Going back to nothing in
+      // the middle of a call slides every caller's voice forward by the whole figure, and the twenty-second
+      // witness goes quiet for the plainest of reasons - a gap in his speech, a quiet stretch, a picture
+      // that briefly stops repainting - which is not evidence that the engine changed. Measured on his own
+      // machine: a figure committed 17 s after it appeared and never re-found in the 50 s left, so the
+      // voice ran 0.75 s early for the rest of that call. A NEW figure still replaces the old one below,
+      // so a line that genuinely slows down mid-call is followed rather than frozen.
+      if (this.measured) { this.reason = "measured"; return; }
       this.reason = alive ? "waiting" : (remoteSd < MIN_REMOTE_SD ? "movement" : "waiting");
       return;
     }

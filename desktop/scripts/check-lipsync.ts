@@ -57,6 +57,25 @@ function noFigure(label: string, c: Call, why?: SyncReason): void {
 }
 
 /**
+ * A call the pictures cannot answer, where the app may still line up a figure by luck. It is not a pass
+ * and it is not dressed up as one: what is stated is the figure the cable ends up carrying, and that the
+ * app never claims it and then takes it back. For a picture LATER than the cable can hold, holding
+ * something is closer than holding nothing - the voice moves toward the late mouth. For an avatar
+ * animating off somebody else's audio, the held figure is a couple of seconds of misalignment on a call
+ * that was never lined up to begin with. Both are reported, neither is hidden behind a green check.
+ */
+function knownLimit(label: string, c: Call): void {
+  const { est, lockAt } = replay(c);
+  let released = 0, seen = false;
+  replay(c, (e) => { if (e.measured) seen = true; else if (seen) released++; });
+  console.log(
+    `LIMIT ${label}: ${lockAt < 0 ? "never committed a figure" : `committed at ${lockAt.toFixed(1)}s`}`
+    + `, ends held ${est.hold.toFixed(2)}s, card says "${est.reason}", ${released} samples held nothing after the first commit`,
+  );
+  if (released) fails.push(`${label}: gave the figure back`);
+}
+
+/**
  * How long a call was run on a figure the app later gave up. Printed for the two calls the rule cannot
  * settle from the pictures alone: a wrong number that reaches a cable for thirty seconds is a fact about
  * the release, not a detail to leave out of the report.
@@ -200,13 +219,55 @@ noFigure("a picture that never moves", { lag: 2.0, seconds: 60, frozen: true, se
 noFigure("a call nobody has talked on", { lag: 2.0, seconds: 60, talk: 0.001, first: 1e9, seed: 14 });
 
 // Two calls the pictures genuinely cannot answer, because there is no copy of him in them: an avatar
-// animating off somebody else's audio, and an engine later than the cable's ceiling. They end with
-// nothing held; how long each one spent believing its coincidence is printed above, not hidden.
-noFigure("an avatar answering nothing", { lag: 2.0, seconds: 70, ownRhythm: true, seed: 16 });
-noFigure("a picture 5.8s late, past the ceiling", { lag: 5.8, seconds: 70, seed: 17 });
+// animating off somebody else's audio, and an engine later than the cable's ceiling. The commit gate
+// still refuses most of them, but a figure that does get committed there is now KEPT for the rest of
+// that call - see the rule below - so these are printed as the limit they are rather than claimed clean.
+knownLimit("an avatar answering nothing", { lag: 2.0, seconds: 70, ownRhythm: true, seed: 16 });
+knownLimit("a picture 5.8s late, past the ceiling", { lag: 5.8, seconds: 70, seed: 17 });
 noFigure("a picture 9s late", { lag: 9, seconds: 90, talk: 0.6, seed: 18 });
 longestClaim("  known limit: an avatar answering nothing", { lag: 2.0, seconds: 70, ownRhythm: true, seed: 16 });
 longestClaim("  known limit: a picture 5.8s late", { lag: 5.8, seconds: 70, seed: 17 });
+
+// ─── His rule: the cable keeps its figure until the video stops ─────────────────────────────────────
+// A caller must not hear the alignment change in the middle of the call. Once a figure is on the cable it
+// stays there - the twenty-second witness goes quiet for ordinary reasons (a long gap in his speech, a
+// stretch of quiet, a picture that stops repainting) and none of them means the engine changed. This is
+// the check for exactly that: a call is watched sample by sample, and from the first committed figure to
+// the last sample the card must never go back to "no figure" and the hold must never fall to nothing.
+{
+  let broken = 0, firstAt = -1, commits = 0;
+  const { est } = replay({ lag: 2.4, seconds: 90, talk: 0.35, avatarMove: 0.6, seed: 22 }, (e, at) => {
+    if (e.measured) { if (firstAt < 0) { firstAt = at; commits++; } }
+    else if (firstAt >= 0) broken++;
+  });
+  const ok = firstAt > 0 && broken === 0 && est.measured && est.hold > 0;
+  console.log(
+    `${ok ? "PASS" : "FAIL"}  a committed figure is never given up: first held at ${firstAt.toFixed(1)}s, `
+    + `${broken} samples after that with nothing held, ends held ${est.hold.toFixed(2)}s (card "${est.reason}")`,
+  );
+  if (!ok) fails.push("a committed figure is never given up");
+  void commits;
+}
+
+// ...and a call that goes silent for half of itself still has the same figure when he starts talking
+// again, rather than a voice that arrived early for the whole quiet stretch.
+{
+  const { est } = replay({
+    lag: 1.8, seconds: 90, seed: 23,
+    us: [
+      { at: 3, len: 0.6, amp: 0.9 }, { at: 5, len: 0.5, amp: 0.8 }, { at: 7.5, len: 0.7, amp: 0.9 },
+      { at: 10, len: 0.5, amp: 0.85 }, { at: 12.5, len: 0.6, amp: 0.9 }, { at: 15, len: 0.5, amp: 0.8 },
+      { at: 60, len: 0.6, amp: 0.9 }, { at: 63, len: 0.5, amp: 0.85 }, { at: 66, len: 0.6, amp: 0.9 },
+    ] as Utterance[],
+  });
+  const err = est.hold - 1.8;
+  const ok = est.measured && Math.abs(err) <= 0.4;
+  console.log(
+    `${ok ? "PASS" : "FAIL"}  a figure survives forty seconds of nobody talking: held ${est.hold.toFixed(2)}s `
+    + `(real 1.80, err ${err >= 0 ? "+" : ""}${err.toFixed(2)})`,
+  );
+  if (!ok) fails.push("a figure survives a long silence");
+}
 
 // ─── It keeps working after the first figure ──────────────────────────────────
 // A long call keeps what it learned rather than drifting off it.
@@ -282,13 +343,44 @@ function refusedSeeds(label: string, make: (seed: number) => Call, maxHeld: numb
   if (held > maxHeld) fails.push(`${label} (${held} of 8 held a figure)`);
 }
 
+/**
+ * Eight conversations of a call that has no copy of him in it, where a figure can still be lined up by
+ * luck. What is asserted here is the promise the release makes: a figure is never claimed and then taken
+ * back. How OFTEN luck produces a commit is counted and printed - it is the cost of keeping one, and it
+ * belongs in the report, not behind a limit someone picked to make the line read green.
+ */
+function luckSeeds(label: string, make: (seed: number) => Call): void {
+  let commits = 0, releases = 0, longest = 0, worst = 0;
+  for (const seed of SEEDS) {
+    let from = -1, best = 0, was = false, held = 0;
+    const { est } = replay(make(seed), (e, at) => {
+      if (e.measured) {
+        if (!was) { commits++; was = true; }
+        if (from < 0) from = at;
+        best = Math.max(best, at - from);
+      } else if (was) { releases++; was = false; from = -1; }
+      held = Math.max(held, e.hold);
+    });
+    longest = Math.max(longest, best);
+    worst = Math.max(worst, held);
+    void est;
+  }
+  console.log(
+    `${releases ? "FAIL" : "PASS"}  ${label}: eight conversations, ${commits}/8 ever line up a figure, `
+    + `${releases} of them given back afterwards (must be 0), longest run on one ${longest.toFixed(0)}s, `
+    + `most held ${worst.toFixed(2)}s`,
+  );
+  if (releases) fails.push(`${label} (${releases} figures given back mid-call)`);
+  gaps.push(`${label} (${commits} of 8 hold a figure they cannot prove)`);
+}
+
 for (const lag of [0.9, 1.8, 3.0, 4.4]) {
   timedSeeds(`engine ${lag.toFixed(1)}s, eight conversations`, seed => ({ lag, seconds: 90, seed }), lag, 0.35, 45);
 }
-refusedSeeds("an avatar on a rhythm of its own", seed => ({ lag: 2.0, seconds: 90, ownRhythm: true, seed }), 3);
-refusedSeeds("a picture 5.8s late, past the ceiling", seed => ({ lag: 5.8, seconds: 90, seed }), 3);
-refusedSeeds("a picture 7s late", seed => ({ lag: 7, seconds: 90, talk: 0.6, seed }), 3);
-refusedSeeds("a picture 20s late", seed => ({ lag: 20, seconds: 90, seed }), 3);
+luckSeeds("an avatar on a rhythm of its own", seed => ({ lag: 2.0, seconds: 90, ownRhythm: true, seed }));
+luckSeeds("a picture 5.8s late, past the ceiling", seed => ({ lag: 5.8, seconds: 90, seed }));
+luckSeeds("a picture 7s late", seed => ({ lag: 7, seconds: 90, talk: 0.6, seed }));
+luckSeeds("a picture 20s late", seed => ({ lag: 20, seconds: 90, seed }));
 refusedSeeds("no picture at all", seed => ({ lag: 2.0, seconds: 90, pictureFrom: 1e9, seed }), 0);
 refusedSeeds("a picture that never moves", seed => ({ lag: 2.0, seconds: 90, frozen: true, seed }), 0);
 refusedSeeds("a call nobody has talked on", seed => ({ lag: 2.0, seconds: 90, talk: 0.001, first: 1e9, seed }), 0);
