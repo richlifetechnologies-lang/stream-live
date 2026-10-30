@@ -2733,34 +2733,34 @@
   // The Plans tab is re-read on every load, including the 15-second tick, because his prices
   // are not constant: a package he re-prices must show at the new number without a redeploy.
   async function loadCalls() {
-    let p;
     try {
-      p = await api({ action: "calls" });
-    } catch (err) {
-      CALL_ROWS = [];
-      CALL_WHY = err.message;
+      const p = await api({ action: "calls" });
+      (p.names || []).forEach((n) => { EMAIL_OF[n.id] = n.email; });
+      const per = N(p.perSecond);
+      const fx = N(p.fx, 12) || 12;
+      CALL_RATE = per > 0
+        ? ledgerRates(p.plans || [], p.subs || [], (p.paidUsers || []).map((u) => ({ user_id: u })), fx, per)
+        : null;
+      CALL_SKIPPED = N(p.trialRows);
+      CALL_FAL = N(p.falRows);
+      CALL_TOTAL = N(p.allRows);
+      CALL_ROWS = p.rows || [];
+      CALL_WHY = "";
+      // One deliberate read with his own sign-in, so a card fed by the gateway can still
+      // say out loud when the two disagree. That disagreement is the difference between a
+      // quiet week and a permission that filters him, and it used to show as a blank card.
+      const { count: seen, error: seenErr } = await sb.from("usage_sessions")
+        .select("id", { count: "exact", head: true }).eq("engine", "fal");
+      CALL_SEEN = seenErr ? -1 : N(seen, -1);
       renderCalls();
-      return;
+      stamp("fcWhen");
+    } catch (err) {
+      // Nothing above is allowed to fail quietly any more: a throw used to leave this card
+      // exactly as it was found - no rows, no +, and no sentence saying why.
+      CALL_ROWS = [];
+      CALL_WHY = (err && err.message) ? err.message : String(err);
+      renderCalls();
     }
-    (p.names || []).forEach((n) => { EMAIL_OF[n.id] = n.email; });
-    const per = N(p.perSecond);
-    const fx = N(p.fx, 12) || 12;
-    CALL_RATE = per > 0
-      ? planRates(p.plans || [], p.subs || [], (p.paidUsers || []).map((u) => ({ user_id: u })), fx, per)
-      : null;
-    CALL_SKIPPED = N(p.trialRows);
-    CALL_FAL = N(p.falRows);
-    CALL_TOTAL = N(p.allRows);
-    CALL_ROWS = p.rows || [];
-    CALL_WHY = "";
-    // One deliberate read with his own sign-in, so a card fed by the gateway can still
-    // say out loud when the two disagree. That disagreement is the difference between a
-    // quiet week and a permission that filters him, and it used to show as a blank card.
-    const { count: seen, error: seenErr } = await sb.from("usage_sessions")
-      .select("id", { count: "exact", head: true }).eq("engine", "fal");
-    CALL_SEEN = seenErr ? -1 : N(seen, -1);
-    renderCalls();
-    stamp("fcWhen");
   }
 
   // His shelf, turned into a price per video minute. price_cents is hundredths of US dollars
@@ -2778,7 +2778,12 @@
     const ask = planUsd(p, fx), mins = packageVideoMinutes(p);
     return ask > 0 && mins > 0 ? ask / mins : null;
   }
-  function planRates(plans, subs, orders, fx, perSecond) {
+  // ledgerRates, not planRates: further down this same script the Prices tab declares an
+  // async planRates(). A second function of the same name replaces the first everywhere,
+  // from the moment the page is parsed - and that is what emptied this card. The call site
+  // got the Prices tab's body, which takes no arguments and hands back a Promise, so the
+  // renderer threw before it painted anything and even the + went with it.
+  function ledgerRates(plans, subs, orders, fx, perSecond) {
     const byId = new Map(plans.map((p) => [String(p.id), p]));
     // Each account is priced at the package it is on. A priced row always wins over an
     // unpriced one, because several accounts hold more than one package row.
@@ -2825,6 +2830,13 @@
     }
     if (!CALL_RATE) {
       box.innerHTML = `<p class="muted" style="margin:12px 0 0">${CALL_FAL} call(s) are on the paid video service, but there is no price per second on the Prices tab, so none of them can be costed.</p>`;
+      paintFold();
+      return;
+    }
+    // A price table in any other shape is a fault in this page, not in his data, and it
+    // used to be the one failure that showed as a completely blank card.
+    if (!(CALL_RATE.forUser instanceof Map)) {
+      box.innerHTML = `<div class="alert" style="margin-top:12px">This list could not be read: the price figures reached the ledger in the wrong form (${esc(typeof CALL_RATE)}).</div>`;
       paintFold();
       return;
     }
