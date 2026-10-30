@@ -415,7 +415,7 @@
           <div class="row" style="align-items:center;gap:10px">
             <span class="muted" id="fcWhen"></span>
             <button id="refreshCalls">Refresh</button>
-            <button id="foldCalls" title="Show or hide the list of calls">+</button>
+            <button id="foldCalls" title="Show or hide the list of calls" style="display:none">+</button>
           </div>
         </div>
         <div id="fcBody"></div>
@@ -1113,8 +1113,16 @@
     const n = Number(s);
     return Number.isFinite(n) && n >= 0 ? up(n) : null;
   };
-  const when = (iso) => (iso ? new Date(iso).toLocaleString() : "—");
-  const afterJoin = (iso) => `(after this account joined${iso ? " " + new Date(iso).toLocaleString() : ""})`;
+  // Printed in UTC rather than in whatever zone the computer claims, because a machine
+  // set to the wrong zone (this one reads twelve hours behind) otherwise shows a call
+  // made this afternoon as happening in the small hours - and near midnight, on a
+  // different day, which is what makes a full list look like an empty one.
+  const when = (iso) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? "—" : d.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  };
+  const afterJoin = (iso) => `(after this account joined${iso ? " " + when(iso) : ""})`;
 
   // The trial register is read as it stands right now, so a match only explains a
   // refusal when that minute was already drawn by the time this account joined. A
@@ -1255,7 +1263,7 @@
     $("authCard").classList.add("hidden");
     $("dash").classList.remove("hidden");
     await loadPlans();
-    await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadAirtime(), loadConfig(), loadContact(), loadAccounts()]);
+    await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadAirtime(), loadConfig(), loadContact(), loadAccounts(), loadCalls()]);
     setBrFromNow();
     await loadPricing();
   }
@@ -2702,6 +2710,13 @@
   let CALL_ROWS = [];
   let CALL_RATE = null;
   let CALL_SKIPPED = 0;
+  // Three counts, kept apart on purpose: "no calls" and "calls you cannot see" look
+  // identical in a blank card, and only the second one is a fault.
+  let CALL_FAL = 0;   // calls on the paid machine, all of them
+  let CALL_TOTAL = 0; // every call on record, both machines
+  let CALL_SEEN = -1; // what this browser's own sign-in is allowed to see
+  let CALL_WHY = "";  // a read that failed, said in words
+  let CALL_LIST_SHOWN = false; // is there a list for the + to open right now
   // Forty rows is a long read, so this card opens folded to its one-line total and the
   // sign on its header opens the list. The choice is remembered in this browser. Folded
   // hides the list only - the figures themselves never blank.
@@ -2720,27 +2735,32 @@
   // The Plans tab is re-read on every load, including the 15-second tick, because his prices
   // are not constant: a package he re-prices must show at the new number without a redeploy.
   async function loadCalls() {
-    const box = $("fcBody");
+    let p;
     try {
-      const [{ data: cfg }, { data: ac }, { data: plans }, { data: subs }, { data: orders }, { count: trial }] = await Promise.all([
-        sb.from("billing_config").select("lucy_video_per_sec_cost").eq("id", 1).maybeSingle(),
-        sb.from("app_config").select("paystack_ghs_per_usd").eq("id", 1).maybeSingle(),
-        sb.from("plans").select("id, name, active, monthly_minutes, video_minutes, price_cents, price_ghp"),
-        sb.from("subscriptions").select("user_id, plan_id"),
-        sb.from("payments").select("user_id").in("status", ["paid", "credited"]),
-        sb.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "decart"),
-      ]);
-      const per = N(cfg?.lucy_video_per_sec_cost);
-      const fx = N(ac?.paystack_ghs_per_usd, 12) || 12;
-      CALL_RATE = per > 0 ? planRates(plans || [], subs || [], orders || [], fx, per) : null;
-      CALL_SKIPPED = N(trial);
-    } catch { CALL_RATE = null; }
-    const { data, error } = await sb.from("usage_sessions")
-      .select("id, user_id, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
-      .eq("engine", "fal").order("started_at", { ascending: false }).limit(60);
-    if (error) { box.innerHTML = `<div class="alert" style="margin-top:12px">${esc(error.message)}</div>`; return; }
-    CALL_ROWS = data || [];
-    await emailsOf(CALL_ROWS.map((r) => r.user_id));
+      p = await api({ action: "calls" });
+    } catch (err) {
+      CALL_ROWS = [];
+      CALL_WHY = err.message;
+      renderCalls();
+      return;
+    }
+    (p.names || []).forEach((n) => { EMAIL_OF[n.id] = n.email; });
+    const per = N(p.perSecond);
+    const fx = N(p.fx, 12) || 12;
+    CALL_RATE = per > 0
+      ? planRates(p.plans || [], p.subs || [], (p.paidUsers || []).map((u) => ({ user_id: u })), fx, per)
+      : null;
+    CALL_SKIPPED = N(p.trialRows);
+    CALL_FAL = N(p.falRows);
+    CALL_TOTAL = N(p.allRows);
+    CALL_ROWS = p.rows || [];
+    CALL_WHY = "";
+    // One deliberate read with his own sign-in, so a card fed by the gateway can still
+    // say out loud when the two disagree. That disagreement is the difference between a
+    // quiet week and a permission that filters him, and it used to show as a blank card.
+    const { count: seen, error: seenErr } = await sb.from("usage_sessions")
+      .select("id", { count: "exact", head: true }).eq("engine", "fal");
+    CALL_SEEN = seenErr ? -1 : N(seen, -1);
     renderCalls();
     stamp("fcWhen");
   }
@@ -2788,15 +2808,25 @@
 
   function renderCalls() {
     const box = $("fcBody");
+    CALL_LIST_SHOWN = false;
+    if (CALL_WHY) {
+      box.innerHTML = `<div class="alert" style="margin-top:12px">This list could not be read: ${esc(CALL_WHY)}</div>`;
+      paintFold();
+      return;
+    }
     if (!CALL_ROWS.length) {
-      box.innerHTML = `<p class="muted" style="margin:12px 0 0">${CALL_SKIPPED
-        ? `No call on the paid video service yet. ${CALL_SKIPPED} trial call(s) are not listed here.`
-        : "No call has been booked on the video service yet."}</p>`;
+      // Three different nothings, said three different ways, because "the card is empty"
+      // used to cover all of them and told you which one to chase.
+      box.innerHTML = `<p class="muted" style="margin:12px 0 0">${!CALL_TOTAL
+        ? "Nothing has been booked on the video service at all — no call is recorded. If someone is on air while you read this, that call was never written down, and the fault is in the gateway, not on this page."
+        : !CALL_FAL
+          ? `No call has run on the paid video service. ${CALL_TOTAL} call(s) are on record: ${CALL_SKIPPED} on the trial machine, which is not listed here.`
+          : `${CALL_FAL} call(s) ran on the paid video service and none reached this list.`}</p>`;
       paintFold();
       return;
     }
     if (!CALL_RATE) {
-      box.innerHTML = '<p class="muted" style="margin:12px 0 0">There is no price per second on the Prices tab, so a call cannot be costed here.</p>';
+      box.innerHTML = `<p class="muted" style="margin:12px 0 0">${CALL_FAL} call(s) are on the paid video service, but there is no price per second on the Prices tab, so none of them can be costed.</p>`;
       paintFold();
       return;
     }
@@ -2881,15 +2911,23 @@
       <p class="muted" style="margin:10px 0 0">${t
         ? `fal.ai says today's whole account bill is <b>${usd(t.cost)}</b> for ${mins(t.seconds / 60)} minutes of compute. These ${rows.length} newest calls add up to <b>${usd(sum.cost)}</b> — a difference of ${usd(Math.abs(gap))} is ${gap >= 0.005 ? "calls older than this list, or spending by a key that is not in the pool" : "within reading distance"}.`
         : "No fal.ai reading yet, so today's bill cannot be set against these rows."} A row in red cost more than it paid — that is a call you ran and did not sell.</p>`;
-    box.innerHTML = brief + (CALLS_FOLD ? "" : list);
+    // Where the gateway's count and his own sign-in's count disagree is the answer to
+    // "where did my history go", so it is printed whether the list is open or folded.
+    const gapSeen = CALL_SEEN >= 0 && CALL_SEEN !== CALL_FAL
+      ? `<p class="muted" style="margin:8px 0 0">Read with your own sign-in this card reaches <b>${CALL_SEEN}</b> of the ${CALL_FAL} call(s) on the paid service; the figures above are counted by the gateway, so the list is complete whatever that number says.</p>`
+      : "";
+    CALL_LIST_SHOWN = true;
+    box.innerHTML = brief + gapSeen + (CALLS_FOLD ? "" : list);
     paintFold();
   }
 
-  // The sign tells you what the press does: + opens the list, - folds it back away.
+  // The sign tells you what the press does: + opens the list, - folds it back away. It
+  // only appears once a list is actually on this card, so a card that never loaded can
+  // no longer look like a card with nothing in it.
   function paintFold() {
     const b = $("foldCalls");
     if (!b) return;
-    b.style.display = CALL_ROWS.length ? "" : "none";
+    b.style.display = CALL_LIST_SHOWN ? "" : "none";
     b.textContent = CALLS_FOLD ? "+" : "−";
   }
 

@@ -16,6 +16,7 @@
 //   fal_balance_test { key }            -- ask fal.ai what one pasted billing key can see, save nothing
 //   fal_balance_save { key?, label?, warnBelow?, alertBelow?, remove? }
 //   paystack_reconcile { reference? }  -- ask Paystack about unpaid orders, credit what it confirms
+//   calls              { }             -- the paid-call ledger, read unfiltered
 //   paystack_webhook   { set? }        -- read the call-back address, or register this gateway's
 // Resp: { ok:true, ...result } or { error, status }
 import { preflight, json, fail } from "../_shared/cors.ts";
@@ -346,6 +347,46 @@ Deno.serve(async (req: Request) => {
         }
         const state = await webhookState();
         return json({ ok: true, url: state.url, detail: state.detail });
+      }
+
+      // { }  -- the paid-call ledger, every figure that card shows, in one ask.
+      // The panel used to read these tables itself with the admin's own JWT, and a
+      // security policy that filters him out answers an empty list with no error at
+      // all: a card that reads "no calls have happened" while calls are happening.
+      // The gateway's own role is not filtered, so the money side comes through here.
+      case "calls": {
+        const db = adminClient();
+        const reads = await Promise.all([
+          db.from("usage_sessions")
+            .select("id, user_id, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
+            .eq("engine", "fal").order("started_at", { ascending: false }).limit(60),
+          db.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "fal"),
+          db.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "decart"),
+          db.from("usage_sessions").select("id", { count: "exact", head: true }),
+          db.from("billing_config").select("lucy_video_per_sec_cost").eq("id", 1).maybeSingle(),
+          db.from("app_config").select("paystack_ghs_per_usd").eq("id", 1).maybeSingle(),
+          db.from("plans").select("id, name, active, monthly_minutes, video_minutes, price_cents, price_ghp"),
+          db.from("subscriptions").select("user_id, plan_id"),
+          db.from("payments").select("user_id").in("status", ["paid", "credited"]),
+        ]);
+        const failed = reads.find((r) => r.error)?.error;
+        if (failed) return fail(`the call ledger could not be read: ${failed.message}`);
+        const [rows, falCount, trialCount, allCount, cfg, ac, plans, subs, paid] = reads;
+        const ids = [...new Set((rows.data || []).map((r) => r.user_id).filter(Boolean))];
+        const names = ids.length ? await db.from("profiles").select("id, email").in("id", ids) : { data: [] };
+        return json({
+          ok: true,
+          rows: rows.data || [],
+          names: names.data || [],
+          paidUsers: (paid.data || []).map((p) => p.user_id),
+          perSecond: cfg.data?.lucy_video_per_sec_cost ?? null,
+          fx: ac.data?.paystack_ghs_per_usd ?? null,
+          plans: plans.data || [],
+          subs: subs.data || [],
+          falRows: falCount.count ?? 0,
+          trialRows: trialCount.count ?? 0,
+          allRows: allCount.count ?? 0,
+        });
       }
 
       default:
