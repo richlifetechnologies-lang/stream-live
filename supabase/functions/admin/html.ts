@@ -1691,9 +1691,18 @@ export const ADMIN_HTML = `<!doctype html>
     $("swVideo").checked = c.modalities?.video === true;
     $("swAudio").checked = c.modalities?.audio === true;
     $("swBoth").checked = c.modalities?.video_audio === true;
-    $("detMaxConc").value = c.max_concurrent_sessions ?? 2;
+    // 1 is what a call start falls back to when an account has no subscription row - the
+    // summary line above already says "of 1 allowed", so the box must not claim 2.
+    $("detMaxConc").value = c.max_concurrent_sessions ?? 1;
     $("noSub").classList.toggle("hidden", c.status !== "none");
-    $("detPlan").innerHTML = PLAN_ROWS.filter((p) => p.active).map((p) => \`<option value="\${p.id}">\${esc(p.name)}</option>\`).join("") || '<option value="">no active plan</option>';
+    // Nothing is pre-selected any more. The first package in the list used to sit in this
+    // box by itself, so pressing Create subscription stamped a plan nobody picked onto the
+    // account - which is how accounts ended up on the one package that carries no price.
+    const livePlans = PLAN_ROWS.filter((p) => p.active);
+    $("detPlan").innerHTML = (livePlans.length
+      ? '<option value="">choose a plan</option>'
+      : '<option value="">no active plan</option>')
+      + livePlans.map((p) => \`<option value="\${p.id}">\${esc(p.name)}</option>\`).join("");
 
     const byMod = Object.fromEntries((c.wallets || []).map((w) => [w.modality, w]));
     $("bucketTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => {
@@ -1703,11 +1712,15 @@ export const ADMIN_HTML = `<!doctype html>
         <td class="mono">\${mins1(w.total_credited)}</td><td class="mono">\${mins1(w.total_spent)}</td></tr>\`;
     }).join("");
 
-    $("gModality").innerHTML = MODALITIES.map((m) => \`<option value="\${m}">\${MOD_LABEL[m]}</option>\`).join("");
-    $("gPackage").innerHTML = PLAN_ROWS.filter((p) => p.active).map((p) => {
+    // Both boxes open empty now. Each used to sit on whatever its list happened to start
+    // with, so one blind click sent minutes to the first bucket or the first package.
+    $("gModality").innerHTML = '<option value="">pick a bucket</option>'
+      + MODALITIES.map((m) => \`<option value="\${m}">\${MOD_LABEL[m]}</option>\`).join("");
+    $("gPackage").innerHTML = '<option value="">pick a package</option>'
+      + PLAN_ROWS.filter((p) => p.active).map((p) => {
       const parts = MODALITIES.filter((m) => N(p[\`\${m}_minutes\`]) > 0).map((m) => \`\${mins(N(p[\`\${m}_minutes\`]))} \${MOD_LABEL[m]}\`).join(" · ");
       return \`<option value="\${esc(p.id)}">\${esc(p.name)}\${parts ? \` — \${parts}\` : " — no minutes set yet"}</option>\`;
-    }).join("") || '<option value="">no active plan</option>';
+    }).join("");
     showPackageHint();
     $("gMinutes").value = ""; $("gReason").value = "";
     $("gUnlimited").checked = false; $("gClearUnlimited").checked = false;
@@ -1770,7 +1783,7 @@ export const ADMIN_HTML = `<!doctype html>
       video_enabled: $("swVideo").checked,
       audio_enabled: $("swAudio").checked,
       video_audio_enabled: $("swBoth").checked,
-      max_concurrent_sessions: Math.max(1, N($("detMaxConc").value, 2)),
+      max_concurrent_sessions: Math.max(1, N($("detMaxConc").value, 1)),
     }).eq("user_id", CUR.user_id).select("user_id");
     if (error) return msg("detMsg", error.message);
     if (!saved || !saved.length) return msg("detMsg", "That account has no subscription row yet — create one below first, then the switches will stick.");
@@ -1787,7 +1800,11 @@ export const ADMIN_HTML = `<!doctype html>
   $("detCreateSub").onclick = async () => {
     if (!CUR) return;
     const plan = $("detPlan").value;
-    if (!plan) return msg("detMsg", "Create a plan first on the Plans tab.");
+    if (!plan) {
+      return msg("detMsg", PLAN_ROWS.some((p) => p.active)
+        ? "Pick which plan this account goes on. Nothing is chosen yet, so nothing was created."
+        : "There is no active plan to choose. Create one on the Plans tab first.");
+    }
     const { error } = await sb.from("subscriptions").insert({ user_id: CUR.user_id, plan_id: plan, status: "active" });
     if (error) return msg("detMsg", error.message);
     await openAccount(CUR.user_id);
@@ -1828,7 +1845,9 @@ export const ADMIN_HTML = `<!doctype html>
     if ($("gUnlimited").checked && $("gClearUnlimited").checked) throw new Error("Pick either set or clear unlimited, not both.");
     if ($("gUnlimited").checked) unlimited = true;
     if ($("gClearUnlimited").checked) unlimited = false;
-    return { action: "grant", userId: CUR.user_id, modality: $("gModality").value, minutes, reason, unlimited };
+    const modality = $("gModality").value;
+    if (!modality) throw new Error("Pick which bucket this is for. Nothing is chosen yet, so nothing was moved.");
+    return { action: "grant", userId: CUR.user_id, modality, minutes, reason, unlimited };
   }
 
   function refreshMinHint() {
@@ -1837,6 +1856,7 @@ export const ADMIN_HTML = `<!doctype html>
     const amount = parseMin(typed);
     if (!CUR || amount === null) { el.textContent = ""; return; }
     const m = $("gModality").value;
+    if (!m) { el.textContent = ""; return; }
     const w = bucketOf(m);
     if (w?.unlimited) { el.textContent = MOD_LABEL[m] + " is unlimited on this account, so the meter does not move."; return; }
     const bal = N(w?.balance);
@@ -1884,6 +1904,7 @@ export const ADMIN_HTML = `<!doctype html>
   $("zeroBtn").onclick = async () => {
     if (!CUR) return msg("grantMsg", "Open an account first.");
     const m = $("gModality").value;
+    if (!m) return msg("grantMsg", "Pick which bucket to empty. Nothing is chosen yet, so nothing was emptied.");
     const w = bucketOf(m);
     if (w?.unlimited) return msg("grantMsg", MOD_LABEL[m] + " is unlimited on this account — clear unlimited first, then empty it.");
     const bal = N(w?.balance);
@@ -1918,7 +1939,7 @@ export const ADMIN_HTML = `<!doctype html>
   $("packageBtn").onclick = async () => {
     if (!CUR) return msg("grantMsg", "Open an account first.");
     const p = PLAN_ROWS.find((x) => x.id === $("gPackage").value);
-    if (!p) return msg("grantMsg", "Pick a package.");
+    if (!p) return msg("grantMsg", "Pick which package to credit. Nothing is chosen yet, so nothing was credited.");
     const amounts = planMinutes(p);
     const mods = MODALITIES.filter((m) => amounts[m] > 0);
     if (!mods.length) return msg("grantMsg", \`“\${p.name}” has no minutes attached. Set them on the Plans tab.\`);
@@ -3016,7 +3037,10 @@ export const ADMIN_HTML = `<!doctype html>
         </td></tr>\`;
     }).join("") || '<tr><td colspan="12" class="muted">The pool is empty, so every call falls back to the FAL_KEY / ELEVENLABS_KEY env secrets. Add a pair above and press Verify.</td></tr>';
 
-    $("asKey").innerHTML = KEY_ROWS.map((k) => \`<option value="\${k.id}">\${esc(k.label || shortId(k.id))}</option>\`).join("");
+    // Opens empty for the same reason as the plan and package boxes: this used to default
+    // to whichever key the pool listed first, and Assign writes a live key.
+    $("asKey").innerHTML = '<option value="">pick a key</option>'
+      + KEY_ROWS.map((k) => \`<option value="\${k.id}">\${esc(k.label || shortId(k.id))}</option>\`).join("");
     stamp("poolWhen");
     await Promise.all([loadKeyUsage(), loadAssignments(), loadCallFailures()]);
   }
@@ -3307,7 +3331,13 @@ export const ADMIN_HTML = `<!doctype html>
     if (!email) return msg("assignMsg", "Enter the user's email.");
     const { data: prof } = await sb.from("profiles").select("id").ilike("email", email).maybeSingle();
     if (!prof) return msg("assignMsg", "No account with that email.");
-    const { error } = await sb.from("user_key_assignments").upsert({ user_id: prof.id, provider: $("asProvider").value, key_id: $("asKey").value }, { onConflict: "user_id,provider" });
+    const keyId = $("asKey").value;
+    if (!keyId) {
+      return msg("assignMsg", KEY_ROWS.length
+        ? "Pick which key this account gets. Nothing is chosen yet, so nothing was assigned."
+        : "The key pool is empty, so there is no key to assign. Add one above first.");
+    }
+    const { error } = await sb.from("user_key_assignments").upsert({ user_id: prof.id, provider: $("asProvider").value, key_id: keyId }, { onConflict: "user_id,provider" });
     if (error) return msg("assignMsg", error.message);
     msg("assignMsg", "Assigned — that key is now tried first for this account.", "ok");
     $("asEmail").value = "";
@@ -3354,9 +3384,15 @@ export const ADMIN_HTML = `<!doctype html>
   $("engSave").onclick = async () => {
     msg("engMsg", "");
     if (!hasTrialCfg) return msg("engMsg", "The trial columns are not in the database yet — run the dual-engine migration, then reload this page.");
+    // An empty box used to save as 0 silently, which stops every new account getting a
+    // free minute without anyone typing that decision.
+    const trialMinutes = ($("engTrialMinutes").value || "").trim();
+    if (trialMinutes === "") {
+      return msg("engMsg", "The trial minutes box is empty. Type 0 if you mean no free minutes for a new account.");
+    }
     const row = {
       trial_enabled: $("engTrialEnabled").checked,
-      trial_video_minutes: Math.max(0, N($("engTrialMinutes").value, 1)),
+      trial_video_minutes: Math.max(0, N(trialMinutes, 0)),
       max_concurrent_trial_sessions: N($("engTrialCeiling").value, 0) > 0 ? Math.floor(N($("engTrialCeiling").value)) : null,
       allow_fal_when_no_decart: $("engFalFallback").checked,
     };
