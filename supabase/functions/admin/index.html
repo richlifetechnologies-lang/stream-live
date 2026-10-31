@@ -405,6 +405,19 @@
         </div>
       </div>
 
+      <!-- One line per call, never a pack of totals: this is where a single call can be
+           pointed at and asked "what did this cost me, and what did I sell it for". -->
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Every call, what it cost and what it paid</h2>
+          <div class="row" style="align-items:center;gap:10px">
+            <span class="muted" id="fcWhen"></span>
+            <button id="refreshCalls">Refresh</button>
+          </div>
+        </div>
+        <div id="fcBody"></div>
+      </div>
+
       <div class="card">
 
         <div class="row" style="justify-content:space-between;align-items:center">
@@ -1186,7 +1199,7 @@
     machines: [loadMachines],
     topups: [loadRequests],
     payments: [loadPayments, loadPaystackHook],
-    keys: [loadKeys, loadBalance],
+    keys: [loadKeys, loadBalance, loadCalls],
     decart: [loadKeys, loadSupply],
     split: [loadAccounts],
     engines: [loadConfig],
@@ -2438,6 +2451,8 @@
   let FAL_BAL = null;
   let BAL_AT = 0;
   let BAL_LIVE = null;
+  let BAL_GOOD = null;
+  let BAL_GOOD_AT = 0;
 
   // How old the reading on screen is. Counted from the moment this page sent the
   // request, not by comparing fal's timestamp to this machine's clock: that clock has
@@ -2505,25 +2520,29 @@
   // the elapsed time, so a tab left open overnight cannot drift into a number nobody took.
   function tickBalance() {
     const big = $("fbBig");
-    if (!big || !FAL_BAL || FAL_BAL.balance == null) return;
+    // A refused read keeps the countdown running on the last good figure instead of
+    // freezing the card.
+    const src = (FAL_BAL && FAL_BAL.balance != null) ? FAL_BAL : BAL_GOOD;
+    if (!big || !src || src.balance == null) return;
     const b = burn();
-    const shown = b ? b.balance : N(FAL_BAL.balance);
+    const shown = b ? b.balance : N(src.balance);
     big.textContent = usd(shown);
-    big.style.color = balColour(shown, FAL_BAL);
-    const per = FAL_BAL.per_second == null ? null : N(FAL_BAL.per_second);
+    big.style.color = balColour(shown, src);
+    const per = src.per_second == null ? null : N(src.per_second);
     const minsBox = $("fbMins");
     if (minsBox && per) minsBox.textContent = "about " + Math.floor(shown / per / 60).toLocaleString() + " minutes of video calls";
     const cap = $("fbBurn");
     if (cap) {
       cap.innerHTML = b && b.dollars >= 0.005
         ? (b.running ? `<span class="pill warn">${b.running} call${b.running > 1 ? "s" : ""} running</span> ` : "")
-          + `${usd(b.dollars)} counted off since the reading · fal said ${usd(N(FAL_BAL.balance))}`
+          + `${usd(b.dollars)} counted off since the reading · fal said ${usd(N(src.balance))}`
         : "left on the fal.ai account";
     }
     paintSpendCells();
   }
 
-  function renderBalance(p) {
+  function renderBalance(p, whenAt) {
+    const at = whenAt == null ? BAL_AT : whenAt;
     const box = $("fbBody");
     if (!p) { box.innerHTML = '<p class="muted" style="margin:12px 0 0">Asking fal.ai…</p>'; paintSpendCells(); return; }
 
@@ -2537,21 +2556,31 @@
 
     if (!p.configured) {
       BAL_LIVE = null;
+      BAL_GOOD = null;
       box.innerHTML = `<div class="alert" style="margin-top:12px">${esc(p.detail || "No billing key is stored yet — paste one below.")}</div>`;
       paintSpendCells();
       return;
     }
     if (p.balance == null) {
+      // A refused read must never blank the figure he is watching. Until a key is
+      // forgotten (the branch above) the last balance fal.ai gave stays on screen,
+      // aged honestly, with this read's failure written under it.
+      if (BAL_GOOD) {
+        const why = String(p.detail || "fal.ai gave no answer").replace(/\s+/g, " ").slice(0, 140);
+        renderBalance({ ...BAL_GOOD, detail: "this read failed (" + why + "), so the figure is the balance fal.ai last gave" }, BAL_GOOD_AT);
+        return;
+      }
       BAL_LIVE = null;
       box.innerHTML = `<div class="alert" style="margin-top:12px"><b>Nothing read this time.</b> ${esc(p.detail || "")}</div>`;
       paintSpendCells();
       return;
     }
+    if (at === BAL_AT) { BAL_GOOD = p; BAL_GOOD_AT = at; }
 
     const bal = N(p.balance);
     const perSec = p.per_second == null ? null : N(p.per_second);
     BAL_LIVE = perSec && p.live
-      ? { bal, perSec, at: BAL_AT, since: N(p.live.seconds), running: N(p.live.running) }
+      ? { bal, perSec, at, since: N(p.live.seconds), running: N(p.live.running) }
       : null;
     const priceNote = p.per_second_source === "fal" ? "what fal.ai charged today" : "the price on your Prices tab";
     const keyMonth = (p.keys || []).reduce((a, k) => a + (k.month ? N(k.month.cost) : 0), 0);
@@ -2590,7 +2619,7 @@
         </div>
       </div>
       ${notes}
-      <p class="muted" style="margin:12px 0 0;font-size:12px">checked ${balAgo(Date.now() - BAL_AT)}${p.from_cache ? " — the reading is held for a minute so this page never hammers fal.ai" : ""} · ${esc(p.detail || "")}${BAL_LIVE ? " · the big figure falls between readings, counted off by your own live calls" : ""}</p>`;
+      <p class="muted" style="margin:12px 0 0;font-size:12px">checked ${balAgo(Date.now() - at)}${p.from_cache ? " — the reading is held for a minute so this page never hammers fal.ai" : ""} · ${esc(p.detail || "")}${BAL_LIVE ? " · the big figure falls between readings, counted off by your own live calls" : ""}</p>`;
     tickBalance();
   }
 
@@ -2661,6 +2690,110 @@
       })
       .catch((err) => msg("fbMsg", err.message));
   };
+
+  // ── every call, what it cost against what it paid ───────────────────────────
+  // fal sends one bill for the whole day and never a price per call, so the cost column
+  // is his own arithmetic: the Prices-tab rate times the seconds this call held. The
+  // total of these rows against "spent today" in the card above is the one place he can
+  // see whether his meter and fal's meter are counting the same thing.
+  let CALL_ROWS = [];
+  let CALL_RATE = null;
+
+  async function loadCalls() {
+    const box = $("fcBody");
+    if (!CALL_RATE) {
+      try {
+        const [{ data: cfg }, { data: br }] = await Promise.all([
+          sb.from("billing_config").select("lucy_video_per_sec_cost, profit_margin_percent").eq("id", 1).maybeSingle(),
+          sb.from("burn_rates").select("multiplier").eq("modality", "video").is("retired_at", null)
+            .lte("effective_from", new Date().toISOString()).order("effective_from", { ascending: false }).limit(1).maybeSingle(),
+        ]);
+        const per = N(cfg?.lucy_video_per_sec_cost);
+        if (per > 0) CALL_RATE = { perSecond: per, mult: N(br?.multiplier, 1.2) || 1.2, margin: N(cfg?.profit_margin_percent) };
+      } catch { CALL_RATE = null; }
+    }
+    const { data, error } = await sb.from("usage_sessions")
+      .select("id, user_id, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
+      .eq("engine", "fal").order("started_at", { ascending: false }).limit(40);
+    if (error) { box.innerHTML = `<div class="alert" style="margin-top:12px">${esc(error.message)}</div>`; return; }
+    CALL_ROWS = data || [];
+    await emailsOf(CALL_ROWS.map((r) => r.user_id));
+    renderCalls();
+    stamp("fcWhen");
+  }
+
+  function renderCalls() {
+    const box = $("fcBody");
+    if (!CALL_ROWS.length) {
+      box.innerHTML = '<p class="muted" style="margin:12px 0 0">No call has been booked on the video service yet.</p>';
+      return;
+    }
+    if (!CALL_RATE) {
+      box.innerHTML = '<p class="muted" style="margin:12px 0 0">There is no price per second on the Prices tab, so a call cannot be costed here.</p>';
+      return;
+    }
+    const now = Date.now();
+    const rate = CALL_RATE;
+    // One sold minute buys 60/multiplier real seconds of compute, and the margin on the
+    // Prices tab is what he asks for those seconds.
+    const sellPerMin = rate.perSecond * (60 / rate.mult) * (1 + rate.margin / 100);
+    const rows = CALL_ROWS.map((r) => {
+      const began = Date.parse(r.started_at);
+      // A lease nobody renewed stopped at its expiry even while the row waits to be
+      // closed, so counting past that instant would invent a burn fal never charged.
+      const stop = r.ended_at ? Date.parse(r.ended_at) : Math.min(now, r.lease_expires_at ? Date.parse(r.lease_expires_at) : now);
+      const line = Number.isFinite(began) ? Math.max(0, (stop - began) / 1000) : 0;
+      const frame = r.media_started_at ? Date.parse(r.media_started_at) : NaN;
+      const pic = Number.isFinite(frame) ? Math.max(0, (stop - frame) / 1000) : 0;
+      const billed = N(r.billed_minutes);
+      return {
+        r, line, pic, billed,
+        cost: (pic > 0 ? pic : line) * rate.perSecond,
+        paid: billed * sellPerMin,
+      };
+    });
+    const sum = rows.reduce((a, x) => ({
+      line: a.line + x.line, pic: a.pic + x.pic, billed: a.billed + x.billed,
+      cost: a.cost + x.cost, paid: a.paid + x.paid,
+    }), { line: 0, pic: 0, billed: 0, cost: 0, paid: 0 });
+    const t = FAL_BAL && FAL_BAL.today ? FAL_BAL.today : null;
+    const gap = t ? t.cost - sum.cost : null;
+    const money = (v) => `<td class="mono" style="text-align:right">${usd(v)}</td>`;
+    box.innerHTML = `
+      <p class="muted" style="margin:10px 0 0">One line per call, newest first. fal.ai bills by the second, so
+        <b>what it cost</b> is the price on your Prices tab (${usd(rate.perSecond)} a second, ${usd(rate.perSecond * 60)} a
+        minute) times the seconds this call held. <b>What it paid</b> is the minutes you charged times your sell rate,
+        ${usd(sellPerMin)} a minute — your cost, ${rate.mult}x burn rate, plus the ${mins1(rate.margin)}% margin you set.</p>
+      <div style="overflow:auto;margin-top:10px">
+        <table id="callsTable">
+          <thead><tr><th>Account</th><th>Started</th><th>Line held</th><th>Picture</th><th>What it cost</th><th>You charged</th><th>What it paid</th><th>Difference</th></tr></thead>
+          <tbody>${rows.map((x) => `<tr>
+            <td><b>${esc(EMAIL_OF[x.r.user_id] || shortId(x.r.user_id))}</b></td>
+            <td class="muted">${when(x.r.started_at)}${x.r.ended_at ? "" : ' <span class="pill warn">on air</span>'}${x.r.settled ? "" : " · not settled"}</td>
+            <td class="mono" style="text-align:right">${clock(x.line / 60)}</td>
+            <td class="mono" style="text-align:right">${x.pic > 0 ? clock(x.pic / 60) : '<span class="pill warn">no picture</span>'}</td>
+            ${money(x.cost)}
+            <td class="mono" style="text-align:right">${mins2(x.billed)} min</td>
+            ${money(x.paid)}
+            <td class="mono" style="text-align:right;color:${x.paid - x.cost < 0.005 ? "#fb7185" : "#35e0a0"}">${x.paid - x.cost >= 0 ? "+" : ""}${usd(x.paid - x.cost)}</td>
+          </tr>`).join("")}</tbody>
+          <tfoot><tr>
+            <td><b>these ${rows.length} calls</b></td><td></td>
+            <td class="mono" style="text-align:right"><b>${clock(sum.line / 60)}</b></td>
+            <td class="mono" style="text-align:right"><b>${clock(sum.pic / 60)}</b></td>
+            <td class="mono" style="text-align:right"><b>${usd(sum.cost)}</b></td>
+            <td class="mono" style="text-align:right"><b>${mins2(sum.billed)} min</b></td>
+            <td class="mono" style="text-align:right"><b>${usd(sum.paid)}</b></td>
+            <td class="mono" style="text-align:right"><b>${sum.paid - sum.cost >= 0 ? "+" : ""}${usd(sum.paid - sum.cost)}</b></td>
+          </tr></tfoot>
+        </table>
+      </div>
+      <p class="muted" style="margin:10px 0 0">${t
+        ? `fal.ai says today's whole account bill is <b>${usd(t.cost)}</b> for ${mins(t.seconds / 60)} minutes of compute. These ${rows.length} newest calls add up to <b>${usd(sum.cost)}</b> — a difference of ${usd(Math.abs(gap))} is ${gap >= 0.005 ? "calls older than this list, or spending by a key that is not in the pool" : "within reading distance"}.`
+        : "No fal.ai reading yet, so today's bill cannot be set against these rows."} A row in red cost more than it paid — that is a call you ran and did not sell.</p>`;
+  }
+
+  $("refreshCalls").onclick = () => { CALL_RATE = null; return loadCalls(); };
 
   async function loadKeys() {
     const base = "id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures";
@@ -2866,6 +2999,7 @@
       // The balance card re-paints on this tick so "checked 20 seconds ago" never goes
       // stale under his eyes; the fetch inside only goes out once the reading is old.
       void loadBalance();
+      void loadCalls();
     }
   }, 15_000);
 
