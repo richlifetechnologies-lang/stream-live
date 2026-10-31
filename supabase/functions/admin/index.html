@@ -413,6 +413,7 @@
           <div class="row" style="align-items:center;gap:10px">
             <span class="muted" id="fcWhen"></span>
             <button id="refreshCalls">Refresh</button>
+            <button id="foldCalls" title="Show or hide the list of calls">+</button>
           </div>
         </div>
         <div id="fcBody"></div>
@@ -2698,6 +2699,12 @@
   // see whether his meter and fal's meter are counting the same thing.
   let CALL_ROWS = [];
   let CALL_RATE = null;
+  // Forty rows is a long read, so this card opens folded to its one-line total and the
+  // sign on its header opens the list. The choice is remembered in this browser. Folded
+  // hides the list only - the figures themselves never blank.
+  const FOLD_KEY = "streamlive.calls.folded";
+  let CALLS_FOLD = true;
+  try { if (localStorage.getItem(FOLD_KEY) === "0") CALLS_FOLD = false; } catch { }
 
   async function loadCalls() {
     const box = $("fcBody");
@@ -2726,10 +2733,12 @@
     const box = $("fcBody");
     if (!CALL_ROWS.length) {
       box.innerHTML = '<p class="muted" style="margin:12px 0 0">No call has been booked on the video service yet.</p>';
+      paintFold();
       return;
     }
     if (!CALL_RATE) {
       box.innerHTML = '<p class="muted" style="margin:12px 0 0">There is no price per second on the Prices tab, so a call cannot be costed here.</p>';
+      paintFold();
       return;
     }
     const now = Date.now();
@@ -2759,7 +2768,11 @@
     const t = FAL_BAL && FAL_BAL.today ? FAL_BAL.today : null;
     const gap = t ? t.cost - sum.cost : null;
     const money = (v) => `<td class="mono" style="text-align:right">${usd(v)}</td>`;
-    box.innerHTML = `
+    const red = rows.filter((x) => x.paid - x.cost < 0.005).length;
+    // Folded, this one line is the whole card: what these calls cost, what they paid,
+    // how many lost. The figures never blank - only the list does.
+    const brief = `<p class="muted" style="margin:10px 0 0">These <b>${rows.length}</b> calls cost <b>${usd(sum.cost)}</b> and paid <b>${usd(sum.paid)}</b> — that is <b>${sum.paid - sum.cost >= 0 ? "+" : ""}${usd(sum.paid - sum.cost)}</b>, over <b>${mins2(sum.billed)}</b> minutes you charged${red ? `, with <b style="color:#fb7185">${red}</b> of them costing more than they paid` : ""}.</p>`;
+    const list = `
       <p class="muted" style="margin:10px 0 0">One line per call, newest first. fal.ai bills by the second, so
         <b>what it cost</b> is the price on your Prices tab (${usd(rate.perSecond)} a second, ${usd(rate.perSecond * 60)} a
         minute) times the seconds this call held. <b>What it paid</b> is the minutes you charged times your sell rate,
@@ -2791,9 +2804,26 @@
       <p class="muted" style="margin:10px 0 0">${t
         ? `fal.ai says today's whole account bill is <b>${usd(t.cost)}</b> for ${mins(t.seconds / 60)} minutes of compute. These ${rows.length} newest calls add up to <b>${usd(sum.cost)}</b> — a difference of ${usd(Math.abs(gap))} is ${gap >= 0.005 ? "calls older than this list, or spending by a key that is not in the pool" : "within reading distance"}.`
         : "No fal.ai reading yet, so today's bill cannot be set against these rows."} A row in red cost more than it paid — that is a call you ran and did not sell.</p>`;
+    box.innerHTML = brief + (CALLS_FOLD ? "" : list);
+    paintFold();
+  }
+
+  // The sign tells you what the press does: + opens the list, - folds it back away.
+  function paintFold() {
+    const b = $("foldCalls");
+    if (!b) return;
+    b.style.display = CALL_ROWS.length ? "" : "none";
+    b.textContent = CALLS_FOLD ? "+" : "−";
   }
 
   $("refreshCalls").onclick = () => { CALL_RATE = null; return loadCalls(); };
+  // Folding is a re-render of rows already in memory, not a new read: pressing it costs
+  // nothing and cannot flicker the figures.
+  $("foldCalls").onclick = () => {
+    CALLS_FOLD = !CALLS_FOLD;
+    try { localStorage.setItem(FOLD_KEY, CALLS_FOLD ? "1" : "0"); } catch { }
+    renderCalls();
+  };
 
   async function loadKeys() {
     const base = "id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures";
