@@ -411,7 +411,7 @@
            pointed at and asked "what did this cost me, and what did I sell it for". -->
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Every call, what it cost and what it paid</h2>
+          <h2 style="font-size:14px;margin:0">Every paid call, what it cost and what it paid</h2>
           <div class="row" style="align-items:center;gap:10px">
             <span class="muted" id="fcWhen"></span>
             <button id="refreshCalls">Refresh</button>
@@ -2701,6 +2701,7 @@
   // see whether his meter and fal's meter are counting the same thing.
   let CALL_ROWS = [];
   let CALL_RATE = null;
+  let CALL_SKIPPED = 0;
   // Forty rows is a long read, so this card opens folded to its one-line total and the
   // sign on its header opens the list. The choice is remembered in this browser. Folded
   // hides the list only - the figures themselves never blank.
@@ -2708,33 +2709,92 @@
   let CALLS_FOLD = true;
   try { if (localStorage.getItem(FOLD_KEY) === "0") CALLS_FOLD = false; } catch { }
 
+  // Two things this card is deliberately strict about. A minute is priced from the packages
+  // he sets on the Plans tab - not from the margin box, which is a wish, not a price - and only
+  // calls made by an account that has paid him appear at all. Trial grants and test credits run
+  // on the same video service and cost him the same money, but listing them here would mix two
+  // different books, so they are counted and named in one line instead.
+  //
+  // The Plans tab is re-read on every load, including the 15-second tick, because his prices
+  // are not constant: a package he re-prices must show at the new number without a redeploy.
   async function loadCalls() {
     const box = $("fcBody");
-    if (!CALL_RATE) {
-      try {
-        const [{ data: cfg }, { data: br }] = await Promise.all([
-          sb.from("billing_config").select("lucy_video_per_sec_cost, profit_margin_percent").eq("id", 1).maybeSingle(),
-          sb.from("burn_rates").select("multiplier").eq("modality", "video").is("retired_at", null)
-            .lte("effective_from", new Date().toISOString()).order("effective_from", { ascending: false }).limit(1).maybeSingle(),
-        ]);
-        const per = N(cfg?.lucy_video_per_sec_cost);
-        if (per > 0) CALL_RATE = { perSecond: per, mult: N(br?.multiplier, 1.2) || 1.2, margin: N(cfg?.profit_margin_percent) };
-      } catch { CALL_RATE = null; }
-    }
+    try {
+      const [{ data: cfg }, { data: ac }, { data: plans }, { data: orders }] = await Promise.all([
+        sb.from("billing_config").select("lucy_video_per_sec_cost").eq("id", 1).maybeSingle(),
+        sb.from("app_config").select("paystack_ghs_per_usd").eq("id", 1).maybeSingle(),
+        sb.from("plans").select("id, name, active, monthly_minutes, video_minutes, price_cents, price_ghp"),
+        sb.from("payments").select("user_id, plan_id, created_at, status").in("status", ["paid", "credited"]),
+      ]);
+      const per = N(cfg?.lucy_video_per_sec_cost);
+      const fx = N(ac?.paystack_ghs_per_usd, 12) || 12;
+      CALL_RATE = per > 0 ? planRates(plans || [], orders || [], fx, per) : null;
+    } catch { CALL_RATE = null; }
     const { data, error } = await sb.from("usage_sessions")
       .select("id, user_id, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
-      .eq("engine", "fal").order("started_at", { ascending: false }).limit(40);
+      .eq("engine", "fal").order("started_at", { ascending: false }).limit(60);
     if (error) { box.innerHTML = `<div class="alert" style="margin-top:12px">${esc(error.message)}</div>`; return; }
-    CALL_ROWS = data || [];
+    const all = data || [];
+    const paid = CALL_RATE?.paidBy;
+    // An order is the only proof that money reached him for that account, so it is also the
+    // only thing this list admits.
+    CALL_ROWS = paid && paid.size ? all.filter((r) => paid.has(String(r.user_id || ""))) : [];
+    CALL_SKIPPED = all.length - CALL_ROWS.length;
     await emailsOf(CALL_ROWS.map((r) => r.user_id));
     renderCalls();
     stamp("fcWhen");
   }
 
+  // His shelf, turned into a price per video minute. price_cents is hundredths of US dollars
+  // and price_ghp is pesewas of cedis, so both divide out to dollars. A package with no price
+  // or no minutes on it cannot set a rate, so it is left out rather than counted as free.
+  // packageVideoMinutes, not planMinutes: the Plans tab already owns that name for a call's
+  // three separate allowances, and a second declaration would silently replace it.
+  function packageVideoMinutes(p) { return N(p.video_minutes) || N(p.monthly_minutes); }
+  function planUsd(p, fx) {
+    if (N(p.price_cents) > 0) return N(p.price_cents) / 100;
+    if (N(p.price_ghp) > 0) return N(p.price_ghp) / 100 / fx;
+    return 0;
+  }
+  function planPerMin(p, fx) {
+    const ask = planUsd(p, fx), mins = packageVideoMinutes(p);
+    return ask > 0 && mins > 0 ? ask / mins : null;
+  }
+  function planRates(plans, orders, fx, perSecond) {
+    const byId = new Map(plans.map((p) => [String(p.id), p]));
+    // Each account is priced at the package its own newest paid order bought, so a customer on
+    // the 5-minute pack shows the 5-minute price, not an average of everything he has sold.
+    const paidBy = new Set();
+    const newest = new Map();
+    for (const o of orders) {
+      const u = String(o.user_id || "");
+      if (!u) continue;
+      paidBy.add(u);
+      const at = Date.parse(o.created_at) || 0;
+      const cur = newest.get(u);
+      if (!cur || at >= cur.at) newest.set(u, { at, plan: byId.get(String(o.plan_id || "")) });
+    }
+    const forUser = new Map();
+    for (const [u, o] of newest) {
+      const per = o.plan ? planPerMin(o.plan, fx) : null;
+      if (per) forUser.set(u, { perMinute: per, plan: String(o.plan.name || o.plan.id) });
+    }
+    // An account whose package carries no price (the unlimited plan, say) still has to be
+    // costed, so it falls back to the average of his priced packages and says so on the row.
+    let sum = 0, n = 0;
+    for (const p of plans.filter((x) => x.active !== false)) {
+      const per = planPerMin(p, fx);
+      if (per) { sum += per; n++; }
+    }
+    return { perSecond, forUser, paidBy, shelf: n ? sum / n : null };
+  }
+
   function renderCalls() {
     const box = $("fcBody");
     if (!CALL_ROWS.length) {
-      box.innerHTML = '<p class="muted" style="margin:12px 0 0">No call has been booked on the video service yet.</p>';
+      box.innerHTML = `<p class="muted" style="margin:12px 0 0">${CALL_SKIPPED
+        ? `No paid call on the video service yet. ${CALL_SKIPPED} call(s) that ran on minutes you gave away are not listed here.`
+        : "No call has been booked on the video service yet."}</p>`;
       paintFold();
       return;
     }
@@ -2743,11 +2803,18 @@
       paintFold();
       return;
     }
+    if (CALL_RATE.forUser.size === 0 && CALL_RATE.shelf == null) {
+      box.innerHTML = '<p class="muted" style="margin:12px 0 0">None of your packages carries both a price and minutes, so a minute has no price to be sold at. Set that on the Plans tab.</p>';
+      paintFold();
+      return;
+    }
     const now = Date.now();
     const rate = CALL_RATE;
-    // One sold minute buys 60/multiplier real seconds of compute, and the margin on the
-    // Prices tab is what he asks for those seconds.
-    const sellPerMin = rate.perSecond * (60 / rate.mult) * (1 + rate.margin / 100);
+    // What a minute sold for is his own Plans tab figure for that account's package. An
+    // account on an unpriced package falls to the average of his priced ones, and the row
+    // says which it used, so no number here is a mystery.
+    const rateOf = (uid) => rate.forUser.get(String(uid || ""))
+      || (rate.shelf != null ? { perMinute: rate.shelf, plan: "average of your priced packages" } : null);
     const rows = CALL_ROWS.map((r) => {
       const began = Date.parse(r.started_at);
       // A lease nobody renewed stopped at its expiry even while the row waits to be
@@ -2757,10 +2824,13 @@
       const frame = r.media_started_at ? Date.parse(r.media_started_at) : NaN;
       const pic = Number.isFinite(frame) ? Math.max(0, (stop - frame) / 1000) : 0;
       const billed = N(r.billed_minutes);
+      const rp = rateOf(r.user_id);
       return {
         r, line, pic, billed,
         cost: (pic > 0 ? pic : line) * rate.perSecond,
-        paid: billed * sellPerMin,
+        sell: rp.perMinute,
+        plan: rp.plan,
+        paid: billed * rp.perMinute,
       };
     });
     const sum = rows.reduce((a, x) => ({
@@ -2773,12 +2843,13 @@
     const red = rows.filter((x) => x.paid - x.cost < 0.005).length;
     // Folded, this one line is the whole card: what these calls cost, what they paid,
     // how many lost. The figures never blank - only the list does.
-    const brief = `<p class="muted" style="margin:10px 0 0">These <b>${rows.length}</b> calls cost <b>${usd(sum.cost)}</b> and paid <b>${usd(sum.paid)}</b> — that is <b>${sum.paid - sum.cost >= 0 ? "+" : ""}${usd(sum.paid - sum.cost)}</b>, over <b>${mins2(sum.billed)}</b> minutes you charged${red ? `, with <b style="color:#fb7185">${red}</b> of them costing more than they paid` : ""}.</p>`;
+    const brief = `<p class="muted" style="margin:10px 0 0">These <b>${rows.length}</b> paid calls cost <b>${usd(sum.cost)}</b> and paid <b>${usd(sum.paid)}</b> — that is <b>${sum.paid - sum.cost >= 0 ? "+" : ""}${usd(sum.paid - sum.cost)}</b>, over <b>${mins2(sum.billed)}</b> minutes you charged${red ? `, with <b style="color:#fb7185">${red}</b> of them costing more than they paid` : ""}${CALL_SKIPPED ? `, and ${CALL_SKIPPED} call(s) on given-away minutes kept out` : ""}.</p>`;
     const list = `
-      <p class="muted" style="margin:10px 0 0">One line per call, newest first. fal.ai bills by the second, so
-        <b>what it cost</b> is the price on your Prices tab (${usd(rate.perSecond)} a second, ${usd(rate.perSecond * 60)} a
-        minute) times the seconds this call held. <b>What it paid</b> is the minutes you charged times your sell rate,
-        ${usd(sellPerMin)} a minute — your cost, ${rate.mult}x burn rate, plus the ${mins1(rate.margin)}% margin you set.</p>
+      <p class="muted" style="margin:10px 0 0">One line per call, newest first, and only for calls made by an account that has paid you${CALL_SKIPPED ? ` - ${CALL_SKIPPED} call(s) on given-away minutes are left out` : ""}. fal.ai bills by the second, so
+        <b>what it cost</b> is the price on your Prices tab (${usd(rate.perSecond)} a second, ${usd(rate.perSecond * 60)} a minute) times
+        the seconds this call held - that is money leaving you, whatever you charge. <b>What it paid</b> is the minutes you charged times
+        the price you set on that account's package on your Plans tab, which each row prints under the minutes. These prices are read fresh
+        every time the card loads, so a package you re-price shows up on the next refresh.</p>
       <div style="overflow:auto;margin-top:10px">
         <table id="callsTable">
           <thead><tr><th>Account</th><th>Started</th><th>Line held</th><th>Picture</th><th>What it cost</th><th>You charged</th><th>What it paid</th><th>Difference</th></tr></thead>
@@ -2788,7 +2859,7 @@
             <td class="mono" style="text-align:right">${clock(x.line / 60)}</td>
             <td class="mono" style="text-align:right">${x.pic > 0 ? clock(x.pic / 60) : '<span class="pill warn">no picture</span>'}</td>
             ${money(x.cost)}
-            <td class="mono" style="text-align:right">${mins2(x.billed)} min</td>
+            <td class="mono" style="text-align:right">${mins2(x.billed)} min<div class="muted" style="font-size:11px">${usd(x.sell)} a minute · ${esc(x.plan)}</div></td>
             ${money(x.paid)}
             <td class="mono" style="text-align:right;color:${x.paid - x.cost < 0.005 ? "#fb7185" : "#35e0a0"}">${x.paid - x.cost >= 0 ? "+" : ""}${usd(x.paid - x.cost)}</td>
           </tr>`).join("")}</tbody>
@@ -2818,7 +2889,7 @@
     b.textContent = CALLS_FOLD ? "+" : "−";
   }
 
-  $("refreshCalls").onclick = () => { CALL_RATE = null; return loadCalls(); };
+  $("refreshCalls").onclick = () => loadCalls();
   // Folding is a re-render of rows already in memory, not a new read: pressing it costs
   // nothing and cannot flicker the figures.
   $("foldCalls").onclick = () => {
