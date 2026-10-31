@@ -2707,37 +2707,37 @@
   let CALLS_FOLD = true;
   try { if (localStorage.getItem(FOLD_KEY) === "0") CALLS_FOLD = false; } catch { }
 
-  // Two things this card is deliberately strict about. A minute is priced from the packages
-  // he sets on the Plans tab - not from the margin box, which is a wish, not a price - and only
-  // calls made by an account that has paid him appear at all. Trial grants and test credits run
-  // on the same video service and cost him the same money, but listing them here would mix two
-  // different books, so they are counted and named in one line instead.
+  // Two things this card is deliberately strict about. A minute is priced from the packages he
+  // sets on the Plans tab - not from the margin box, which is a wish, not a price - and trial
+  // calls are not listed, because they run on the trial machine and were never sold.
+  //
+  // What the paid machine shows is decided by the engine alone, never by whether an order
+  // exists: an account you credited by hand, or your own test account, still cost you real fal
+  // money, and leaving those out hid the very history this card is for.
   //
   // The Plans tab is re-read on every load, including the 15-second tick, because his prices
   // are not constant: a package he re-prices must show at the new number without a redeploy.
   async function loadCalls() {
     const box = $("fcBody");
     try {
-      const [{ data: cfg }, { data: ac }, { data: plans }, { data: orders }] = await Promise.all([
+      const [{ data: cfg }, { data: ac }, { data: plans }, { data: subs }, { data: orders }, { count: trial }] = await Promise.all([
         sb.from("billing_config").select("lucy_video_per_sec_cost").eq("id", 1).maybeSingle(),
         sb.from("app_config").select("paystack_ghs_per_usd").eq("id", 1).maybeSingle(),
         sb.from("plans").select("id, name, active, monthly_minutes, video_minutes, price_cents, price_ghp"),
-        sb.from("payments").select("user_id, plan_id, created_at, status").in("status", ["paid", "credited"]),
+        sb.from("subscriptions").select("user_id, plan_id"),
+        sb.from("payments").select("user_id").in("status", ["paid", "credited"]),
+        sb.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "decart"),
       ]);
       const per = N(cfg?.lucy_video_per_sec_cost);
       const fx = N(ac?.paystack_ghs_per_usd, 12) || 12;
-      CALL_RATE = per > 0 ? planRates(plans || [], orders || [], fx, per) : null;
+      CALL_RATE = per > 0 ? planRates(plans || [], subs || [], orders || [], fx, per) : null;
+      CALL_SKIPPED = N(trial);
     } catch { CALL_RATE = null; }
     const { data, error } = await sb.from("usage_sessions")
       .select("id, user_id, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
       .eq("engine", "fal").order("started_at", { ascending: false }).limit(60);
     if (error) { box.innerHTML = `<div class="alert" style="margin-top:12px">${esc(error.message)}</div>`; return; }
-    const all = data || [];
-    const paid = CALL_RATE?.paidBy;
-    // An order is the only proof that money reached him for that account, so it is also the
-    // only thing this list admits.
-    CALL_ROWS = paid && paid.size ? all.filter((r) => paid.has(String(r.user_id || ""))) : [];
-    CALL_SKIPPED = all.length - CALL_ROWS.length;
+    CALL_ROWS = data || [];
     await emailsOf(CALL_ROWS.map((r) => r.user_id));
     renderCalls();
     stamp("fcWhen");
@@ -2758,27 +2758,24 @@
     const ask = planUsd(p, fx), mins = packageVideoMinutes(p);
     return ask > 0 && mins > 0 ? ask / mins : null;
   }
-  function planRates(plans, orders, fx, perSecond) {
+  function planRates(plans, subs, orders, fx, perSecond) {
     const byId = new Map(plans.map((p) => [String(p.id), p]));
-    // Each account is priced at the package its own newest paid order bought, so a customer on
-    // the 5-minute pack shows the 5-minute price, not an average of everything he has sold.
-    const paidBy = new Set();
-    const newest = new Map();
-    for (const o of orders) {
-      const u = String(o.user_id || "");
-      if (!u) continue;
-      paidBy.add(u);
-      const at = Date.parse(o.created_at) || 0;
-      const cur = newest.get(u);
-      if (!cur || at >= cur.at) newest.set(u, { at, plan: byId.get(String(o.plan_id || "")) });
-    }
+    // Each account is priced at the package it is on. A priced row always wins over an
+    // unpriced one, because several accounts hold more than one package row.
     const forUser = new Map();
-    for (const [u, o] of newest) {
-      const per = o.plan ? planPerMin(o.plan, fx) : null;
-      if (per) forUser.set(u, { perMinute: per, plan: String(o.plan.name || o.plan.id) });
+    for (const s of subs) {
+      const u = String(s.user_id || "");
+      if (!u) continue;
+      const p = byId.get(String(s.plan_id || ""));
+      if (!p) continue;
+      const per = planPerMin(p, fx), cur = forUser.get(u);
+      if (per && !(cur && cur.perMinute)) forUser.set(u, { perMinute: per, plan: String(p.name || p.id) });
+      else if (!cur) forUser.set(u, { perMinute: null, plan: String(p.name || p.id) });
     }
-    // An account whose package carries no price (the unlimited plan, say) still has to be
-    // costed, so it falls back to the average of his priced packages and says so on the row.
+    // Which accounts have ever put money in, kept only to label a row that has not.
+    const paidBy = new Set((orders || []).map((o) => String(o.user_id || "")).filter(Boolean));
+    // An account on a package with no price written on it still has to be costed, so it falls
+    // back to the average of his priced packages and says so on the row.
     let sum = 0, n = 0;
     for (const p of plans.filter((x) => x.active !== false)) {
       const per = planPerMin(p, fx);
@@ -2791,7 +2788,7 @@
     const box = $("fcBody");
     if (!CALL_ROWS.length) {
       box.innerHTML = `<p class="muted" style="margin:12px 0 0">${CALL_SKIPPED
-        ? `No paid call on the video service yet. ${CALL_SKIPPED} call(s) that ran on minutes you gave away are not listed here.`
+        ? `No call on the paid video service yet. ${CALL_SKIPPED} trial call(s) are not listed here.`
         : "No call has been booked on the video service yet."}</p>`;
       paintFold();
       return;
@@ -2808,11 +2805,17 @@
     }
     const now = Date.now();
     const rate = CALL_RATE;
-    // What a minute sold for is his own Plans tab figure for that account's package. An
-    // account on an unpriced package falls to the average of his priced ones, and the row
-    // says which it used, so no number here is a mystery.
-    const rateOf = (uid) => rate.forUser.get(String(uid || ""))
-      || (rate.shelf != null ? { perMinute: rate.shelf, plan: "average of your priced packages" } : null);
+    // What a minute sold for is his own Plans tab figure for that account's package. An account
+    // on a package with no price written on it is said so on the row rather than guessed at; an
+    // account with no package row at all falls to the average of his priced ones.
+    const rateOf = (uid) => {
+      const x = rate.forUser.get(String(uid || ""));
+      if (x && x.perMinute) return x;
+      if (x) return { perMinute: 0, plan: `${x.plan} carries no price` };
+      return rate.shelf != null
+        ? { perMinute: rate.shelf, plan: "average of your priced packages" }
+        : { perMinute: 0, plan: "no price set" };
+    };
     const rows = CALL_ROWS.map((r) => {
       const began = Date.parse(r.started_at);
       // A lease nobody renewed stopped at its expiry even while the row waits to be
@@ -2828,6 +2831,7 @@
         cost: (pic > 0 ? pic : line) * rate.perSecond,
         sell: rp.perMinute,
         plan: rp.plan,
+        noOrder: !rate.paidBy.has(String(r.user_id || "")),
         paid: billed * rp.perMinute,
       };
     });
@@ -2841,9 +2845,9 @@
     const red = rows.filter((x) => x.paid - x.cost < 0.005).length;
     // Folded, this one line is the whole card: what these calls cost, what they paid,
     // how many lost. The figures never blank - only the list does.
-    const brief = `<p class="muted" style="margin:10px 0 0">These <b>${rows.length}</b> paid calls cost <b>${usd(sum.cost)}</b> and paid <b>${usd(sum.paid)}</b> — that is <b>${sum.paid - sum.cost >= 0 ? "+" : ""}${usd(sum.paid - sum.cost)}</b>, over <b>${mins2(sum.billed)}</b> minutes you charged${red ? `, with <b style="color:#fb7185">${red}</b> of them costing more than they paid` : ""}${CALL_SKIPPED ? `, and ${CALL_SKIPPED} call(s) on given-away minutes kept out` : ""}.</p>`;
+    const brief = `<p class="muted" style="margin:10px 0 0">These <b>${rows.length}</b> calls on the paid video service cost <b>${usd(sum.cost)}</b> and paid <b>${usd(sum.paid)}</b> — that is <b>${sum.paid - sum.cost >= 0 ? "+" : ""}${usd(sum.paid - sum.cost)}</b>, over <b>${mins2(sum.billed)}</b> minutes you charged${red ? `, with <b style="color:#fb7185">${red}</b> of them costing more than they paid` : ""}${CALL_SKIPPED ? `, plus <b>${CALL_SKIPPED}</b> trial call(s) that are not listed` : ""}.</p>`;
     const list = `
-      <p class="muted" style="margin:10px 0 0">One line per call, newest first, and only for calls made by an account that has paid you${CALL_SKIPPED ? ` - ${CALL_SKIPPED} call(s) on given-away minutes are left out` : ""}. fal.ai bills by the second, so
+      <p class="muted" style="margin:10px 0 0">One line per call, newest first, for every call run on the paid video service${CALL_SKIPPED ? ` - the <b>${CALL_SKIPPED}</b> trial call(s) are not here` : ""}. fal.ai bills by the second, so
         <b>what it cost</b> is the price on your Prices tab (${usd(rate.perSecond)} a second, ${usd(rate.perSecond * 60)} a minute) times
         the seconds this call held - that is money leaving you, whatever you charge. <b>What it paid</b> is the minutes you charged times
         the price you set on that account's package on your Plans tab, which each row prints under the minutes. These prices are read fresh
@@ -2857,7 +2861,7 @@
             <td class="mono" style="text-align:right">${clock(x.line / 60)}</td>
             <td class="mono" style="text-align:right">${x.pic > 0 ? clock(x.pic / 60) : '<span class="pill warn">no picture</span>'}</td>
             ${money(x.cost)}
-            <td class="mono" style="text-align:right">${mins2(x.billed)} min<div class="muted" style="font-size:11px">${usd(x.sell)} a minute · ${esc(x.plan)}</div></td>
+            <td class="mono" style="text-align:right">${mins2(x.billed)} min<div class="muted" style="font-size:11px">${usd(x.sell)} a minute · ${esc(x.plan)}${x.noOrder ? " · never paid you" : ""}</div></td>
             ${money(x.paid)}
             <td class="mono" style="text-align:right;color:${x.paid - x.cost < 0.005 ? "#fb7185" : "#35e0a0"}">${x.paid - x.cost >= 0 ? "+" : ""}${usd(x.paid - x.cost)}</td>
           </tr>`).join("")}</tbody>
