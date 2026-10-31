@@ -328,37 +328,25 @@ comment on function public.sl_note_network(uuid, text, text) is
 revoke all on function public.sl_note_network(uuid, text, text) from public, anon, authenticated;
 grant execute on function public.sl_note_network(uuid, text, text) to service_role;
 
--- ─── the same catalogue, offered abroad ─────────────────────────────────────────────────
--- Every package the seller has today is a Ghana package, so each one is copied to the
--- international shelf at the SAME figures: same minutes, same features, same device ceiling,
--- same price, in cedis as the till charges them. He reprices each twin himself afterwards.
+-- ─── the same catalogue, offered abroad — WITHOUT writing a single row ───────────────────
+-- Every package the seller has today is a Ghana package, so a foreign buyer would land on an
+-- empty list. He must still see his packages, and he must see them at the same figures until
+-- he prices them himself.
 --
--- plans.id is the package's own text reference, not a number, and there is no unique
--- constraint on its name, so the twin's id is the Ghana id plus '-intl' and its name is left
--- exactly as the buyer knows it — which shelf a row sits on is what plans.market and
--- plans.mirror_of say, not what its words say.
+-- This is deliberately NOT done by inserting a copied row per package. His installed apps read
+-- the plans table directly, with no shelf in the question, so every copied row would appear in
+-- an app that has not updated yet as a SECOND card beside the one it was copied from — the same
+-- package twice, one of them with no price on it. That is a broken Plans screen for a customer
+-- who did nothing wrong.
 --
--- Re-running this cannot double the shelf: the twin is recognised by mirror_of pointing back
--- at its original, or by that id already being taken, and on conflict do nothing means this
--- statement can only ever ADD packages, never edit one. A package he has since repriced has
--- lost its mirror_of, so the guard that keeps its twin is the id, and it still holds.
-insert into public.plans (
-  id, name, monthly_minutes, max_devices, features, price_cents, currency, active,
-  blurb, includes, video_minutes, audio_minutes, video_audio_minutes, price_ghp,
-  market, mirror_of, i18n
-)
-select
-  g.id || '-intl', g.name, g.monthly_minutes, g.max_devices, g.features, g.price_cents,
-  g.currency, g.active, g.blurb, g.includes, g.video_minutes, g.audio_minutes,
-  g.video_audio_minutes, g.price_ghp, 'intl', g.id, g.i18n
-from public.plans g
-where g.market = 'gh'
-  and not exists (
-    select 1 from public.plans t
-    where t.market = 'intl'
-      and (t.mirror_of = g.id or t.id = g.id || '-intl')
-  )
-on conflict (id) do nothing;
+-- So the abroad shelf is a VIEW of his rows, decided where the shelf is asked for:
+--   a package that has an active row of its own on the abroad shelf is offered as that row;
+--   a package that has none is offered on the abroad shelf as itself, at its own figure, and
+--   the reader marks it 'mirrored' so the panel can say out loud that abroad is still paying
+--   the home price.
+-- The moment he presses "Send abroad" in the panel and types his own price, that package stops
+-- falling back and its own row answers. Nothing about his existing rows changes, and nothing in
+-- this migration writes to his catalogue.
 
 -- ─── the shelf, read for one market ─────────────────────────────────────────────────────
 -- The no-argument form is dropped, not left beside this one: with both arguments defaulted,
@@ -382,6 +370,10 @@ as $$
            coalesce(pl.i18n -> lower(left(nullif(p_lang, ''), 2)) ->> 'blurb', pl.blurb) as shown_blurb,
            x.price_ghp,
            m.price_ghp as original_price_ghp,
+           -- A home package answering for the abroad shelf, because the seller has not made his
+           -- own abroad row for it yet. Flagged so every reader can say the figure is still the
+           -- Ghana one, and so the card is not printed as if it were a priced-up package.
+           p_market = 'intl' and pl.market is distinct from 'intl' as falls_back,
            x.price_ghp is not null
              and coalesce(pl.video_minutes, 0) + coalesce(pl.audio_minutes, 0)
                  + coalesce(pl.video_audio_minutes, 0) > 0 as buyable
@@ -392,25 +384,47 @@ as $$
     cross join lateral (select public.sl_plan_ghp(pl.id) as price_ghp) x
     where pl.active
       -- Anything that is not named 'intl' means the home shelf, so a blank or a stale argument
-      -- from an older app still gets the customer the packages he has always been shown.
-      and pl.market = case when p_market = 'intl' then 'intl' else 'gh' end
+      -- from an older app still gets the customer the packages he has always been shown, and an
+      -- older app — which asks this question with no shelf in it at all — can never be handed an
+      -- abroad row beside the home one it already lists.
+      and case when p_market = 'intl' then (
+             pl.market = 'intl'
+             or (pl.market is distinct from 'intl'
+                 and not exists (
+                   select 1 from public.plans t
+                   where t.market = 'intl' and t.active
+                     and (t.mirror_of = pl.id or t.id = pl.id || '-intl')
+                 ))
+           ) else (
+             pl.market is distinct from 'intl'
+           ) end
   )
   select jsonb_build_object(
     'ok', true,
     'enabled', coalesce((select ac.paystack_enabled from public.app_config ac where ac.id = 1), false),
-    'market', case when p_market = 'intl' then 'intl' else 'gh' end,
-    -- Both shelves are charged in Ghana cedis, because Paystack refuses USD for this merchant
-    -- ("Currency not supported by merchant", proven against the live API on 2026-10-17) and
-    -- payments.currency allows nothing else. The dollar figure a buyer also sees is his guide,
-    -- not the amount taken.
+    'market', case when p_market = 'intl' then 'intl' when p_market = 'both' then 'both' else 'gh' end,
+    -- What the buyer is SHOWN, and it is different per shelf because his customers are: the
+    -- abroad list prints the dollar figure the seller typed into price_cents, the home list
+    -- prints the cedi figure. This changes no money. The amount taken stays the cedi figure on
+    -- both shelves, because payments.currency allows nothing but GHS and Paystack refuses USD
+    -- for this merchant account ("Currency not supported by merchant", proven against the live
+    -- API on 2026-10-17) — so a buyer abroad reads dollars here and Paystack charges him the
+    -- cedi equivalent on its own screen.
+    'price_shows', case when p_market = 'intl' then 'USD' else 'GHS' end,
     'currency', 'GHS',
     'ghs_per_usd', coalesce((select ac.paystack_ghs_per_usd from public.app_config ac where ac.id = 1), 12),
-    -- One door per shelf, and the seller's own switch can only ever CLOSE it, never open a
-    -- door on the wrong shelf: turning mobile money off leaves the home till with no way to
-    -- pay, which is exactly what he asked for, and it cannot put a card form in front of a
-    -- customer in Accra. An empty list here is answered by the checkout function, and an
-    -- order is refused rather than quietly given the other method.
+    -- Two doors are only ever open together for a till that does not know shelves yet — a page
+    -- somebody has bookmarked, or an app build that has not updated. It gets exactly what it
+    -- got before this split, which is the seller's own switch list, and can still take money.
+    -- A request that does name a shelf gets that shelf's one door, and the seller's switch can
+    -- only ever CLOSE it, never open a door on the wrong shelf: turning mobile money off leaves
+    -- the home till with no way to pay, which is exactly what he asked for, and it cannot put a
+    -- card form in front of a customer in Accra. An empty list here is answered by the checkout
+    -- function, and an order is refused rather than quietly given the other method.
     'channels', case
+      when p_market = 'both' then
+        coalesce((select ac.paystack_channels from public.app_config ac where ac.id = 1),
+                 array['card', 'mobile_money'])
       when p_market = 'intl' then
         case when coalesce((select 'card' = any (ac.paystack_channels)
                               from public.app_config ac where ac.id = 1), true)
@@ -425,8 +439,12 @@ as $$
         'id', s.id, 'name', s.shown_name, 'blurb', s.shown_blurb, 'includes', s.includes,
         'features', s.features,
         'market', s.market,
-        'mirrored', s.mirror_of is not null
-          and coalesce(s.price_ghp, -1) = coalesce(s.original_price_ghp, -1),
+        -- True when the figure on this abroad card is not an abroad price yet: either the
+        -- seller's own twin row still costing exactly what the row it was copied from costs, or
+        -- no twin at all, so the home row itself is standing on the foreign shelf.
+        'mirrored', s.falls_back
+          or (s.market = 'intl' and s.mirror_of is not null
+              and coalesce(s.price_ghp, -1) = coalesce(s.original_price_ghp, -1)),
         'price_cents', coalesce(s.price_cents, 0),
         'price_ghp', case when s.buyable then s.price_ghp end,
         'listed_price_ghp', s.price_ghp,
@@ -442,7 +460,7 @@ as $$
 $$;
 
 comment on function public.sl_paystack_packages(text, text) is
-  'the shelf the buyer sees, for one market and in his own language: every active package on that shelf, each with its cedi price (null when none is set), its own market, a buyable flag, and whether its price is still the copied Ghana one. One door per shelf — mobile money at home, card abroad — and the seller''s panel switch can only close it, never swap it.';
+  'the shelf the buyer sees, for one market and in his own language: every active package on that shelf, each with its cedi price (null when none is set), its own market, a buyable flag, and whether its figure is still the Ghana one. A named shelf has one door — mobile money at home, card abroad — and the seller''s panel switch can only close it, never swap it. p_market = ''both'' is the pre-split answer for a till that has no shelf on its address: the whole home list and the seller''s own channel switches, so a bookmarked page or an un-updated app can still take money. price_shows says which currency a card is printed in — USD abroad, GHS at home — and changes nothing about the amount charged, which is cedis on both shelves.';
 
 -- Same hygiene as every other payment function: the till is a page with no login, so it must
 -- not be able to read the catalogue straight out of the database. Only this repository's own

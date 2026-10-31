@@ -157,7 +157,7 @@
           <div style="flex:1 1 320px"><label>Credit an account</label><input id="quickEmail" placeholder="the email the user signed up with" /></div>
           <div style="flex:0 0 auto"><button id="quickOpen" class="primary">Open to credit</button></div>
         </div>
-        <p class="muted" style="margin:10px 0 0">Pick the bucket you are topping up — <b>Video Call</b>, <b>Audio Call</b> or <b>Video + Audio</b> — then say what the account may use. Balances are separate and never expire.</p>
+        <p class="muted" style="margin:10px 0 0">Pick the bucket you are topping up — <b>Video Call</b> or <b>Video + Audio</b> — then say what the account may use. Balances are separate and never expire.</p>
         <div id="quickMsg"></div>
       </div>
 
@@ -180,10 +180,9 @@
               <label>What this account may use</label>
               <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
                 <label class="feat" style="margin:0 0 8px"><input type="checkbox" id="swVideo" /> Video Call</label>
-                <label class="feat" style="margin:0 0 8px"><input type="checkbox" id="swAudio" /> Audio Call</label>
                 <label class="feat" style="margin:0"><input type="checkbox" id="swBoth" /> Video + Audio</label>
               </div>
-              <div class="muted" style="margin-top:6px">Unticked buckets are refused at call start, even if that bucket holds minutes.</div>
+              <div class="muted" style="margin-top:6px">Unticked buckets are refused at call start, even if that bucket holds minutes. The app has no audio-only call any more, so that switch is gone here; if this account's record still has one, saving leaves it exactly as it is.</div>
             </div>
             <div>
               <label>Max concurrent sessions (devices calling at once)</label>
@@ -274,10 +273,10 @@
           <button id="acctSearchBtn">Search</button>
           <button id="acctRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:8px 0 12px">Minutes sit in three separate buckets — video, audio and video + audio — and never expire. An account can be full in one bucket and empty in another. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
+        <p class="muted" style="margin:8px 0 12px">Minutes sit in two separate buckets — <b>Video Call</b> and <b>Video + Audio</b> — and never expire. An account can be full in one bucket and empty in another. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
         <div style="overflow:auto">
           <table id="acctTable">
-            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video service</th><th>Video</th><th>Audio</th><th>Video + Audio</th><th>Lifetime</th><th></th></tr></thead>
+            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video service</th><th>Video</th><th>Video + Audio</th><th>Lifetime</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -742,7 +741,7 @@
         <h2 style="font-size:14px;margin:0 0 4px">Post a new rate</h2>
         <p class="muted" style="margin:0 0 12px">Rates are versioned history: never edit a rate that already ran, post a new row. A lease in flight keeps the multiplier it started with.</p>
         <div class="row">
-          <div><label>Bucket</label><select id="brModality"><option value="video">Video Call</option><option value="audio">Audio Call</option><option value="video_audio">Video + Audio</option></select></div>
+          <div><label>Bucket</label><select id="brModality"><option value="video">Video Call</option><option value="video_audio">Video + Audio</option></select></div>
           <div><label>Multiplier</label><input id="brMult" type="number" min="0.05" step="0.05" value="1" /></div>
           <div><label>Effective from (UTC)</label><input id="brFrom" type="datetime-local" /></div>
           <div style="flex:2 1 240px"><label>Note</label><input id="brNote" placeholder="e.g. ElevenLabs price rise" /></div>
@@ -1004,7 +1003,6 @@
         <p style="margin:0 0 6px;font-size:12px;color:#cfe6ef">What does the buyer get?</p>
         <div class="row" style="gap:20px;margin:0 0 16px">
           <label class="feat" style="margin-top:0"><input type="radio" name="pgMod" value="video" checked /> Video only</label>
-          <label class="feat" style="margin-top:0"><input type="radio" name="pgMod" value="audio" /> Voice only</label>
           <label class="feat" style="margin-top:0"><input type="radio" name="pgMod" value="video_audio" /> Video + voice</label>
         </div>
         <div class="row" style="align-items:flex-end;gap:14px">
@@ -1037,7 +1035,7 @@
         <h2 style="font-size:14px;margin:0 0 6px">Several sizes at once</h2>
         <p class="muted" style="margin:0 0 12px">Type the minute amounts you want to offer, separated by commas. Each line shows the price, the cash you keep and the AI credit that stays unspent at that price. <b>Add</b> creates that package, switched off.</p>
         <div class="row" style="align-items:flex-end;gap:14px">
-          <div style="flex:0 0 190px"><label style="margin-top:0">For which service?</label><select id="pgLadderMod"><option value="video">Video only</option><option value="audio">Voice only</option><option value="video_audio">Video + voice</option></select></div>
+          <div style="flex:0 0 190px"><label style="margin-top:0">For which service?</label><select id="pgLadderMod"><option value="video">Video only</option><option value="video_audio">Video + voice</option></select></div>
           <div style="flex:1 1 300px"><label style="margin-top:0">Minute amounts</label><input id="pgBundles" value="30, 60, 120, 300, 600" /></div>
         </div>
         <div style="overflow:auto;margin-top:12px">
@@ -1069,6 +1067,29 @@
   const FEATURE_LABEL = { video: "Video calls", voice: "Voice / audio", portrait_obs: "Portrait OBS output" };
   const MODALITIES = ["video", "audio", "video_audio"];
   const MOD_LABEL = { video: "Video Call", audio: "Audio Call", video_audio: "Video + Audio" };
+  // The app has exactly two call tabs — Video + Audio and Video only — so an Audio Call of
+  // one's own can never be started, and minutes in that bucket can never be spent. Every
+  // choice the panel offers therefore comes from this list. MODALITIES stays the full
+  // vocabulary for READING: wallets, ledger rows, rates and packages that were priced before
+  // the audio tab went keep their stored numbers, and nothing here writes a silent zero.
+  const CALL_MODALITIES = ["video", "video_audio"];
+
+  // Where his own connection came from, printed beside his address. A flag glyph where the
+  // browser draws one — and always the code and the country name too, because a Windows
+  // browser prints the two regional letters instead of a flag, and a cell that reads as blank
+  // tells him nothing. Recorded by the gateway from the request that account itself made;
+  // nothing here looks a price, a list or a payment method out of it.
+  const REGION = (() => { try { return new Intl.DisplayNames(["en"], { type: "region" }); } catch { return null; } })();
+  const countryChip = (code) => {
+    const c = String(code || "").trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(c)) return "";
+    const name = REGION?.of(c) || c;
+    const art = /^[AEIOUHNX]/.test(c) ? "an " : "";
+    return `<span title="${esc(`Logged from ${art}connection in ${name}. Only you see this. It never chooses a price, a list or a payment method for him.`)}"`
+      + ` style="display:inline-block;margin-left:6px;padding:2px 8px;border-radius:999px;font-size:11px;font-weight:700;white-space:nowrap;background:rgba(74,222,128,.10);border:1px solid rgba(74,222,128,.3);color:#86efac">`
+      + `<span aria-hidden="true">${String.fromCodePoint(...[...c].map((ch) => 0x1f1e6 - 65 + ch.charCodeAt(0)))}</span> `
+      + `${esc(c)} · ${esc(name)}</span>`;
+  };
   // What each supplier is called in this panel. The customer-facing apps never
   // use these words: a user sees one Start button and no service name.
   const ENGINE_LABEL = { fal: "Paid service", decart: "Trial pool" };
@@ -1167,6 +1188,7 @@
   let DEV_SEEN = {};
   let REG_BY_DEV = {};
   let CUR = null;
+  let ACCT_AUDIO_KEEP = false;   // this account's stored audio-only switch, carried through a save
 
   function msg(el, text, cls = "err") { $(el).innerHTML = text ? `<div class="${cls}">${esc(text)}</div>` : ""; }
 
@@ -1473,23 +1495,27 @@
       const bought = paid.has(p.id);
       const eng = engineOfAcct(p.id);
       const pin = s?.engine_override ? ' <span class="pill n" title="you pinned this account">pinned</span>' : "";
-      // Which list he taps for himself, and the country beside his account for his eyes only.
-      // Neither one decides a price: the shelf is his own tap, and a wrong country costs him
-      // nothing but a moment of curiosity.
+      // Which list he taps for himself. Neither this nor the country above decides a price:
+      // the shelf is his own tap, and a wrong country costs him nothing but a moment of
+      // curiosity.
       const shelf = !hasShelf ? "" : (p.market === "gh" || p.market === "intl"
-        ? `<div style="margin-top:3px"><span style="font-size:11px;font-weight:700;color:${p.market === "intl" ? "#a78bfa" : "#35e0e6"}">${p.market === "intl" ? "outside-Ghana list" : "Ghana list"}</span>${p.country ? ` <span class="muted" title="only you see this. It never chooses a price or a payment method for him.">${esc(p.country)}</span>` : ""}</div>`
+        ? `<div style="margin-top:3px"><span style="font-size:11px;font-weight:700;color:${p.market === "intl" ? "#a78bfa" : "#35e0e6"}">${p.market === "intl" ? "outside-Ghana list" : "Ghana list"}</span></div>`
         : '<div class="muted" style="margin-top:3px">has not chosen a list yet</div>');
+      // The country sits beside his address on its own line, whatever list he has tapped —
+      // including accounts that have never tapped one. Where no reading exists yet the cell
+      // says why rather than leaving him to wonder if the panel is broken.
+      const from = p.country ? countryChip(p.country)
+        : '<span class="muted" style="margin-left:6px;font-size:11px">no country read yet — his app has not reached the gateway since this stamp began</span>';
       return `<tr data-user="${p.id}">
-        <td><b>${esc(p.email)}</b><div class="muted">since ${esc((p.created_at || "").slice(0, 10))}</div>${shelf}</td>
+        <td><b>${esc(p.email)}</b>${from}<div class="muted">since ${esc((p.created_at || "").slice(0, 10))}</div>${shelf}</td>
         <td class="muted">${s ? esc(plans[s.plan_id]?.name || s.plan_id) + (bought ? "" : '<div class="muted">stamped at sign-up, nothing bought</div>') : '<span class="pill none">no subscription</span>'}</td>
         <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
         <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id, p.created_at))}</div>${devOf(p.id, p.created_at)}${netOf(p)}</td>
         <td>${cell("video", s?.video_enabled)}</td>
-        <td>${cell("audio", s?.audio_enabled)}</td>
         <td>${cell("video_audio", s?.video_audio_enabled)}</td>
         <td class="muted mono">+${mins1(credited)} / −${mins1(spent)}</td>
         <td style="white-space:nowrap"><button data-act="open" data-id="${p.id}" class="primary">Credit minutes</button>${ADMIN_OF[p.id] ? "" : ` <button data-act="del-acct" data-id="${p.id}" class="danger">Delete</button>`}</td></tr>`;
-    }).join("") || '<tr><td colspan="9" class="muted">No account matches that filter.</td></tr>';
+    }).join("") || '<tr><td colspan="8" class="muted">No account matches that filter.</td></tr>';
     msg("acctMsg", "");
   }
 
@@ -1698,7 +1724,10 @@
     $("detSummary").innerHTML = `Plan <b>${esc(plans[c.plan_id]?.name || c.plan_id || "—")}</b> · status ${status} ${c.status === "active" ? "" : '<span class="muted">(calls are refused unless active)</span>'}${bought === false ? ' <span class="muted">— both stamped at sign-up, nothing bought</span>' : ""} · open leases <b>${(c.open_sessions || []).length}</b> of ${c.max_concurrent_sessions ?? 1} allowed · minutes never expire`;
 
     $("swVideo").checked = c.modalities?.video === true;
-    $("swAudio").checked = c.modalities?.audio === true;
+    // The audio-only switch is off this panel, but the column is still on his subscription
+    // row. Whatever it says today is written back unchanged, so saving two switches can never
+    // quietly change a third one.
+    ACCT_AUDIO_KEEP = c.modalities?.audio === true;
     $("swBoth").checked = c.modalities?.video_audio === true;
     // 1 is what a call start falls back to when an account has no subscription row - the
     // summary line above already says "of 1 allowed", so the box must not claim 2.
@@ -1714,9 +1743,16 @@
       + livePlans.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("");
 
     const byMod = Object.fromEntries((c.wallets || []).map((w) => [w.modality, w]));
-    $("bucketTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => {
+    // The audio-only bucket is listed only when this account actually holds something in it,
+    // so old money is never hidden while nobody gets a row for a bucket no call can spend.
+    const holdsSomething = (m) => {
+      const w = byMod[m] || {};
+      return !!w.unlimited || N(w.balance) > 0 || N(w.total_credited) > 0 || N(w.total_spent) > 0;
+    };
+    const shownMods = MODALITIES.filter((m) => CALL_MODALITIES.includes(m) || holdsSomething(m));
+    $("bucketTable").querySelector("tbody").innerHTML = shownMods.map((m) => {
       const w = byMod[m] || { balance: 0, unlimited: false, total_credited: 0, total_spent: 0 };
-      return `<tr><td>${MOD_LABEL[m]}</td><td>${bucket(w)}</td><td class="mono">${mins(w.burn_rate ?? 1)}x</td>
+      return `<tr><td>${MOD_LABEL[m]}${CALL_MODALITIES.includes(m) ? "" : ' <span class="muted" title="The app has no audio-only call, so nobody can spend these.">· no call can spend this</span>'}</td><td>${bucket(w)}</td><td class="mono">${mins(w.burn_rate ?? 1)}x</td>
         <td>${w.unlimited ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
         <td class="mono">${mins1(w.total_credited)}</td><td class="mono">${mins1(w.total_spent)}</td></tr>`;
     }).join("");
@@ -1724,10 +1760,10 @@
     // Both boxes open empty now. Each used to sit on whatever its list happened to start
     // with, so one blind click sent minutes to the first bucket or the first package.
     $("gModality").innerHTML = '<option value="">pick a bucket</option>'
-      + MODALITIES.map((m) => `<option value="${m}">${MOD_LABEL[m]}</option>`).join("");
+      + CALL_MODALITIES.map((m) => `<option value="${m}">${MOD_LABEL[m]}</option>`).join("");
     $("gPackage").innerHTML = '<option value="">pick a package</option>'
       + PLAN_ROWS.filter((p) => p.active).map((p) => {
-      const parts = MODALITIES.filter((m) => N(p[`${m}_minutes`]) > 0).map((m) => `${mins(N(p[`${m}_minutes`]))} ${MOD_LABEL[m]}`).join(" · ");
+      const parts = CALL_MODALITIES.filter((m) => N(p[`${m}_minutes`]) > 0).map((m) => `${mins(N(p[`${m}_minutes`]))} ${MOD_LABEL[m]}`).join(" · ");
       return `<option value="${esc(p.id)}">${esc(p.name)}${parts ? ` — ${parts}` : " — no minutes set yet"}</option>`;
     }).join("");
     showPackageHint();
@@ -1785,12 +1821,11 @@
     msg("detMsg", "");
     const allowed = [
       $("swVideo").checked && "Video Call",
-      $("swAudio").checked && "Audio Call",
       $("swBoth").checked && "Video + Audio",
     ].filter(Boolean);
     const { data: saved, error } = await sb.from("subscriptions").update({
       video_enabled: $("swVideo").checked,
-      audio_enabled: $("swAudio").checked,
+      audio_enabled: ACCT_AUDIO_KEEP,
       video_audio_enabled: $("swBoth").checked,
       max_concurrent_sessions: Math.max(1, N($("detMaxConc").value, 1)),
     }).eq("user_id", CUR.user_id).select("user_id");
@@ -1927,8 +1962,8 @@
     } catch (err) { msg("grantMsg", err.message); }
   };
 
-  // A package is only the three amounts typed on the Plans tab, so selling one
-  // is one click here instead of three separate grants.
+  // A package is only the two amounts typed on the Plans tab, so selling one is one click
+  // here instead of a separate grant per bucket.
   function planMinutes(p) {
     return Object.fromEntries(MODALITIES.map((m) => [m, Math.max(0, Math.round(N(p[`${m}_minutes`], 0)))]));
   }
@@ -1939,7 +1974,7 @@
     const p = PLAN_ROWS.find((x) => x.id === sel.value);
     if (!p) return ($("gPackageHint").textContent = "");
     const amounts = planMinutes(p);
-    const parts = MODALITIES.filter((m) => amounts[m] > 0).map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`);
+    const parts = CALL_MODALITIES.filter((m) => amounts[m] > 0).map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`);
     $("gPackageHint").textContent = parts.length ? parts.join(" · ") : "no minutes attached — set them on the Plans tab";
   }
 
@@ -1950,10 +1985,15 @@
     const p = PLAN_ROWS.find((x) => x.id === $("gPackage").value);
     if (!p) return msg("grantMsg", "Pick which package to credit. Nothing is chosen yet, so nothing was credited.");
     const amounts = planMinutes(p);
-    const mods = MODALITIES.filter((m) => amounts[m] > 0);
-    if (!mods.length) return msg("grantMsg", `“${p.name}” has no minutes attached. Set them on the Plans tab.`);
+    const mods = CALL_MODALITIES.filter((m) => amounts[m] > 0);
+    if (!mods.length) return msg("grantMsg", `“${p.name}” has no minutes a call can use. Set them on the Plans tab.`);
     const reason = $("gReason").value.trim() || `Package ${p.name} purchased`;
-    if (!confirm(`Credit ${CUR.email}\n\n${mods.map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`).join("\n")}\n\nReason: ${reason}\n\nThis writes one ledger row per bucket.`)) return;
+    // A package priced before the audio-only tab went may still carry that bucket. Selling it
+    // must not hand a buyer minutes he cannot spend, so they are left out — and said out loud.
+    const dead = amounts.audio > 0
+      ? `\n\nNote: this package also carries ${mins(amounts.audio)} Audio Call minutes. There is no audio-only call in the app, so those are NOT credited.`
+      : "";
+    if (!confirm(`Credit ${CUR.email}\n\n${mods.map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`).join("\n")}\n\nReason: ${reason}\n\nThis writes one ledger row per bucket.${dead}`)) return;
     $("packageBtn").disabled = true;
     const wasPaid = await paidOf(CUR.user_id);
     const done = [];
@@ -3430,7 +3470,7 @@
 
   function renderRates() {
     const eff = effectiveRates();
-    $("currentRates").querySelector("tbody").innerHTML = MODALITIES.map((m) => {
+    $("currentRates").querySelector("tbody").innerHTML = CALL_MODALITIES.map((m) => {
       const r = eff[m];
       return `<tr><td>${MOD_LABEL[m]}</td><td class="mono">${r ? mins(r.multiplier) + "x" : '<span class="pill n">unset (1x)</span>'}</td>
         <td class="mono">${mins(r?.multiplier ?? 1)} minutes</td>
@@ -3853,8 +3893,13 @@
       <div class="stat"><div class="l">Minutes spent</div><div class="v" style="color:#c4b5fd">${mins1(sum.spent)}</div><div class="l">settled by the lease meter</div></div>
       <div class="stat"><div class="l">Still in wallets</div><div class="v">${clock(sum.outstanding)}</div><div class="l">${sum.accounts.size} account(s), ${sum.unlimited} bucket(s) unlimited</div></div>
       <div class="stat"><div class="l">Burn ratio</div><div class="v">${sum.credited > 0 ? Math.round((sum.spent / sum.credited) * 100) + "%" : "—"}</div><div class="l">of granted minutes used</div></div>`;
-    $("poolTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => `<tr>
-      <td>${MOD_LABEL[m]}</td>
+    // Same rule as the account screen: the audio-only bucket appears here only while some
+    // account still holds something in it, so a figure that used to be reported never simply
+    // disappears from the totals he reads.
+    $("poolTable").querySelector("tbody").innerHTML = MODALITIES
+      .filter((m) => CALL_MODALITIES.includes(m) || byMod[m].accounts.size > 0)
+      .map((m) => `<tr>
+      <td>${MOD_LABEL[m]}${CALL_MODALITIES.includes(m) ? "" : ' <span class="muted">· no call can spend this</span>'}</td>
       <td class="mono" style="text-align:right">${clock(byMod[m].outstanding)}${byMod[m].unlimited ? ' <span class="pill yes">' + byMod[m].unlimited + " unlimited</span>" : ""}</td>
       <td class="mono" style="text-align:right">${mins1(byMod[m].credited)}</td>
       <td class="mono" style="text-align:right">${mins1(byMod[m].spent)}</td>
@@ -3893,7 +3938,10 @@
     PLAN_TARGET = data ? N(data.profit_margin_percent, NaN) : NaN;
   }
 
-  const planCost = (v) => (PLAN_MINCOST ? MODALITIES.reduce((s, m) => s + N(PLAN_MINCOST[m]) * N(v.minutes[m]), 0) : null);
+  // Only the buckets a call can spend are costed: audio-only minutes are not credited when a
+  // package is sold, so charging himself for them here would understate nothing but his own
+  // price check.
+  const planCost = (v) => (PLAN_MINCOST ? CALL_MODALITIES.reduce((s, m) => s + N(PLAN_MINCOST[m]) * N(v.minutes[m]), 0) : null);
 
   async function loadPlans(force) {
     // The panel re-reads the open tab once a minute. On this tab that would rebuild every
@@ -3937,7 +3985,8 @@
     const priceOf = (p) => N(p.price_cents) / 100;
     const live = PLAN_ROWS.filter((p) => p.active);
     const prices = PLAN_ROWS.map(priceOf).filter((v) => v > 0).sort((a, b) => a - b);
-    const bare = PLAN_ROWS.filter((p) => !MODALITIES.some((m) => planMinutes(p)[m] > 0));
+    const bare = PLAN_ROWS.filter((p) => !CALL_MODALITIES.some((m) => planMinutes(p)[m] > 0));
+    const deadAudio = PLAN_ROWS.filter((p) => planMinutes(p).audio > 0);
     const under = PLAN_MINCOST ? PLAN_ROWS.filter((p) => priceOf(p) > 0 && priceOf(p) < planCost({ minutes: planMinutes(p) })) : [];
     const gh = PLAN_ROWS.filter((p) => p.market === "intl").length ? PLAN_ROWS.filter((p) => p.market !== "intl") : PLAN_ROWS;
     const intl = PLAN_ROWS.filter((p) => p.market === "intl");
@@ -3947,8 +3996,13 @@
       : `${PLAN_ROWS.length} package${PLAN_ROWS.length === 1 ? "" : "s"} in the catalogue, ${live.length} on sale`
         + ` · ${gh.length} for Ghana users, ${intl.length} for users outside Ghana`
         + (prices.length ? ` · ${pgUsd(prices[0])} to ${pgUsd(prices[prices.length - 1])}` : "")
-        + (copied.length ? `<br><span class="dirty">${copied.length} outside-Ghana package${copied.length === 1 ? "" : "s"} still carry${copied.length === 1 ? "s" : ""} the Ghana price — a buyer abroad is charged what a buyer at home pays: ${copied.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "")
+        + (intl.length
+            ? (copied.length ? `<br><span class="dirty">${copied.length} outside-Ghana package${copied.length === 1 ? "" : "s"} still carry${copied.length === 1 ? "s" : ""} the Ghana price — a buyer abroad is charged what a buyer at home pays: ${copied.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "")
+            // No abroad rows at all is not an empty shelf: the app answers it with his Ghana
+            // packages, which is why nothing had to be copied into his catalogue for it.
+            : `<br><span class="dirty">Nothing is priced for users outside Ghana yet, so that list shows your ${gh.length} Ghana package${gh.length === 1 ? "" : "s"} at the Ghana price — printed in dollars, paid by card. Press “Send abroad” on a package and type your own figure to change that.</span>`)
         + (bare.length ? `<br><span class="dirty">${bare.length} has no minutes attached, so anyone who pays gets nothing: ${bare.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "")
+        + (deadAudio.length ? `<br><span class="muted">${deadAudio.length} package${deadAudio.length === 1 ? " still carries" : "s still carry"} Audio Call minutes, which no call in the app can spend, so “Credit this package” leaves them out: ${deadAudio.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "")
         + (under.length ? `<br><span class="dirty">${under.length} priced under what it costs you: ${under.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "");
   }
 
@@ -3956,7 +4010,7 @@
     $("plansList").innerHTML = !PLAN_ROWS.length ? '<p class="muted">No packages yet.</p>' : `<table>
         <thead><tr>
           <th>Package the buyer sees</th><th>Which list</th><th class="num">Price</th>
-          <th class="num">Video</th><th class="num">Audio</th><th class="num">Video + Audio</th>
+          <th class="num">Video</th><th class="num">Video + Audio</th>
           <th class="num">Costs you</th><th class="num">You keep</th>
           <th>Accounts</th><th>On sale</th><th></th>
         </tr></thead>
@@ -3992,7 +4046,7 @@
           <span class="ptag">${devices === 1 ? "1 device" : devices + " devices"}</span></div></td>
       <td style="white-space:nowrap">${shelf}${planCopied(p) ? '<div class="muted" style="font-size:11px">price still copied</div>' : ""}</td>
       <td class="num">${pgUsd(price)}</td>
-      ${MODALITIES.map((m) => `<td class="num">${a[m] ? mins(a[m]) : dash}</td>`).join("")}
+      ${CALL_MODALITIES.map((m) => `<td class="num">${a[m] ? mins(a[m]) : dash}</td>`).join("")}
       <td class="num">${cost === null ? dash : pgUsd(cost)}</td>
       <td class="num" style="color:${cost === null ? "#6b8296" : keep < 0 ? "#fb7185" : "#4ade80"}">${cost === null ? dash : pgUsd(keep)}</td>
       <td class="planhold">${held ? `<span class="pill n">${held}</span>` : '<span class="muted">none</span>'}</td>
@@ -4028,16 +4082,18 @@
       </div>
       <p class="phint" style="margin-top:6px">The buyer chooses his own list by tapping it in the app; nothing here guesses where he is. A package on the outside-Ghana list is offered to him with the card door only, and a Ghana package with mobile money only — so the price you type here is the price that shelf charges.</p>
       <label>Minutes this package sells — this is what lands on the buyer's account when you credit them</label>
-      <div class="grid3">
-        ${MODALITIES.map((m) => `<div><label style="margin-top:0">${MOD_LABEL[m]}</label><input data-f="min_${m}" type="number" min="0" step="1" value="${v["min_" + m]}" /></div>`).join("")}
+      <div class="grid2">
+        ${CALL_MODALITIES.map((m) => `<div><label style="margin-top:0">${MOD_LABEL[m]}</label><input data-f="min_${m}" type="number" min="0" step="1" value="${v["min_" + m]}" /></div>`).join("")}
       </div>
+      ${v.min_audio > 0 ? `<p class="phint" style="margin-top:6px">This package also holds ${mins(v.min_audio)} of Audio Call minutes from when the app had an audio-only tab. There is no such call now, so they are kept on the record and left out when the package is credited — no box here can change them.</p>` : ""}
+      <input type="hidden" data-f="min_audio" value="${v.min_audio}" />
       <label>One-line pitch — your own note; the buyer's card no longer prints it</label>
       <input data-f="blurb" value="${esc(v.blurb)}" placeholder="For streamers who go live on camera" />
       <label>What the buyer gets — one line each; also kept off the card now, for your records</label>
       <textarea data-f="includes" placeholder="300 Video Call minutes&#10;Two devices at a time">${esc(v.includes)}</textarea>
       <label>What it unlocks</label>
       <div>${FEATURES.map((f) => `<label class="feat" style="margin:0 14px 6px 0"><input type="checkbox" data-f="feat_${f}" ${v.feats.includes(f) ? "checked" : ""} /> ${FEATURE_LABEL[f]}</label>`).join("")}</div>
-      <p class="phint">Those three boxes decide which call tabs a buyer holding this package may use. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” does all three buckets in one click.</p>`;
+      <p class="phint">Those two boxes decide which call tabs a buyer holding this package may use — the app has a Video + Audio call and a Video-only call, and nothing else. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” fills both buckets in one click.</p>`;
   }
 
   function planEditor(p) {
@@ -4074,7 +4130,7 @@
   // chips are off the card now, so they are off this preview too — otherwise the panel
   // would promise a buyer a card he will never see.
   function planPreview(v) {
-    const mods = MODALITIES.filter((m) => v.minutes[m] > 0);
+    const mods = CALL_MODALITIES.filter((m) => v.minutes[m] > 0);
     const intl = v.market === "intl";
     const accent = intl ? "#a78bfa" : "#35e0e6";
     return `<div class="ph" style="color:${accent}">${esc(v.name || "Untitled package")}</div>
@@ -4088,7 +4144,7 @@
   function planMoney(v) {
     if (!PLAN_MINCOST) return "<b>Cost figures unavailable</b> — this login could not read the saved rates.";
     const cost = planCost(v), keep = v.price - cost;
-    const parts = MODALITIES.filter((m) => v.minutes[m] > 0)
+    const parts = CALL_MODALITIES.filter((m) => v.minutes[m] > 0)
       .map((m) => `${v.minutes[m]} ${MOD_LABEL[m]} at ${pgUsd(PLAN_MINCOST[m], 3)} a minute = ${pgUsd(PLAN_MINCOST[m] * v.minutes[m])}`);
     const aim = Number.isFinite(PLAN_TARGET) ? `, against the ${PLAN_TARGET}% you asked for on the Prices tab` : "";
     return `<b>Costs you ${pgUsd(cost)}</b> of AI time${parts.length ? ` (${parts.join("; ")})` : " — no minutes attached"}.`
@@ -4243,7 +4299,7 @@
       }
       box.classList.add("hidden"); box.innerHTML = "";
       PLAN_EDIT = null; PLAN_DIRTY = false;
-      const total = MODALITIES.reduce((s, m) => s + v.minutes[m], 0);
+      const total = CALL_MODALITIES.reduce((s, m) => s + v.minutes[m], 0);
       msg("plansMsg", `Created “${row.name}” at ${pgUsd(v.price)} carrying ${mins(total)} minutes — off the shelf until you switch it on. Its reference is “${newId}”, which is what the Prices tab calls it.`, "ok");
       return loadPlans();
     }
@@ -4434,7 +4490,7 @@
 
   function pgRenderUnits() {
     const rate = pgProviders(), mult = pgMultipliers(), cc = pgCreditCost();
-    $("pgUnitTable").querySelector("tbody").innerHTML = MODALITIES.map((m) => `<tr>
+    $("pgUnitTable").querySelector("tbody").innerHTML = CALL_MODALITIES.map((m) => `<tr>
       <td>${PG_SHOP_LABEL[m]}</td>
       <td class="mono" style="text-align:right">${pgUsd(rate[m])}</td>
       <td class="mono" style="text-align:right">${mins(mult[m])}</td>
@@ -4578,7 +4634,7 @@
       includes: [label, "Minutes never expire", "Works on every device you sign in to"],
       max_devices: 2,
       video_minutes: 0, audio_minutes: 0, video_audio_minutes: 0,
-      features: mod === "audio" ? ["voice"] : mod === "video" ? ["video"] : ["video", "voice"],
+      features: mod === "video" ? ["video"] : ["video", "voice"],
       active: false,
     };
     row[PG_MINCOL[mod]] = minutes;

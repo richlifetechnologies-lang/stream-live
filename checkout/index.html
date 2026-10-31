@@ -247,6 +247,7 @@ const DICT = {
     "Ask for help": "Pide ayuda",
     "and quote your reference.": "y menciona tu número de referencia.",
     "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "Los precios que ves son los paquetes y las cifras de la lista de Planes del vendedor, en cedis de Ghana a GH₵{rate} por dólar.",
+    "The prices you see are the packages and figures on the seller's Plans list, in US dollars. Payment is taken in Ghana cedis at GH₵{rate} to the dollar.": "Los precios que ves son los paquetes y las cifras de la lista de Planes del vendedor, en dólares estadounidenses. El cobro se hace en cedis de Ghana a GH₵{rate} por dólar.",
     "Pay {amount} by {method}": "Pagar {amount} con {method}",
     "card": "tarjeta",
     "mobile money": "dinero móvil",
@@ -353,6 +354,7 @@ const DICT = {
     "Ask for help": "Peça ajuda",
     "and quote your reference.": "e informe a sua referência.",
     "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "Os preços que você vê são os pacotes e os números da lista de Planos do vendedor, em cedis de Gana a GH₵{rate} por dólar.",
+    "The prices you see are the packages and figures on the seller's Plans list, in US dollars. Payment is taken in Ghana cedis at GH₵{rate} to the dollar.": "Os preços que você vê são os pacotes e os números da lista de Planos do vendedor, em dólares americanos. A cobrança é feita em cedis de Gana a GH₵{rate} por dólar.",
     "Pay {amount} by {method}": "Pagar {amount} com {method}",
     "card": "cartão",
     "mobile money": "dinheiro móvel",
@@ -459,6 +461,7 @@ const DICT = {
     "Ask for help": "Demande de l'aide",
     "and quote your reference.": "et donne ta référence.",
     "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "Les prix que tu vois sont les forfaits et les chiffres de la liste Forfaits du vendeur, en cedis ghanéens à GH₵{rate} le dollar.",
+    "The prices you see are the packages and figures on the seller's Plans list, in US dollars. Payment is taken in Ghana cedis at GH₵{rate} to the dollar.": "Les prix que tu vois sont les forfaits et les chiffres de la liste Forfaits du vendeur, en dollars américains. Le paiement est prélevé en cedis ghanéens à GH₵{rate} le dollar.",
     "Pay {amount} by {method}": "Payer {amount} par {method}",
     "card": "carte",
     "mobile money": "mobile money",
@@ -565,6 +568,7 @@ const DICT = {
     "Ask for help": "اطلب المساعدة",
     "and quote your reference.": "واذكر رقم مرجعك.",
     "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "الأسعار التي تراها هي الحزم والأرقام الواردة في قائمة الخطط لدى البائع، بالسيدي الغاني بسعر GH₵{rate} للدولار.",
+    "The prices you see are the packages and figures on the seller's Plans list, in US dollars. Payment is taken in Ghana cedis at GH₵{rate} to the dollar.": "الأسعار التي تراها هي الحزم والأرقام الواردة في قائمة الخطط لدى البائع، بالدولار الأمريكي. يُحصَّل المبلغ بالسيدي الغاني بسعر GH₵{rate} للدولار.",
     "Pay {amount} by {method}": "ادفع {amount} عبر {method}",
     "card": "البطاقة",
     "mobile money": "المحفظة المحمولة",
@@ -743,6 +747,29 @@ const minutesOf = (p) => MODS.map((m) => [m, Number(p[m + "_minutes"] || 0)]).fi
 // Two decimals, the way the panel writes money.
 const money = (pesewas) => "GH₵" + (Number(pesewas) / 100).toFixed(2);
 
+/**
+ * The figure a card shows, and the three letters beside it.
+ *
+ * Which currency the buyer READS is the seller's server's answer for the shelf he is
+ * standing on — `price_shows` is "USD" abroad and "GHS" at home — never a guess this page
+ * makes from his address, his language or his bank. What he is CHARGED is the cedi figure
+ * on both shelves: the payment record allows no other currency and the gateway refuses
+ * dollars for this account, so a buyer in Lagos or London reads dollars here and settles
+ * the cedi equivalent on the payment page. Nothing here moves money.
+ *
+ * A package with no dollar figure yet falls back to the cedi one rather than showing
+ * nothing: on a page that takes payment an honest second-best figure beats a blank.
+ */
+function shownPrice(p) {
+  const dollars = Number(p.price_cents) / 100;
+  if (lastData && lastData.price_shows === "USD" && dollars > 0) {
+    return { text: "$" + dollars.toFixed(2), code: "USD" };
+  }
+  const pesewas = Number(p.listed_price_ghp);
+  if (!(pesewas > 0)) return null;
+  return { text: money(pesewas), code: "GHS" };
+}
+
 const WAY_TEXT = {
   card: { title: "Debit or credit card", sub: "Visa, Mastercard or Verve. You type the card on Paystack's own screen." },
   mobile_money: { title: "Mobile money", sub: "MTN MoMo, Telecel Cash (the old Vodafone Cash) or AT Money — whichever network you use. Paystack sends a prompt to your phone and the payment goes when you approve it." },
@@ -777,7 +804,8 @@ function notBuyable(p) {
 }
 
 /**
- * One card: the package's own name, its price in cedis, and the minutes it carries. The
+ * One card: the package's own name, its price in the currency this shelf prints, and the
+ * minutes it carries. The
  * seller's marketing line, the list of what is included and the feature tags used to be
  * printed here too; he took them off every package, in the app and on this page, so the
  * buyer sees one figure and one number of minutes and nothing to read. A package the
@@ -789,11 +817,11 @@ function notBuyable(p) {
  */
 function cardBodyHtml(p) {
   const mods = minutesOf(p);
+  const price = shownPrice(p);
   const why = notBuyable(p);
   return '<div class="name">' + esc(tr(p.name || "Untitled package")) + "</div>"
-    + (Number(p.listed_price_ghp) > 0
-        ? '<div class="price">' + money(p.listed_price_ghp) + "<span>GHS</span></div>"
-        : '<div class="unpriced">' + tr("Price not set") + "</div>")
+    + (price ? '<div class="price">' + price.text + "<span>" + price.code + "</span></div>"
+             : '<div class="unpriced">' + tr("Price not set") + "</div>")
     + (mods.length
         ? '<div class="mins"><p class="ml">' + tr("Minutes in this package") + "</p>"
           + mods.map(([m, v]) => '<div class="mm"><span>' + tr(MOD_LABEL[m]) + "</span><b>"
@@ -808,8 +836,11 @@ function refreshGo() {
   if (!chosen) { go.disabled = true; go.textContent = tr("Choose a package above"); return; }
   if (!method) { go.disabled = true; go.textContent = tr("Choose how you want to pay"); return; }
   go.disabled = false;
+  // The button repeats the figure on the card he chose, in the same currency, so the page
+  // never says one thing on the card and another on the button.
+  const price = shownPrice(chosen);
   go.textContent = tr("Pay {amount} by {method}",
-    { amount: money(chosen.price_ghp), method: tr(WAY_NAME[method]) });
+    { amount: price ? price.text : money(chosen.price_ghp), method: tr(WAY_NAME[method]) });
 }
 
 function renderWays() {
@@ -896,9 +927,14 @@ function paintShop(data) {
   });
 
   renderWays();
-  $("rate").textContent = tr(
-    "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.",
-    { rate: Number(data.rate || 12) });
+  // The abroad list is printed in dollars, so this line cannot also claim the figures on it
+  // are cedis. Both versions say the one thing that stays true on either shelf: the money
+  // itself is taken in Ghana cedis.
+  $("rate").textContent = data.price_shows === "USD"
+    ? tr("The prices you see are the packages and figures on the seller's Plans list, in US dollars. Payment is taken in Ghana cedis at GH₵{rate} to the dollar.",
+      { rate: Number(data.rate || 12) })
+    : tr("The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.",
+      { rate: Number(data.rate || 12) });
   $("buy").hidden = false;
 }
 
@@ -1145,7 +1181,13 @@ $("go").onclick = async () => {
   $("go").disabled = true;
   setErr("");
   try {
-    const r = await post("", { method: "POST", body: JSON.stringify({ email, plan_id: chosen.id, method }) });
+    // Which shelf he tapped is sent with the order, so the seller's server checks the door
+    // against the list he actually bought from. It is sent only when this page was opened
+    // from one of the two shelves: a bookmarked till or an older app has no shelf on its
+    // address, and answering for it would take away the card-and-momo choice it has always
+    // given. Either way the server picks the door from the package itself if this is absent.
+    const shelf = urlMarket ? { market: urlMarket } : {};
+    const r = await post("", { method: "POST", body: JSON.stringify({ email, plan_id: chosen.id, method, ...shelf }) });
     location.href = r.checkout_url;
   } catch (e) {
     setErr(e.message);

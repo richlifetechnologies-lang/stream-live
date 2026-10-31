@@ -11,7 +11,9 @@ import { toUserMessage } from "../lib/end-reason";
 import { t } from "../lib/i18n";
 import { usd, type AccountSnapshot, type CheckoutInfo, type Modality, type Plan } from "@stream-live/client";
 import { Clock, CreditCard, Globe, RefreshCw, Smartphone, Tag } from "lucide-react";
-const MODS: Modality[] = ["video", "audio", "video_audio"];
+// The two calls the app can actually start. The old audio-only bucket is left off a package
+// card on purpose: a number on this card is a promise, and no customer can spend that one.
+const MODS: Modality[] = ["video", "video_audio"];
 
 /** The cedi figure the payment page will charge — the seller's own, not a guess. */
 const ghs = (n: number) => "GH\u20B5" + n.toFixed(2);
@@ -98,28 +100,44 @@ export default function PlansPage() {
 
   /**
    * The two shelves. Every package the seller has listed today is a Ghana package. The shelf
-   * for users outside Ghana carries the packages he has marked for it; until he marks any,
-   * that shelf offers the same packages at the same prices so a customer abroad is not left
-   * staring at an empty page. The moment he lists his own on the panel, only his show.
+   * for users outside Ghana carries the packages he has marked for it, and any package he has
+   * not marked yet stands on it as itself, so a customer abroad is never left staring at an
+   * empty page. The moment he lists his own on the panel, that row answers for its package.
    *
-   * `mirrored` says a card is somebody else's figure rather than one he priced: the copied
-   * rows still wear the Ghana price, so the app does not tell a buyer on this shelf that the
-   * package is HIS. A twin stops counting as copied the second he types his own price.
+   * `mirrored` says a card is somebody else's figure rather than one he priced: a package with
+   * no abroad row, or a copied row still wearing the price it was copied at.
+   *
+   * The two shelves are also read in different money. A customer in Accra is charged cedis and
+   * sees cedis; a customer abroad thinks in dollars, so his list is printed in dollars — the
+   * seller's own figure, stored on the same row. What the card is finally charged is the
+   * gateway's business, and it is still cedis, because Paystack refuses USD for this account.
    */
   type Listed = { plan: Plan; mirrored: boolean };
   const byId = new Map(plans.map((p) => [p.id, p]));
-  const ghPlans: Listed[] = plans.filter((p) => shelfOf(p) === "gh").map((plan) => ({ plan, mirrored: false }));
   const marked = plans.filter((p) => shelfOf(p) === "intl");
-  const intlPlans: Listed[] = (marked.length ? marked : ghPlans.map((c) => c.plan)).map((plan) => ({
-    plan,
-    mirrored: marked.length
-      ? plan.mirrorOf !== null && byId.get(plan.mirrorOf)?.priceCents === plan.priceCents
-      : true,
-  }));
+  const ghPlans: Listed[] = plans.filter((p) => shelfOf(p) === "gh").map((plan) => ({ plan, mirrored: false }));
+  // Package by package, not shelf by shelf: the seller may price one package for abroad and
+  // leave the rest alone, and then the abroad list is his priced row plus his own rows for the
+  // others — never a half-empty page. A home package standing in for itself is marked
+  // `mirrored`, because the figure on it is not one he priced for that shelf.
+  const abroadTwin = (p: Plan) => marked.some((t) => t.mirrorOf === p.id || t.id === p.id + "-intl");
+  const intlPlans: Listed[] = plans
+    .filter((p) => shelfOf(p) === "intl" || !abroadTwin(p))
+    .map((plan) => ({
+      plan,
+      mirrored: shelfOf(plan) === "gh"
+        ? true
+        : plan.mirrorOf !== null && byId.get(plan.mirrorOf)?.priceCents === plan.priceCents,
+    }));
 
-  /** The lowest price that shelf can actually take money for. */
-  const fromPrice = (list: Listed[]) => {
+  /** The lowest price that shelf can actually take money for — in that shelf's own money:
+   *  cedis at home, the dollars the seller typed abroad. */
+  const fromPrice = (id: Shelf, list: Listed[]) => {
     if (!online) return null;
+    if (id === "intl") {
+      const dollars = list.map(c => c.plan.priceCents).filter(n => n > 0).sort((a, b) => a - b);
+      return dollars.length ? usd(dollars[0]) : null;
+    }
     const cents = list.map(c => shop!.prices[c.plan.id]).filter((n): n is number => Number.isFinite(n))
       .sort((a, b) => a - b);
     return cents.length ? ghs(cents[0]) : null;
@@ -133,7 +151,7 @@ export default function PlansPage() {
   const ShelfPill = (id: Shelf, list: Listed[]) => {
     const on = shelf === id;
     const a = SHELF_ACCENT[id];
-    const from = fromPrice(list);
+    const from = fromPrice(id, list);
     const Icon = id === "gh" ? Smartphone : Globe;
     return (
       <button key={id} onClick={() => pickShelf(id)} aria-pressed={on} style={{
@@ -272,6 +290,14 @@ export default function PlansPage() {
             const mine = !mirrored && snap?.planId === p.id;
             const mins = MODS.filter(m => p.minutes[m] > 0);
             const buyable = online ? shop!.prices[p.id] : undefined;
+            // Two money, one row. A customer in Accra reads the cedi figure the till will
+            // charge him; a customer abroad reads the dollars the seller typed, which is the
+            // same stored price the panel shows him. `??` only ever falls through when one of
+            // the two is missing, because a card with no figure on it is worse than a card
+            // wearing the other currency.
+            const quote = buyable !== undefined ? ghs(buyable) : null;
+            const own = p.priceCents > 0 ? usd(p.priceCents) : null;
+            const priceText = shelf === "intl" ? (own ?? quote) : (quote ?? own);
             return (
               <Card key={p.id} style={{
                 display: "flex", flexDirection: "column", minWidth: 0,
@@ -290,7 +316,7 @@ export default function PlansPage() {
                     {t("Price")}
                   </p>
                   <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 30, lineHeight: 1.05, margin: 0, color: acc.solid, fontVariantNumeric: "tabular-nums", wordBreak: "break-word" }}>
-                    {buyable !== undefined ? ghs(buyable) : usd(p.priceCents)}
+                    {priceText ?? "—"}
                   </p>
                   {buyable === undefined && (
                     <p style={{ fontSize: 11, color: "hsl(222 25% 48%)", fontFamily: "'Rajdhani',sans-serif", margin: "5px 0 0", lineHeight: 1.45 }}>
@@ -321,7 +347,7 @@ export default function PlansPage() {
 
                 {buyable !== undefined && (
                   <PrimaryButton onClick={() => openTill(shop!.page, SHELF_WAY[shelf], shelf)} style={{ marginTop: 12, alignSelf: "stretch", ...(shelf === "intl" ? { background: `linear-gradient(135deg, ${acc.solid} 0%, hsl(258 85% 58%) 100%)`, boxShadow: `0 0 26px ${acc.tint(0.3)}` } : {}) }}>
-                    {shelf === "gh" ? <Smartphone style={{ width: 14, height: 14 }} /> : <CreditCard style={{ width: 14, height: 14 }} />} {t("Buy — {price}", { price: ghs(buyable) })}
+                    {shelf === "gh" ? <Smartphone style={{ width: 14, height: 14 }} /> : <CreditCard style={{ width: 14, height: 14 }} />} {t("Buy — {price}", { price: priceText ?? ghs(buyable) })}
                   </PrimaryButton>
                 )}
               </Card>

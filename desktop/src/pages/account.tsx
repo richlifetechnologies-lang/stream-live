@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { AppLayout } from "../components/layout"
-import { Stage, PageHead, Card, CardTitle, Pill, PillRow, PrimaryButton, D2 } from "../components/d2";
+import { Stage, PageHead, Card, CardTitle, Pill, PrimaryButton, D2 } from "../components/d2";
 import { ArtBackdrop, Logo } from "../components/brand";
 import { useToast } from "../hooks/use-toast";
 import { gateway, useAccount, useAdminContact, signIn, signUp, signOut } from "../lib/gateway";
@@ -119,45 +119,57 @@ export default function AccountPage() {
 
     return (
       <div style={{ position: "fixed", inset: 0, overflow: "auto", background: BG }}>
+        {/* The poster belongs to the window, not to the page. Riding inside the scroll
+            content made its box grow the moment the content overflowed, so every resize
+            re-scaled and re-cropped the artwork — the picture got sliced through the
+            middle while the form fell off the bottom. A fixed layer can only ever show
+            more or less of the same poster, at whatever shape the window is. */}
+        <div style={{ position: "fixed", inset: 0, overflow: "hidden" }}>
+          <ArtBackdrop />
+        </div>
         {/* The language switch comes before anything else, because this is the first
             screen a customer meets and the one an unreadable app stops him at. */}
         <div style={{ position: "fixed", top: 16, right: 22, zIndex: 60 }}>
           <LanguageMenu />
         </div>
-        <Stage minH="100%">
-          {/* The artwork rides inside the stage, so the glass cards float over the
-              poster rather than over flat colour. */}
-          <ArtBackdrop />
-          {/* Top padding clears that fixed language switch so the head card never sits
-              under it — this is the first screen, it cannot be half-covered. */}
-          <div style={{ position: "relative", maxWidth: 820, margin: "0 auto", paddingTop: 36, paddingBottom: 24 }}>
-            <PageHead
-              name={authMode === "signup" ? "Create your account" : "Welcome back"}
-              note={authMode === "signup"
+        {/* One column down the middle of the window. `margin: auto` centres it while it
+            fits and keeps its top reachable once the window is shorter than the form;
+            centring with the flex axis instead would push the form out of the scroll
+            area, which is how it went missing on a low window. The top padding clears
+            the fixed language switch — this is the first screen, it cannot be
+            half-covered. */}
+        <div style={{ position: "relative", minHeight: "100%", display: "flex", padding: "64px 24px 28px" }}>
+          <div style={{ margin: "auto", width: "100%", maxWidth: 440, display: "flex", flexDirection: "column", alignItems: "center" }}>
+            <Logo size={54} style={{ justifyContent: "center" }} />
+            <h1 style={{
+              fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 20, letterSpacing: "0.16em",
+              textTransform: "uppercase", color: "hsl(190 80% 96%)", margin: "14px 0 0", textAlign: "center",
+            }}>
+              {t(authMode === "signup" ? "Create your account" : "Welcome back")}
+            </h1>
+            <p style={{ fontSize: 12.5, color: "hsl(222 25% 58%)", fontFamily: "'Rajdhani',sans-serif", margin: "8px 0 0", lineHeight: 1.5, textAlign: "center" }}>
+              {t(authMode === "signup"
                 ? "Nothing to buy up front. Use the email you can actually receive mail on — your administrator tops up the minutes you call with."
-                : "Sign in with the account you created — your minutes, devices and requests are waiting."}
-              card={
-                <Card>
-                  <p style={{ margin: 0, fontSize: 15.5, fontWeight: 700, lineHeight: 1.4, fontFamily: "'Rajdhani', sans-serif", color: "hsl(190 85% 95%)" }}>
-                    {t("Your first account on a computer gets 1 minute of free video streaming to test the software.")}
-                  </p>
-                  <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.45, fontFamily: "'Rajdhani', sans-serif", color: "hsl(187 55% 80%)" }}>
-                    {t("That free minute shows a watermark on the AI video. Get minutes in your account — by buying them or by having them credited — and the watermark is gone.")}
-                  </p>
-                </Card>
-              }
-            />
+                : "Sign in with the account you created — your minutes, devices and requests are waiting.")}
+            </p>
+            <div style={{ width: "100%", marginTop: 16 }}>
+              <Card>
+                <p style={{ margin: 0, fontSize: 15.5, fontWeight: 700, lineHeight: 1.4, fontFamily: "'Rajdhani', sans-serif", color: "hsl(190 85% 95%)" }}>
+                  {t("Your first account on a computer gets 1 minute of free video streaming to test the software.")}
+                </p>
+                <p style={{ margin: "7px 0 0", fontSize: 13, lineHeight: 1.45, fontFamily: "'Rajdhani', sans-serif", color: "hsl(187 55% 80%)" }}>
+                  {t("That free minute shows a watermark on the AI video. Get minutes in your account — by buying them or by having them credited — and the watermark is gone.")}
+                </p>
+              </Card>
+            </div>
 
-            <PillRow>
+            <div style={{ width: "100%", marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
               <Pill active={authMode === "signin"} label="Sign in" onClick={() => setAuthMode("signin")} />
               <Pill active={authMode === "signup"} label="Create account" onClick={() => setAuthMode("signup")} />
-            </PillRow>
-            <div style={{ height: 14 }} />
+            </div>
 
-            <Card pad={24} style={{ width: 392, maxWidth: "100%" }}>
+            <Card pad={24} style={{ width: "100%", marginTop: 14 }}>
               <form onSubmit={handleAuth} style={{ display: "flex", flexDirection: "column", gap: 13 }}>
-                <Logo size={54} style={{ justifyContent: "center", marginBottom: 4 }} />
-
                 {authMode === "signup" && (
                   <div>
                     <label style={labelSt}>{t("Display name")}</label>
@@ -200,7 +212,7 @@ export default function AccountPage() {
               </p>
             </Card>
           </div>
-        </Stage>
+        </div>
         <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
       </div>
     );

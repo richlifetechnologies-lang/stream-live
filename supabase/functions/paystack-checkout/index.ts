@@ -15,7 +15,13 @@
 // can also say which door it wants with `?way=card` / `?way=mobile_money`, which is what the
 // app already sends; either word lands on the same shelf.
 //
-// The door is enforced here, on the server, from the package the buyer named:
+// A request that names NEITHER word is the till as it existed before there were two shelves —
+// a bookmarked page, an app build that has not updated — and it is served the same answer it
+// always got: the home list and both of the seller's open doors. Nothing already in a
+// customer's hands loses the ability to pay because a rule arrived that it was never built to
+// speak.
+//
+// Where a shelf IS named, the door is enforced here, on the server:
 // plans.market says whether that package is a Ghana one or an international one, and the
 // channel that does not belong to its shelf is refused before Paystack is asked for a
 // checkout. A page that was bookmarked, half-loaded or hand-typed cannot open a door the
@@ -47,19 +53,41 @@ const TIMEOUT_MS = 15_000;
 /** The two shelves, and nothing else. */
 type Market = "gh" | "intl";
 
+/**
+ * `both` is not a shelf: it is a till that has no shelf on its address — a page somebody
+ * bookmarked before the split, or an app build that has not updated. It is answered exactly as
+ * it was answered before, with the seller's own channel switches and the home list, so nothing
+ * that is already in a customer's hands stops taking money the day this ships.
+ */
+type Shelf = Market | "both";
+
 /** The one payment method each shelf takes money through. */
 const SHELF_DOOR: Record<Market, "card" | "mobile_money"> = { gh: "mobile_money", intl: "card" };
 
 /**
  * Which shelf a request is for, from what the customer himself chose. `?market=` is the
  * honest word; `?way=` is the one the app already puts on the till's address, and it can
- * only ever mean one shelf. A till with neither gets the home shelf, which is what it has
- * always been given. No address, no header, no country is looked at here.
+ * only ever mean one shelf. Neither word means the old, shelf-less question. No address, no
+ * header, no country is looked at here.
  */
-function shelfFor(params: URLSearchParams): Market {
+function shelfFor(params: URLSearchParams): Shelf {
   const m = (params.get("market") || "").trim().toLowerCase();
   if (m === "intl" || m === "gh") return m;
-  return (params.get("way") || "").trim().toLowerCase() === "card" ? "intl" : "gh";
+  const w = (params.get("way") || "").trim().toLowerCase();
+  if (w === "card") return "intl";
+  if (w === "mobile_money") return "gh";
+  return "both";
+}
+
+/**
+ * The same reading on a POST body. Null means the page never said which list it was standing
+ * on, and then no door is enforced — the seller's own switches decide, as they always did.
+ */
+function shelfFromBody(body: Record<string, unknown>): Market | null {
+  const m = String(body.market ?? "").trim().toLowerCase();
+  if (m === "intl" || m === "gh") return m;
+  const w = String(body.way ?? "").trim().toLowerCase();
+  return w === "card" ? "intl" : w === "mobile_money" ? "gh" : null;
 }
 
 function secretKey(): string {
@@ -108,31 +136,40 @@ async function paystack(path: string, key: string, body?: Record<string, unknown
 }
 
 /**
- * One shelf: what the seller lists on it, the figure it is charged at, and the one door it
- * takes money through. The page never has to be edited when he adds or re-prices a package —
+ * One shelf: what the seller lists on it, the figure it is charged at, and the door it takes
+ * money through. The page never has to be edited when he adds or re-prices a package —
  * sl_paystack_packages reads the same table the app's Plans screen does, and it is the shelf,
  * not the request, that names the door. An empty door list is passed through as it stands:
  * a seller who switched that method off on his own panel meant it, and this server will not
  * quietly hand his customers the other one instead.
+ *
+ * `both` is the shelf-less question, and it is answered the way it was answered before the
+ * two lists existed — the home catalogue and whichever doors the seller has open. A bookmarked
+ * till page and an app that has not updated are the only things that ask it, and neither may
+ * find the door it has always used bricked.
  */
-async function packages(market: Market = "gh", lang: string | null = null) {
+async function packages(shelf: Shelf = "both", lang: string | null = null) {
   const { data, error } = await adminClient().rpc("sl_paystack_packages", {
-    p_market: market,
+    p_market: shelf,
     p_lang: lang ?? null,
   });
   if (error) throw new Error(error.message);
-  const shelf = (data?.packages ?? []) as Array<Record<string, unknown>>;
-  const channels = Array.isArray(data?.channels)
-    ? data.channels.filter((c: unknown) => c === SHELF_DOOR[market])
+  const rows = (data?.packages ?? []) as Array<Record<string, unknown>>;
+  const open = Array.isArray(data?.channels)
+    ? data.channels.filter((c: unknown) => c === "card" || c === "mobile_money")
     : [];
   return {
     enabled: data?.enabled === true,
-    market: data?.market === "intl" ? "intl" : market,
+    market: String(data?.market ?? shelf),
+    // Which money the buyer's card is printed in: dollars abroad, cedis at home. The figure
+    // taken is the cedi one on both shelves — payments.currency allows nothing else, and
+    // Paystack refuses USD for this account.
+    price_shows: String(data?.price_shows ?? "GHS"),
     currency: String(data?.currency ?? "GHS"),
     rate: Number(data?.ghs_per_usd ?? 12),
     page: pageUrl(),
-    channels,
-    packages: shelf,
+    channels: shelf === "both" ? open : open.filter((c: string) => c === SHELF_DOOR[shelf]),
+    packages: rows,
   };
 }
 
@@ -219,23 +256,28 @@ async function handle(req: Request): Promise<Response> {
   const key = secretKey();
   const db = adminClient();
 
-  // The shelf is the package's, not the page's. Asked first, because it is the package that
-  // says which door this order may go through — which list the customer was looking at, and
-  // what he typed into the method box, are both things a browser decides.
+  // The shelf comes from the package, and from the list the buyer was actually looking at when
+  // the page says so. Asked first, because it says which door this order may go through — what
+  // he typed into the method box is a thing a browser decides.
   const planId = String(body.plan_id ?? "").trim();
-  const market = await shelfOfPlan(db, planId);
-  const { enabled, channels, packages: shelf } = await packages(market ?? "gh");
+  const tapped = shelfFromBody(body);
+  const own = await shelfOfPlan(db, planId);
+  // A Ghana package standing in for its own abroad row is bought abroad, by card: the row's own
+  // market would send that buyer to a mobile-money prompt he cannot answer.
+  const market = tapped ?? own;
+  const { enabled, channels, packages: shelf } = await packages(market ?? "both");
   if (!enabled) {
     return fail("Online payment is not switched on yet. Please pay another way for now.", 503);
   }
 
-  // The door the shelf has, and only that door. Refused here, on the server, before Paystack
-  // is asked for a checkout: mobile money is a Ghana thing and a card abroad is a card thing,
-  // and no page — stale, bookmarked, or written by hand in a console — can put the wrong one
-  // on a package.
-  if (market && String(body.method ?? "").trim().toLowerCase() !== SHELF_DOOR[market]) {
+  // The door of the shelf he named, enforced here on the server before Paystack is asked for a
+  // checkout: mobile money is a Ghana thing and a card abroad is a card thing, and no page —
+  // stale, bookmarked, or written by hand in a console — can put the wrong one on a package.
+  // A page that names no shelf at all is the old till, and it is not refused for a rule it
+  // was never built to: its buyer pays through whichever door the seller has open.
+  if (tapped && String(body.method ?? "").trim().toLowerCase() !== SHELF_DOOR[tapped]) {
     return fail(
-      market === "intl"
+      tapped === "intl"
         ? "That package is paid by card. Mobile money is only for packages bought in Ghana."
         : "That package is paid by mobile money. Choose mobile money and try again.",
       400,
