@@ -12,6 +12,9 @@
 //   delete_account{ userId, reason? }        -- remove the account for good
 //   set_engine    { userId, engine: 'fal'|'decart'|null } -- pin/unpin the service
 //   test_key      { provider, key? , keyId? } -- prove a key works, no inference billed
+//   fal_balance   { }                   -- the account balance and today's spend, live from fal.ai
+//   fal_balance_test { key }            -- ask fal.ai what one pasted billing key can see, save nothing
+//   fal_balance_save { key?, label?, warnBelow?, alertBelow?, remove? }
 //   paystack_reconcile { reference? }  -- ask Paystack about unpaid orders, credit what it confirms
 //   paystack_webhook   { set? }        -- read the call-back address, or register this gateway's
 // Resp: { ok:true, ...result } or { error, status }
@@ -20,9 +23,16 @@ import { requireUser } from "../_shared/auth.ts";
 import { adminClient } from "../_shared/db.ts";
 import { grantCredits, reapSessions, resolveRequest, signOutEverywhere, updateLease, type Modality } from "../_shared/credits.ts";
 import { verifyKey, type Provider } from "../_shared/verify.ts";
+import { normalizeSecret } from "../_shared/keys.ts";
+import { falAccountBalance, falBalance, falKeyList, falKeyTail, forgetFalBalance } from "../_shared/fal-balance.ts";
 import { reconcilePending, settleByReference, webhookRegister, webhookState } from "../_shared/paystack-reconcile.ts";
 
 const MODALITIES = ["video", "audio", "video_audio"];
+
+/** A dollar figure for a sentence the administrator reads, never for a machine. */
+function money(value: number, currency: string): string {
+  return `${currency === "USD" ? "$" : `${currency} `}${value.toFixed(2)}`;
+}
 
 async function requireAdmin(userId: string): Promise<boolean> {
   const { data } = await adminClient()
@@ -208,6 +218,104 @@ Deno.serve(async (req: Request) => {
           });
         }
         return json({ ok: true, provider, verified: res.ok, status: res.status, detail: res.detail });
+      }
+
+      // ── The money side: what is left to spend on calls ────────────────────────
+      // Read-only, and the reading is the important half: fal reports the balance for
+      // the whole account, so one stored billing key answers for every pool key. The
+      // per-key figures ride along in the same payload because the panel paints its
+      // key table from it and a second request would show a different instant.
+      //
+      // ok:true means this function did its job. Whether fal answered is a separate
+      // matter the card reads off balance/detail, so a fal outage must not arrive as
+      // a thrown request — "the balance could not be read" is a picture, not an error.
+      case "fal_balance":
+        return json({ ...(await falBalance()), ok: true });
+
+      // { key }  -- what does this key see? Saves nothing, spends nothing. A blank key
+      // re-checks the stored one, which is what the pool's Verify button means.
+      case "fal_balance_test": {
+        let key = normalizeSecret(String(body.key ?? ""));
+        if (!key) {
+          const { data } = await adminClient().from("fal_watch").select("billing_key").limit(1).maybeSingle();
+          key = normalizeSecret(String(data?.billing_key ?? ""));
+        }
+        if (!key) return fail("Paste a key first — there is no stored billing key to check either.");
+        const bal = await falAccountBalance(key);
+        if ("err" in bal) return json({ ok: true, verified: false, detail: bal.err });
+        const list = await falKeyList(key);
+        const mine = "err" in list ? null : list.keys.find((k) => k.id === key.split(":")[0]);
+        // BILLING and READONLY presets cannot open an inference call, which is what
+        // makes them safe to keep in a table the panel reads. Anything else can.
+        const spendable = mine ? !/^(BILLING|READONLY)$/.test(mine.preset) : null;
+        return json({
+          ok: true,
+          verified: true,
+          balance: bal.balance,
+          currency: bal.currency,
+          tail: falKeyTail(key),
+          preset: mine?.preset ?? "unknown to fal's key list",
+          spendable,
+          detail: `This key reads ${money(bal.balance, bal.currency)} on the account.`
+            + (spendable === false ? " It cannot start a call, so it is the right kind to store."
+              : spendable === true ? " Caution: it CAN start calls and spend money. A BILLING-preset key reads the same balance without that risk."
+                : ""),
+        });
+      }
+
+      // { key?, label?, warnBelow?, alertBelow?, remove? }  -- write the stored key
+      // Blank key keeps what is already there, so editing the amounts never needs the
+      // secret again. A pasted key is proven against fal BEFORE it is saved: a typo
+      // kept silently would leave the card showing yesterday's number forever.
+      case "fal_balance_save": {
+        const db = adminClient();
+        const { data: existing } = await db.from("fal_watch").select("id").limit(1).maybeSingle();
+
+        if (body.remove === true) {
+          if (!existing) return fail("There is no billing key stored, so there is nothing to forget.");
+          const { error } = await db.from("fal_watch").delete().eq("id", existing.id);
+          if (error) return fail(`could not forget the key: ${error.message}`);
+          forgetFalBalance();
+          return json({ ok: true, removed: true });
+        }
+
+        const amount = (v: unknown): number | null => {
+          if (v === null || v === undefined || String(v).trim() === "") return null;
+          const n = Number(v);
+          return Number.isFinite(n) && n >= 0 ? n : NaN;
+        };
+        const warn = amount(body.warnBelow), alert = amount(body.alertBelow);
+        if (Number.isNaN(warn)) return fail("the amber amount has to be a number of dollars, or blank for no colour");
+        if (Number.isNaN(alert)) return fail("the red amount has to be a number of dollars, or blank for no colour");
+        if (warn !== null && alert !== null && alert > warn) {
+          return fail("red has to be the smaller amount: red means running out, amber means nearly there");
+        }
+
+        let secret = normalizeSecret(String(body.key ?? ""));
+        if (!secret && existing) {
+          const { data } = await db.from("fal_watch").select("billing_key").eq("id", existing.id).maybeSingle();
+          secret = normalizeSecret(String(data?.billing_key ?? ""));
+        }
+        if (!secret) {
+          return fail("Nothing to save — paste a fal.ai billing key, or leave it blank and change the amounts on the stored one.");
+        }
+        const bal = await falAccountBalance(secret);
+        if ("err" in bal) return json({ ok: true, saved: false, verified: false, detail: `${bal.err}. Nothing was saved.` });
+
+        const list = await falKeyList(secret);
+        const mine = "err" in list ? null : list.keys.find((k) => k.id === secret.split(":")[0]);
+        const spendable = mine ? !/^(BILLING|READONLY)$/.test(mine.preset) : null;
+
+        const label = typeof body.label === "string" && body.label.trim()
+          ? body.label.trim().slice(0, 60)
+          : "fal balance key";
+        const row = { label, billing_key: secret, warn_below: warn, alert_below: alert, updated_at: new Date().toISOString() };
+        const { error } = existing
+          ? await db.from("fal_watch").update(row).eq("id", existing.id)
+          : await db.from("fal_watch").insert(row);
+        if (error) return fail(`could not save: ${error.message}`);
+        forgetFalBalance();
+        return json({ ...(await falBalance()), ok: true, saved: true, verified: true, tail: falKeyTail(secret), preset: mine?.preset ?? "", spendable });
       }
 
       // ── Online payments: ask Paystack, and make it tell us next time ──────────

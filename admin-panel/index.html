@@ -371,7 +371,44 @@
     </section>
     <!-- ══ TAB: KEY POOL ═══════════════════════════════════════════════════ -->
     <section id="tab-keys" class="hidden">
+      <!-- The money, above the keys, because it is the number he looks at before he
+           decides whether to add one. Every figure here is fal.ai's own. -->
       <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">fal.ai balance</h2>
+          <div class="row" style="align-items:center;gap:10px">
+            <span class="muted" id="fbWhen"></span>
+            <button id="refreshBalance">Check now</button>
+          </div>
+        </div>
+        <div id="fbBody"></div>
+        <div id="fbMsg"></div>
+        <div id="fbResult" class="presult"></div>
+
+        <div class="grid2" style="margin-top:16px">
+          <div>
+            <label>The key that reads this balance</label>
+            <div class="secret">
+              <input id="fbKey" type="password" autocomplete="off" spellcheck="false" placeholder="blank = keep the stored key" />
+              <button type="button" data-show="fbKey">show</button>
+              <button type="button" id="testBalance" class="primary">Verify</button>
+            </div>
+          </div>
+          <div><label>Name it</label><input id="fbLabel" placeholder="e.g. fal billing key" /></div>
+        </div>
+        <div class="grid2" style="margin-top:4px">
+          <div><label>Turn amber under</label><input id="fbWarn" type="number" min="0" step="1" placeholder="$ — blank = no colour" /></div>
+          <div><label>Turn red under</label><input id="fbAlert" type="number" min="0" step="1" placeholder="$ — blank = no colour" /></div>
+        </div>
+        <p class="phint" style="margin-top:10px">Where the key comes from: <b>fal.ai → dashboard → API Keys → New key → preset BILLING</b>. That kind of key can read a balance and <b>cannot start a call</b>, so it costs nothing to keep it here. The keys that spend your money stay in the pool below, and this one is never added to it.</p>
+        <div class="btns" style="margin-top:12px">
+          <button id="saveBalance" class="primary">Save and read the balance</button>
+          <button id="forgetBalance">Forget this key</button>
+        </div>
+      </div>
+
+      <div class="card">
+
         <div class="row" style="justify-content:space-between;align-items:center">
           <h2 style="font-size:14px;margin:0">Key pool</h2>
           <div class="row" style="align-items:center;gap:10px">
@@ -446,7 +483,7 @@
         <p class="muted" style="margin:6px 0 12px">Only the last four characters ever reach this page. <b>Verify</b> re-checks the stored copy against the provider; <span class="pill ok">live</span> means no failure was recorded against it in the last 24 hours.</p>
         <div style="overflow:auto">
           <table id="keysTable">
-            <thead><tr><th>Label</th><th>Video · fal.ai</th><th id="thTrialKey">Trial · DeCart</th><th id="thTrialLeft">Trial left</th><th>Voice · ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
+            <thead><tr><th>Label</th><th>Video · fal.ai</th><th>Spent on fal.ai today</th><th id="thTrialKey">Trial · DeCart</th><th id="thTrialLeft">Trial left</th><th>Voice · ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1151,7 +1188,7 @@
     machines: [loadMachines],
     topups: [loadRequests],
     payments: [loadPayments, loadPaystackHook],
-    keys: [loadKeys],
+    keys: [loadKeys, loadBalance],
     decart: [loadKeys, loadSupply],
     split: [loadAccounts],
     engines: [loadConfig],
@@ -2388,6 +2425,245 @@
     $("poolAlert").innerHTML = line ? `<div class="alert">${line}</div>` : "";
   }
 
+  // ── The money: what fal.ai still has to spend on calls ──────────────────────
+  // Every number here starts as fal's own, fetched by admin-api with the read-only
+  // billing key. This panel adds the sentence around them and the colour, so one glance
+  // says "can I still sell calls". When fal cannot be reached the card says that instead
+  // of showing a figure it can no longer back up.
+  //
+  // fal answers once a minute and its invoice settles late, so between two readings the
+  // account is not standing still: every call running right now is taking seconds fal
+  // has not billed yet. The card counts those off fal's figure using his own meter — the
+  // same lease rows that book his customers — so the number falls while he watches it.
+  // Estimate and reading are never blended into one unlabeled figure: the line under the
+  // number names both, and the next reading replaces the count with the truth.
+  let FAL_BAL = null;
+  let BAL_AT = 0;
+  let BAL_LIVE = null;
+
+  // How old the reading on screen is. Counted from the moment this page sent the
+  // request, not by comparing fal's timestamp to this machine's clock: that clock has
+  // been observed jumping hours during a single session, and a wrong "checked 7 hours
+  // ago" under a figure that is actually seconds old is worse than no line at all.
+  // The countdown below is built the same way on purpose.
+  function balAgo(ms) {
+    const s = Math.max(0, Math.round(ms / 1000));
+    if (s < 3) return "just now";
+    if (s < 45) return s + " seconds ago";
+    if (s < 5400) return Math.round(s / 60) + " minutes ago";
+    return Math.round(s / 3600) + " hours ago";
+  }
+
+  /** What the meter has taken since fal answered, and the balance that leaves. */
+  function burn() {
+    if (!BAL_LIVE) return null;
+    const secs = Math.max(0, BAL_LIVE.since + BAL_LIVE.running * ((Date.now() - BAL_LIVE.at) / 1000));
+    const dollars = secs * BAL_LIVE.perSec;
+    return {
+      secs,
+      dollars,
+      balance: Math.max(0, BAL_LIVE.bal - dollars),
+      running: BAL_LIVE.running,
+    };
+  }
+
+  function balColour(v, p) {
+    const warn = p.warn_below == null ? null : N(p.warn_below);
+    const red = p.alert_below == null ? null : N(p.alert_below);
+    return (red != null && v < red) ? "#fb7185" : (warn != null && v < warn) ? "#facc15" : "#35e0e6";
+  }
+
+  /** Seconds a key has taken since the reading, grown by the calls still on it now. */
+  function liveKeySeconds(lk) {
+    if (!lk) return 0;
+    const extra = BAL_LIVE ? Math.max(0, (Date.now() - BAL_LIVE.at) / 1000) * N(lk.running) : 0;
+    return N(lk.seconds) + extra;
+  }
+
+  // The dollar figure this product's own keys cost fal, one row each. "not on fal"
+  // is not a zero: it means the stored string is no longer a key on that account, so
+  // its share of the spending can't be traced and the account total is the true one.
+  function spendCell(id) {
+    const k = (FAL_BAL?.keys || []).find((x) => x.id === id);
+    if (!k) return '<span class="muted" style="font-size:11px">not read yet</span>';
+    if (!k.known) return '<span class="pill warn">not on fal</span><div class="muted" style="font-size:11px;margin-top:3px">this account has no key like that any more, so its share of the spending cannot be traced.</div>';
+    const secs = k.today && k.today.seconds ? `<div class="muted" style="font-size:11px">${mins(k.today.seconds / 60)} min of video today</div>` : "";
+    const price = FAL_BAL.per_second == null ? null : N(FAL_BAL.per_second);
+    const lk = (FAL_BAL.live?.keys || []).find((x) => x.id === id);
+    const taken = liveKeySeconds(lk);
+    const burning = price && taken > 0.5
+      ? `<div style="font-size:11px;margin-top:3px;color:#facc15">+${usd(taken * price)} since the reading${lk.running ? ` · ${lk.running} call${lk.running > 1 ? "s" : ""} on it now` : ""}</div>`
+      : "";
+    return `<span class="mono">${k.today ? usd(k.today.cost) : "—"}</span>`
+      + `<div class="muted" style="font-size:11px">${k.month ? usd(k.month.cost) : "—"} this month</div>${secs}${burning}`;
+  }
+
+  function paintSpendCells() {
+    document.querySelectorAll("#keysTable [data-spend]").forEach((td) => { td.innerHTML = spendCell(td.dataset.spend); });
+  }
+
+  // One second's work: move the figure, its colour, the minutes it buys and the key
+  // rows. Nothing is accumulated here — every value is recomputed from the reading and
+  // the elapsed time, so a tab left open overnight cannot drift into a number nobody took.
+  function tickBalance() {
+    const big = $("fbBig");
+    if (!big || !FAL_BAL || FAL_BAL.balance == null) return;
+    const b = burn();
+    const shown = b ? b.balance : N(FAL_BAL.balance);
+    big.textContent = usd(shown);
+    big.style.color = balColour(shown, FAL_BAL);
+    const per = FAL_BAL.per_second == null ? null : N(FAL_BAL.per_second);
+    const minsBox = $("fbMins");
+    if (minsBox && per) minsBox.textContent = "about " + Math.floor(shown / per / 60).toLocaleString() + " minutes of video calls";
+    const cap = $("fbBurn");
+    if (cap) {
+      cap.innerHTML = b && b.dollars >= 0.005
+        ? (b.running ? `<span class="pill warn">${b.running} call${b.running > 1 ? "s" : ""} running</span> ` : "")
+          + `${usd(b.dollars)} counted off since the reading · fal said ${usd(N(FAL_BAL.balance))}`
+        : "left on the fal.ai account";
+    }
+    paintSpendCells();
+  }
+
+  function renderBalance(p) {
+    const box = $("fbBody");
+    if (!p) { box.innerHTML = '<p class="muted" style="margin:12px 0 0">Asking fal.ai…</p>'; paintSpendCells(); return; }
+
+    // The stored amounts are shown in the boxes that set them, but never over a field
+    // he is mid-way through typing in.
+    const typing = (id) => document.activeElement && document.activeElement.id === id;
+    if (!typing("fbLabel")) $("fbLabel").value = p.label || "";
+    if (!typing("fbWarn")) $("fbWarn").value = p.warn_below == null ? "" : p.warn_below;
+    if (!typing("fbAlert")) $("fbAlert").value = p.alert_below == null ? "" : p.alert_below;
+    $("fbWhen").textContent = p.configured ? "read with " + p.tail : "";
+
+    if (!p.configured) {
+      BAL_LIVE = null;
+      box.innerHTML = `<div class="alert" style="margin-top:12px">${esc(p.detail || "No billing key is stored yet — paste one below.")}</div>`;
+      paintSpendCells();
+      return;
+    }
+    if (p.balance == null) {
+      BAL_LIVE = null;
+      box.innerHTML = `<div class="alert" style="margin-top:12px"><b>Nothing read this time.</b> ${esc(p.detail || "")}</div>`;
+      paintSpendCells();
+      return;
+    }
+
+    const bal = N(p.balance);
+    const perSec = p.per_second == null ? null : N(p.per_second);
+    BAL_LIVE = perSec && p.live
+      ? { bal, perSec, at: BAL_AT, since: N(p.live.seconds), running: N(p.live.running) }
+      : null;
+    const priceNote = p.per_second_source === "fal" ? "what fal.ai charged today" : "the price on your Prices tab";
+    const keyMonth = (p.keys || []).reduce((a, k) => a + (k.month ? N(k.month.cost) : 0), 0);
+    const gap = (p.month ? N(p.month.cost) : 0) - keyMonth;
+    const missing = (p.keys || []).filter((k) => !k.known).length;
+    let notes = "";
+    if (p.month && gap > 0.005) {
+      notes += `<p class="muted" style="margin:14px 0 0;font-size:12px">${usd(gap)} of this month's spending was rung up by keys that are not in the pool below — a retired key, or the env secret. The balance and the two spending figures are fal's totals for the <b>whole account</b>; the <b>Spent on fal.ai today</b> column only ever covers keys still stored here.</p>`;
+    }
+    if (missing) {
+      notes += `<p class="muted" style="margin:6px 0 0;font-size:12px">${missing} key${missing > 1 ? "s" : ""} in the pool below is not on the fal account any more, so it shows "not on fal" instead of a figure.</p>`;
+    }
+    if (p.live && N(p.live.untracked) > 0.5 && perSec) {
+      notes += `<p class="muted" style="margin:6px 0 0;font-size:12px">${usd(N(p.live.untracked) * perSec)} counted off since the reading came from a call whose serving key was not recorded on the session, so no row below can show it.</p>`;
+    }
+
+    box.innerHTML = `
+      <div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-end;margin-top:12px">
+        <div>
+          <div id="fbBig" style="font-family:ui-monospace,monospace;font-size:38px;font-weight:800;line-height:1.05;color:${balColour(bal, p)}">${usd(bal)}</div>
+          <div class="muted" id="fbBurn" style="font-size:12px">left on the fal.ai account</div>
+        </div>
+        <div>
+          ${p.minutes_left == null
+            ? '<div class="muted" style="font-size:13px">No price per second to work from, so no minute figure.</div>'
+            : `<div id="fbMins" style="font-size:19px;font-weight:700">about ${Math.round(N(p.minutes_left)).toLocaleString()} minutes of video calls</div>
+               <div class="muted" style="font-size:12px">${usd(perSec)} a second · ${usd(perSec * 60)} a minute — ${priceNote}</div>`}
+        </div>
+        <div>
+          <div style="font-family:ui-monospace,monospace;font-size:19px;font-weight:700">${p.today ? usd(p.today.cost) : "—"}</div>
+          <div class="muted" style="font-size:12px">spent today</div>
+        </div>
+        <div>
+          <div style="font-family:ui-monospace,monospace;font-size:19px;font-weight:700">${p.month ? usd(p.month.cost) : "—"}</div>
+          <div class="muted" style="font-size:12px">spent this month</div>
+        </div>
+      </div>
+      ${notes}
+      <p class="muted" style="margin:12px 0 0;font-size:12px">checked ${balAgo(Date.now() - BAL_AT)}${p.from_cache ? " — the reading is held for a minute so this page never hammers fal.ai" : ""} · ${esc(p.detail || "")}${BAL_LIVE ? " · the big figure falls between readings, counted off by your own live calls" : ""}</p>`;
+    tickBalance();
+  }
+
+  // force = the button was pressed. Otherwise a reading younger than a minute is only
+  // re-painted, which keeps the "checked 20 seconds ago" line honest without a second
+  // round trip every fifteen seconds.
+  async function loadBalance(force) {
+    if (FAL_BAL && !force && Date.now() - BAL_AT < 50_000) { renderBalance(FAL_BAL); return; }
+    BAL_AT = Date.now();
+    try {
+      FAL_BAL = await api({ action: "fal_balance" });
+      msg("fbMsg", "");
+      renderBalance(FAL_BAL);
+    } catch (err) {
+      msg("fbMsg", "Could not read the balance: " + err.message);
+      paintSpendCells();
+    }
+  }
+
+  $("refreshBalance").onclick = () => loadBalance(true);
+  $("fbKey").oninput = () => { $("fbResult").className = "presult"; };
+  $("testBalance").onclick = () => {
+    const box = $("fbResult");
+    box.className = "presult show";
+    box.textContent = "Asking fal.ai…";
+    api({ action: "fal_balance_test", key: $("fbKey").value.trim() || undefined })
+      .then((r) => {
+        box.className = "presult show " + (r.verified ? "ok" : "fail");
+        box.textContent = r.detail || (r.verified ? "Accepted." : "fal.ai refused that key.");
+      })
+      .catch((err) => { box.className = "presult show fail"; box.textContent = err.message; });
+  };
+  $("saveBalance").onclick = () => {
+    const btn = $("saveBalance");
+    btn.disabled = true;
+    const blank = (id) => { const v = $(id).value.trim(); return v === "" ? null : v; };
+    api({
+      action: "fal_balance_save",
+      key: $("fbKey").value.trim() || undefined,
+      label: $("fbLabel").value.trim() || undefined,
+      warnBelow: blank("fbWarn"),
+      alertBelow: blank("fbAlert"),
+    }).then((r) => {
+      if (r.saved !== true) return msg("fbMsg", r.detail || "fal.ai would not accept that key, so nothing was saved.");
+      const box = $("fbResult");
+      box.className = "presult show ok";
+      box.textContent = "Saved" + (r.tail ? ` — ${r.tail}` : "") + " now reads " + usd(r.balance) + " on the account."
+        + (r.spendable === true ? " Careful: that key can also start calls and spend money; a BILLING-preset key reads the same balance without that risk." : "");
+      $("fbKey").value = "";
+      msg("fbMsg", "Saved.", "ok");
+      FAL_BAL = r;
+      BAL_AT = Date.now();
+      renderBalance(r);
+      void loadKeys();
+    }).catch((err) => msg("fbMsg", err.message))
+      .finally(() => { btn.disabled = false; });
+  };
+  $("forgetBalance").onclick = () => {
+    if (!confirm("Forget the stored fal.ai billing key? The balance card stops reading until another one is pasted. Your call keys, your customers and your prices are untouched.")) return;
+    api({ action: "fal_balance_save", remove: true })
+      .then(() => {
+        FAL_BAL = null;
+        BAL_AT = 0;
+        $("fbKey").value = "";
+        $("fbResult").className = "presult";
+        msg("fbMsg", "The billing key is forgotten.", "ok");
+        return loadBalance(true);
+      })
+      .catch((err) => msg("fbMsg", err.message));
+  };
+
   async function loadKeys() {
     const base = "id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures";
     let { data, error } = await sb.from("admin_key_health").select(base + ", trial_key_tail, trial_minutes_budget, trial_minutes_used").order("priority", { ascending: true });
@@ -2437,6 +2713,7 @@
       return `<tr data-key="${k.id}">
         <td><b>${esc(k.label || "(unlabeled)")}</b>${k.is_default ? ' <span class="pill yes">default</span>' : ""}</td>
         <td>${cell(k, "fal", k.video_key_tail)}</td>
+        <td data-spend="${k.id}">${spendCell(k.id)}</td>
         ${hasTrialCols ? tRow : ""}
         ${hasTrialCols ? `<td>${tLeft}</td>` : ""}
         <td>${cell(k, "elevenlabs", k.voice_key_tail)}</td>
@@ -2449,7 +2726,7 @@
           <button data-act="edit" data-id="${k.id}">Edit</button>
           <button data-act="del" data-id="${k.id}" class="danger">Delete</button>
         </td></tr>`;
-    }).join("") || '<tr><td colspan="11" class="muted">The pool is empty, so every call falls back to the FAL_KEY / ELEVENLABS_KEY env secrets. Add a pair above and press Verify.</td></tr>';
+    }).join("") || '<tr><td colspan="12" class="muted">The pool is empty, so every call falls back to the FAL_KEY / ELEVENLABS_KEY env secrets. Add a pair above and press Verify.</td></tr>';
 
     $("asKey").innerHTML = KEY_ROWS.map((k) => `<option value="${k.id}">${esc(k.label || shortId(k.id))}</option>`).join("");
     stamp("poolWhen");
@@ -2567,7 +2844,7 @@
   }
 
   // This panel is a monitoring screen, so it keeps itself current without a click.
-  // Two timers, on purpose:
+  // Three timers, on purpose:
   //  - the Key pool's "Today / cap" figure moves while you watch it, so it is patched
   //    in place every 15 s. A full reload of that tab would clear a Verify result you
   //    are still reading, and it sits next to the secret fields, so the tab as a whole
@@ -2575,6 +2852,10 @@
   //  - every other tab re-reads itself once a minute, and never under a field the
   //    admin is typing into. Tables are what re-render; the forms around them are
   //    static markup, so a half-typed credit amount survives a refresh.
+  //  - the balance figure itself is moved once a second, and asks nothing of anyone: no
+  //    fetch, no network. It only re-derives the estimate from the last reading, which
+  //    is why a backgrounded tab that misses ticks still shows the right number the
+  //    moment it is looked at again.
   setInterval(() => {
     const on = document.querySelector(".tabs button[data-tab].on");
     if (on && on.dataset.tab === "keys") {
@@ -2584,8 +2865,18 @@
       // appears without a click. The key form above it is never touched.
       void loadKeyUsage();
       void loadCallFailures();
+      // The balance card re-paints on this tick so "checked 20 seconds ago" never goes
+      // stale under his eyes; the fetch inside only goes out once the reading is old.
+      void loadBalance();
     }
   }, 15_000);
+
+  setInterval(() => {
+    if (!BAL_LIVE || document.hidden) return;
+    const on = document.querySelector(".tabs button[data-tab].on");
+    if (!on || on.dataset.tab !== "keys") return;
+    tickBalance();
+  }, 1000);
 
   setInterval(() => {
     const on = document.querySelector(".tabs button[data-tab].on");
