@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { useToast } from "../hooks/use-toast";
 import { useAdminContact } from "../lib/gateway";
 import { ContactLine } from "./contact";
+import { t as tr } from "../lib/i18n";
 import { X } from "lucide-react";
 
 export default function Toaster() {
@@ -40,7 +41,7 @@ export default function Toaster() {
                 to read a refusal and then tap a number, so these cards stay 12s. */}
             {t.withContact && (contact?.whatsapp || contact?.telegram) && (
               <div style={{ marginTop: 9 }}>
-                <ContactLine contact={contact} note="Tell your administrator what happened:" />
+                <ContactLine contact={contact} note={tr("Tell your administrator what happened:")} />
               </div>
             )}
           </div>

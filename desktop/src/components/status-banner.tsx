@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { GATEWAY_CONFIGURED } from "../lib/gateway-config";
 import { RAIL_W } from "./layout";
+import { t } from "../lib/i18n";
 
 const WARN = "hsl(38 95% 55%)";
 const ERR = "hsl(0 80% 62%)";
@@ -21,7 +22,7 @@ export default function StatusBanner() {
         setMessages((prev) => prev.filter((m) => m.id !== "updater"));
         return;
       }
-      const text = `Stream Live couldn’t check for updates — ${info.message}`;
+      const text = t("Stream Live couldn’t check for updates — {message}", { message: info.message });
       setMessages((prev) => {
         const next: StatusItem = { id: "updater", text, color: ERR };
         return prev.some((m) => m.text === text) ? prev : [...prev.filter((m) => m.id !== "updater"), next];
@@ -36,8 +37,7 @@ export default function StatusBanner() {
       : [{
           id: "gateway",
           color: WARN,
-          text: "This Stream Live build was installed without its gateway settings, so sign-in cannot work. " +
-                "Message the team that gave you this installer and ask for the current build.",
+          text: t("This Stream Live build was installed without its gateway settings, so sign-in cannot work. Message the team that gave you this installer and ask for the current build."),
         }, ...prev]);
   }, []);
 
@@ -76,7 +76,7 @@ export default function StatusBanner() {
               fontFamily: "'Rajdhani', sans-serif", cursor: "pointer",
             }}
           >
-            Dismiss
+            {t("Dismiss")}
           </button>
         </div>
       ))}

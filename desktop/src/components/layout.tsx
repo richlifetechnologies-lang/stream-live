@@ -2,7 +2,9 @@ import { Link, useLocation } from "wouter";
 import { Video, Settings, History, Hourglass, User, CreditCard } from "lucide-react";
 import { Logo } from "./brand";
 import { ContactLine } from "./contact";
+import { LanguageMenu } from "./lang-menu";
 import { useAdminContact } from "../lib/gateway";
+import { t } from "../lib/i18n";
 
 /**
  * Width of the nav rail. Anything that centres itself against the window rather
@@ -13,21 +15,30 @@ export const RAIL_W = 190;
 /** Pages that already carry the full contact card in their own body. */
 const HAS_CARD = ["/minutes", "/plans"];
 
-export function AppLayout({ children }: { children: React.ReactNode }) {
+export function AppLayout({ children, langInPage }: { children: React.ReactNode; langInPage?: boolean }) {
   const [location] = useLocation();
   const contact = useAdminContact();
 
   const navItems = [
-    { href: "/", icon: Video, label: "Stream" },
-    { href: "/minutes", icon: Hourglass, label: "Minutes" },
-    { href: "/plans", icon: CreditCard, label: "Plans & prices" },
-    { href: "/account", icon: User, label: "Account" },
-    { href: "/usage", icon: History, label: "History" },
-    { href: "/settings", icon: Settings, label: "Settings" },
+    { href: "/", icon: Video, label: t("Stream") },
+    { href: "/minutes", icon: Hourglass, label: t("Minutes") },
+    { href: "/plans", icon: CreditCard, label: t("Plans & prices") },
+    { href: "/account", icon: User, label: t("Account") },
+    { href: "/usage", icon: History, label: t("History") },
+    { href: "/settings", icon: Settings, label: t("Settings") },
   ];
 
   return (
     <div style={{ display: "flex", minHeight: "100vh", background: "hsl(222 47% 4%)" }}>
+      {/* The corner switch, on every page. The stream page carries it inside its own
+          header instead, because that header already puts the on-air timer in this
+          corner and the two would sit on top of each other. */}
+      {!langInPage && (
+        <div style={{ position: "fixed", top: 16, right: 22, zIndex: 60 }}>
+          <LanguageMenu />
+        </div>
+      )}
+
       {/* Sidebar — every tab names itself: the symbols alone read as a puzzle. */}
       <aside style={{
         width: RAIL_W,
@@ -102,7 +113,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
           background: "hsl(222 50% 5%)", borderTop: "1px solid hsl(222 40% 9%)",
           boxShadow: "0 -14px 22px hsl(226 80% 2% / 0.55)",
         }}>
-          <ContactLine contact={contact} stack note="Stuck? Message your administrator:" />
+          <ContactLine contact={contact} stack note={t("Stuck? Message your administrator:")} />
         </div>
       )}
 

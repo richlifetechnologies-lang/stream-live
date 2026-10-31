@@ -14,6 +14,7 @@ import Toaster from "./components/toaster";
 import StatusBanner from "./components/status-banner";
 import { ArtBackdrop } from "./components/brand";
 import { useAccount, restore, getState, notePaymentReceipt } from "./lib/gateway";
+import { useLang } from "./lib/i18n";
 
 const C = "hsl(187 100% 52%)";
 const ERR = "hsl(0 80% 62%)";
@@ -280,11 +281,27 @@ function Splash() {
 function StreamGate() {
   const account = useAccount();
   if (account.loading) return <Splash />;
-  if (!account.signedIn) return <AccountPage />;
+  // Sign-in is required in the app he ships. The only place the console opens without
+  // it is a plain browser, where window.isElectron is never set - that is how the
+  // layout gets looked at, and a packaged build cannot inherit it.
+  if (!account.signedIn && window.isElectron) return <AccountPage />;
   return <StreamPage />;
 }
 
 export default function App() {
+  // One subscription at the root: choosing a language re-renders every screen below it.
+  // The tree is re-rendered, not remounted, so a call that is on air keeps its video,
+  // its audio and its meter while the words around it change.
+  const lang = useLang();
+
+  // The one place the reading direction is set. Applying dir to the document — rather
+  // than to any one panel — means every surface in the window, the walk-through overlay
+  // included, follows Arabic right-to-left without a second mechanism of its own.
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
+  }, [lang]);
+
   useEffect(() => { void restore(); }, []);
 
   // The updater asks before it quits, so installing can't drop a live call.

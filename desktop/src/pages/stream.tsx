@@ -9,6 +9,7 @@ import {
 import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure, noteClockSkew } from "../lib/gateway";
 import { stopDeadlineAt } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
+import { Stage, PageHead, Pill, PillRow } from "../components/d2";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
@@ -25,12 +26,13 @@ import {
 } from "lucide-react";
 import { GuidedTour, onTourRequested, tourSeen, tourStops } from "../components/guided-tour";
 import { encode, decode } from "@msgpack/msgpack";
+import { t } from "../lib/i18n";
 
 // ─── Branding ─────────────────────────────────────────────────────────────────
 const APP = "Stream Live";
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
-type TabId = "video-audio" | "audio-only" | "video-only";
+type TabId = "video-audio" | "video-only";
 const TABS: { id: TabId; label: string; sub: string; Icon: typeof Video; color: string; glow: string }[] = [
   {
     id: "video-audio",
@@ -39,14 +41,6 @@ const TABS: { id: TabId; label: string; sub: string; Icon: typeof Video; color: 
     Icon: VideoIcon,
     color: "hsl(187 100% 52%)",       // cyan
     glow:  "hsl(187 100% 52% / 0.25)",
-  },
-  {
-    id: "audio-only",
-    label: "Audio Call",
-    sub: "Voice cloning only",
-    Icon: Headphones,
-    color: "hsl(265 90% 65%)",        // purple
-    glow:  "hsl(265 90% 65% / 0.25)",
   },
   {
     id: "video-only",
@@ -59,12 +53,12 @@ const TABS: { id: TabId; label: string; sub: string; Icon: typeof Video; color: 
 ];
 
 // ─── Per-tab isolated state ────────────────────────────────────────────────────
-// Each tab (Video+Audio / Audio Call / Video Call) is an independent workspace:
+// Each tab (Video + Audio / Video Call) is an independent workspace:
 // its own selected camera & mic, style, prompt, reference image and voice-clone
 // settings. This hook stores a separate value per TabId but exposes the SAME
 // [value, setValue] shape as useState, so call sites are unchanged and switching
 // tabs never leaks one tab's inputs/uploads into another.
-const TAB_IDS: TabId[] = ["video-audio", "audio-only", "video-only"];
+const TAB_IDS: TabId[] = ["video-audio", "video-only"];
 function usePerTabState<T>(activeTab: TabId, initial: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [store, setStore] = useState<Record<TabId, T>>(() => {
     const base = {} as Record<TabId, T>;
@@ -164,15 +158,11 @@ const SYNC_BADGE: Record<SyncState, string> = {
   waiting:   "MEASURING",
 };
 const SYNC_WORDS: Record<SyncState, string> = {
-  measured:  "Your voice is held back by that much, so callers hear each word at the moment the "
-           + "avatar's mouth makes it. Once it has found this, it keeps it for the rest of the call.",
+  measured:  "Your voice is held back by that much, so callers hear each word at the moment the avatar's mouth makes it. Once it has found this, it keeps it for the rest of the call.",
   live:      "Your picture keeps up with your voice, so nothing is held back.",
-  picture:   "There is no avatar picture to hear your voice in yet. Nothing is held back until there "
-           + "is, and the voice stays level with the picture.",
-  movement:  "The avatar picture is not moving at all, so there is nothing to line your voice up "
-           + "against. Nothing is held back, and the voice stays level with the picture.",
-  waiting:   "Listening for your voice in the avatar's mouth. It needs about twenty seconds of talking "
-           + "before it holds your voice back, and until then the voice stays level with the picture.",
+  picture:   "There is no avatar picture to hear your voice in yet. Nothing is held back until there is, and the voice stays level with the picture.",
+  movement:  "The avatar picture is not moving at all, so there is nothing to line your voice up against. Nothing is held back, and the voice stays level with the picture.",
+  waiting:   "Listening for your voice in the avatar's mouth. It needs about twenty seconds of talking before it holds your voice back, and until then the voice stays level with the picture.",
 };
 
 const MIC_CARD_WORDS: Record<GateState, string> = {
@@ -329,12 +319,12 @@ class AudioSyncPipeline {
     this.gate.update(level, WINDOW_MS / 1000);
     this.vuLevel = this.gate.vu(level);
     if (this.audioCtx) {
-      const t = this.audioCtx.currentTime;
+      const now = this.audioCtx.currentTime;
       // His words travel out unless the gate is shut; the AI hears them either way, just further
       // away. Both err towards being heard, because a wrongly-shut microphone is a silent call.
-      if (this.gateNode) this.gateNode.gain.setTargetAtTime(this.gate.muted ? 0 : 1, t, GATE_RAMP);
+      if (this.gateNode) this.gateNode.gain.setTargetAtTime(this.gate.muted ? 0 : 1, now, GATE_RAMP);
       if (this.engineNode) {
-        this.engineNode.gain.setTargetAtTime(this.gate.armed && !this.gate.talking ? ENGINE_DUCK : 1, t, GATE_RAMP);
+        this.engineNode.gain.setTargetAtTime(this.gate.armed && !this.gate.talking ? ENGINE_DUCK : 1, now, GATE_RAMP);
       }
     }
     // What the callers get, after the gate and after the hold, on the same scale as his own bar.
@@ -374,7 +364,7 @@ class AudioSyncPipeline {
   stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
     if (this.audioCtx) { this.audioCtx.close().catch(() => {}); this.audioCtx = null; }
-    this.micStream?.getTracks().forEach(t => t.stop()); this.micStream = null;
+    this.micStream?.getTracks().forEach(track => track.stop()); this.micStream = null;
     this.engineDest = null; this.cableDest = null; this.gateNode = null;
     this.engineNode = null; this.delayNode = null; this.analyser = null!; this.cableAnalyser = null;
     this.gate.reset();
@@ -769,7 +759,7 @@ async function _startVideoSession(token: string, localStream: MediaStream, onRem
       if ((type === "ready" || type === "iceservers") && !pc) {
         const ice = ((msg.iceServers ?? msg.ice_servers ?? msg.iceservers) as RTCIceServer[] | undefined) ?? [{ urls: "stun:stun.l.google.com:19302" }];
         pc = new RTCPeerConnection({ iceServers: ice });
-        localStream.getTracks().forEach(t => pc!.addTrack(t, localStream));
+        localStream.getTracks().forEach(track => pc!.addTrack(track, localStream));
         pc.ontrack = ev => { onRemote(ev.streams[0] ?? new MediaStream([ev.track])); };
         pc.onicecandidate = ev => { if (ev.candidate) send({ type: "candidate", candidate: ev.candidate.toJSON() }); };
         pc.onconnectionstatechange = () => { const st = pc?.connectionState; if (st) onConnectionState(st); };
@@ -956,6 +946,18 @@ export default function StreamPage() {
   const [selectedMicId, setSelectedMicId] = usePerTabState<string>(activeTab, "");
   const [cameraReady, setCameraReady]     = useState(false);
 
+  // The pick read synchronously. `enumerateDevices` is called from callbacks that
+  // were created before React committed the new id, so reading state there saw the
+  // old value and snapped the chip back to the first device on every switch — the
+  // bar "worked for a while and then stopped". These refs carry the truth the
+  // moment the drop-down fires.
+  const camSelRef = useRef(selectedCamId);
+  const micSelRef = useRef(selectedMicId);
+  camSelRef.current = selectedCamId;
+  micSelRef.current = selectedMicId;
+  const chooseCam = useCallback((id: string) => { camSelRef.current = id; setSelectedCamId(id); }, [setSelectedCamId]);
+  const chooseMic = useCallback((id: string) => { micSelRef.current = id; setSelectedMicId(id); }, [setSelectedMicId]);
+
   // ── Video style ───────────────────────────────────────────────────────────
   // Per-tab: prompt/style/reference image uploaded in one tab must not appear in another.
   const [selectedStyle, setSelectedStyle] = usePerTabState<StyleId>(activeTab, "hyper-real");
@@ -975,17 +977,26 @@ export default function StreamPage() {
   // his microphone is being heard without spending a minute to find out. It is painted straight
   // into the DOM rather than through page state, because a fast state tick on this page has
   // remounted the device lists and closed the camera drop-down underneath him.
-  const micFillRef = useRef<HTMLDivElement | null>(null);
-  const micWordRef = useRef<HTMLSpanElement | null>(null);
+  // The level bars are painted by the audio pipeline, not by React state. Design 2 shows
+  // them on the control bar and the cards show them again, so every mounted bar registers
+  // itself and one paint reaches all of them.
+  const micBars = useRef<Set<HTMLDivElement>>(new Set());
+  const micWords = useRef<Set<HTMLSpanElement>>(new Set());
+  const addMicBar = useCallback((el: HTMLDivElement | null) => { if (el) micBars.current.add(el); }, []);
+  const addMicWord = useCallback((el: HTMLSpanElement | null) => { if (el) micWords.current.add(el); }, []);
   const paintMic = useCallback((pct: number, state: GateState) => {
-    if (micFillRef.current) micFillRef.current.style.width = Math.max(0, Math.min(100, Math.round(pct))) + "%";
-    if (micWordRef.current) micWordRef.current.textContent = MIC_CARD_WORDS[state];
+    const w = Math.max(0, Math.min(100, Math.round(pct))) + "%";
+    const word = t(MIC_CARD_WORDS[state]);
+    micBars.current.forEach(b => { if (!b.isConnected) micBars.current.delete(b); else b.style.width = w; });
+    micWords.current.forEach(s => { if (!s.isConnected) micWords.current.delete(s); else s.textContent = word; });
   }, []);
   // The held copy gets its own bar, painted the same way: the number on screen has to be the
   // signal OBS is handed, or the card only shows the sound of the room.
-  const cableFillRef = useRef<HTMLDivElement | null>(null);
+  const cableBars = useRef<Set<HTMLDivElement>>(new Set());
+  const addCableBar = useCallback((el: HTMLDivElement | null) => { if (el) cableBars.current.add(el); }, []);
   const paintCable = useCallback((pct: number) => {
-    if (cableFillRef.current) cableFillRef.current.style.width = Math.max(0, Math.min(100, Math.round(pct))) + "%";
+    const w = Math.max(0, Math.min(100, Math.round(pct))) + "%";
+    cableBars.current.forEach(b => { if (!b.isConnected) cableBars.current.delete(b); else b.style.width = w; });
   }, []);
   const [micChecking, setMicChecking] = useState(false);
 
@@ -1005,7 +1016,6 @@ export default function StreamPage() {
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [uploadVoiceName, setUploadVoiceName] = useState("");
   const [vcAnalyser, setVcAnalyser]       = useState<AnalyserNode | null>(null);
-  const [micAnalyser, setMicAnalyser]     = useState<AnalyserNode | null>(null);
 
   // ── Local monitor: hear your own cloned voice ─────────────────────────────
   const [voiceMonitor, setVoiceMonitor] = useState<boolean>(() => {
@@ -1093,12 +1103,6 @@ export default function StreamPage() {
   const vcamCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const vcamTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const vcamOnRef     = useRef(false);
-  // Mic-only analyser for audio-only tab waveform
-  const micOnlyAudioCtxRef  = useRef<AudioContext|null>(null);
-  const micOnlyAnalyserRef  = useRef<AnalyserNode|null>(null);
-  const micOnlyStreamRef    = useRef<MediaStream|null>(null);
-  // Same microphone, rumble-filtered — what the cable carries on the Audio Call tab.
-  const micOnlyRouteStreamRef = useRef<MediaStream|null>(null);
 
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
   const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
@@ -1147,7 +1151,7 @@ export default function StreamPage() {
     if (tourOpen) return;
     const here = modalityForTab(activeTab);
     if (hasMinutes(account, here)) return;
-    const elsewhere = TABS.filter(t => t.id !== activeTab && hasMinutes(account, modalityForTab(t.id)));
+    const elsewhere = TABS.filter(tab => tab.id !== activeTab && hasMinutes(account, modalityForTab(tab.id)));
     if (elsewhere.length === 1) setActiveTab(elsewhere[0].id);
   }, [account, activeTab, tourOpen]);
 
@@ -1155,6 +1159,9 @@ export default function StreamPage() {
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
 
   // ─── Enumerate devices ─────────────────────────────────────────────────────
+  // Reads the live picks from refs rather than from its own closure, so any caller —
+  // the mount effect, a camera restart, a hot-plug — can run it without overwriting
+  // the device the customer chose a moment ago.
   const enumerateDevices = useCallback(async () => {
     try {
       const devs = await navigator.mediaDevices.enumerateDevices();
@@ -1169,33 +1176,42 @@ export default function StreamPage() {
       const auds = realAuds.length ? realAuds : allAuds;
       setCameras(vids); setMics(auds);
 
-      // Default selection to a real device.
-      if (vids.length && !selectedCamId) setSelectedCamId(vids[0].deviceId);
-      if (auds.length && !selectedMicId) setSelectedMicId(auds[0].deviceId);
+      // Default a tab that has never picked; leave any real pick alone.
+      const camId = camSelRef.current, micId = micSelRef.current;
+      if (vids.length && !camId) { camSelRef.current = vids[0].deviceId; setSelectedCamId(vids[0].deviceId); }
+      if (auds.length && !micId) { micSelRef.current = auds[0].deviceId; setSelectedMicId(auds[0].deviceId); }
 
-      // Auto-correct a currently-selected virtual device (e.g. an OBS Virtual
+      // Auto-correct a device that has gone away (unplugged, or an OBS Virtual
       // Camera left over from a prior install) and restart the live preview on
       // a real camera so the feed isn't permanently black.
-      const camStillListed = !selectedCamId || vids.some(v => v.deviceId === selectedCamId);
-      if (!camStillListed && vids.length) {
+      if (camId && vids.length && !vids.some(v => v.deviceId === camId)) {
         const nextId = vids[0].deviceId;
+        camSelRef.current = nextId;
         setSelectedCamId(nextId);
         if (cameraReadyRef.current) startCameraRef.current?.(nextId);
       }
-      if (selectedMicId && !auds.some(a => a.deviceId === selectedMicId) && auds.length) {
+      if (micId && auds.length && !auds.some(a => a.deviceId === micId)) {
+        micSelRef.current = auds[0].deviceId;
         setSelectedMicId(auds[0].deviceId);
       }
     } catch { /* ignore */ }
-  }, [selectedCamId, selectedMicId]);
+  }, [setSelectedCamId, setSelectedMicId]);
 
-  useEffect(() => { enumerateDevices(); }, []);
+  useEffect(() => { enumerateDevices(); }, [enumerateDevices]);
+  // A webcam or headset plugged in after the app opened has to appear in the bar.
+  useEffect(() => {
+    navigator.mediaDevices?.addEventListener?.("devicechange", enumerateDevices);
+    return () => navigator.mediaDevices?.removeEventListener?.("devicechange", enumerateDevices);
+  }, [enumerateDevices]);
+  // Each tab carries its own pick, so a tab opened for the first time has to catch up.
+  useEffect(() => { void enumerateDevices(); }, [activeTab, enumerateDevices]);
 
   // ─── Tab switch: stop stream first ─────────────────────────────────────────
   const switchTab = useCallback((tab: TabId) => {
     tabChosen.current = true;
     if (isStreaming || isStarting) {
       teardownStream();
-      toast({ title: "Stream stopped", description: "Switching modes." });
+      toast({ title: t("Stream stopped"), description: t("Switching modes.") });
     }
     setActiveTab(tab);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1220,13 +1236,13 @@ export default function StreamPage() {
       } catch {
         stream = await navigator.mediaDevices.getUserMedia(constraints(false));
       }
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current?.getTracks().forEach(track => track.stop());
       localStreamRef.current = stream;
       if (localVideoRef.current) localVideoRef.current.srcObject = stream;
       if (camCountRef.current) camCountRef.current.srcObject = stream;
       cameraReadyRef.current = true;
       setCameraReady(true); enumerateDevices();
-    } catch { toast({ title: "Camera Error", description: "Could not access camera.", variant: "destructive", withContact: true }); }
+    } catch { toast({ title: t("Camera Error"), description: t("Could not access camera."), variant: "destructive", withContact: true }); }
   }, [selectedCamId, enumerateDevices, toast]);
 
   // Refs so enumerateDevices can restart the live camera without a dep cycle.
@@ -1234,7 +1250,7 @@ export default function StreamPage() {
 
   // ─── Turn camera OFF (release hardware, clear preview) ───────────────────────
   const stopCamera = useCallback(() => {
-    localStreamRef.current?.getTracks().forEach(t => t.stop());
+    localStreamRef.current?.getTracks().forEach(track => track.stop());
     localStreamRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     if (camCountRef.current) camCountRef.current.srcObject = null;
@@ -1243,16 +1259,16 @@ export default function StreamPage() {
   }, []);
 
   const handleCameraSwitch = useCallback(async (id: string) => {
-    if (id === selectedCamId) return;
-    setSelectedCamId(id);
+    if (id === camSelRef.current) return;
+    chooseCam(id);
     if (cameraReady) {
       // Release the previously-selected camera immediately, then start the new one.
-      localStreamRef.current?.getTracks().forEach(t => t.stop());
+      localStreamRef.current?.getTracks().forEach(track => track.stop());
       localStreamRef.current = null;
       if (localVideoRef.current) localVideoRef.current.srcObject = null;
       await startCamera(id);
     }
-  }, [cameraReady, selectedCamId, startCamera]);
+  }, [cameraReady, chooseCam, startCamera]);
 
   // Strict tab isolation: release the camera whenever the active tab changes, so
   // a camera turned on in one tab never keeps showing in another. Each tab starts
@@ -1266,7 +1282,7 @@ export default function StreamPage() {
   // keeps counting, which is the one thing a screenshot of the picture cannot
   // prove.
   //
-  // Written straight into the spans instead of through state. `DeviceSelectors`
+  // Written straight into the spans instead of through state. `DeviceChip`
   // is declared inside this component, so every re-render replaces its identity,
   // React tears the block down and builds a new one, and an open camera drop-down
   // closes under the cursor - which is exactly what a one-second state tick did to
@@ -1284,8 +1300,8 @@ export default function StreamPage() {
       const ai  = presented(remoteVideoRef.current);
       const camN = cam !== null && prevCam !== null ? cam - prevCam : null;
       const aiN  = ai  !== null && prevAi  !== null ? ai  - prevAi  : null;
-      if (fpsCamRef.current) fpsCamRef.current.textContent = `Camera ${camN === null ? "—" : `${camN} fps`}`;
-      if (fpsAiRef.current)  fpsAiRef.current.textContent  = `AI picture ${aiN === null ? "—" : `${aiN} fps`}`;
+      if (fpsCamRef.current) fpsCamRef.current.textContent = camN === null ? t("Camera —") : t("Camera {n} fps", { n: camN });
+      if (fpsAiRef.current)  fpsAiRef.current.textContent  = aiN === null ? t("AI picture —") : t("AI picture {n} fps", { n: aiN });
       if (fpsHintRef.current) {
         fpsHintRef.current.style.display =
           camN !== null && aiN !== null && camN >= 5 && aiN <= Math.floor(camN / 2) ? "inline" : "none";
@@ -1331,20 +1347,20 @@ export default function StreamPage() {
     const api = getElectronAPI();
     if (!api?.vcamStart || !api?.vcamStop) {
       setVcamSupported(false);
-      toast({ title: "Virtual camera unavailable", description: "Run in the Stream Live desktop app on Windows, and install the Stream Live Camera driver.", variant: "destructive", withContact: true });
+      toast({ title: t("Virtual camera unavailable"), description: t("Run in the Stream Live desktop app on Windows, and install the Stream Live Camera driver."), variant: "destructive", withContact: true });
       return;
     }
     if (!vcamEnabled) {
       const r = await api.vcamStart();
       setVcamSupported(r.supported);
       if (!r.supported) {
-        toast({ title: "Virtual camera unavailable", description: r.error || "The native driver layer could not load.", variant: "destructive", withContact: true });
+        toast({ title: t("Virtual camera unavailable"), description: r.error || t("The native driver layer could not load."), variant: "destructive", withContact: true });
         return;
       }
       setVcamEnabled(true);
       vcamOnRef.current = true;
       vcamTick();
-      toast({ title: "Stream Live Camera ON", description: "Select “Stream Live Camera” in Zoom/Teams/Chrome. It shows the AI output while streaming." });
+      toast({ title: t("Stream Live Camera ON"), description: t("Select “Stream Live Camera” in Zoom/Teams/Chrome. It shows the AI output while streaming.") });
     } else {
       stopVCamPump();
       await api.vcamStop();
@@ -1382,7 +1398,7 @@ export default function StreamPage() {
     for (const c of attempts) {
       try {
         const s = await navigator.mediaDevices.getUserMedia(c);
-        s.getTracks().forEach(t => t.stop());
+        s.getTracks().forEach(track => track.stop());
         return true;
       } catch { /* try next */ }
     }
@@ -1431,7 +1447,7 @@ export default function StreamPage() {
         const cands = outsOf(devs).filter(d => !d.label);
         if (cands.length === 1) hit = cands[0];
       }
-      return hit ? { id: hit.deviceId, label: hit.label || `${CABLE_NAME} (auto-detected)` } : null;
+      return hit ? { id: hit.deviceId, label: hit.label || t("{cable} (auto-detected)", { cable: CABLE_NAME }) } : null;
     } catch { return null; }
   }, [ensureMediaPermission]);
 
@@ -1457,7 +1473,7 @@ export default function StreamPage() {
     const setSinks = async (id: string) => { for (const el of els) await el.setSinkId!(id); };
     if (!on) { for (const el of els) { try { await el.setSinkId?.(""); } catch { /* ignore */ } } setCableSinkLabel(""); return; }
     if (els.some(el => typeof el.setSinkId !== "function")) {
-      toast({ title: "Audio routing unsupported", description: "This runtime can't select an output device.", variant: "destructive", withContact: true });
+      toast({ title: t("Audio routing unsupported"), description: t("This runtime can't select an output device."), variant: "destructive", withContact: true });
       setAudioRouteOn(false); return;
     }
     // 1) User-pinned output device (works even when labels are hidden).
@@ -1465,7 +1481,7 @@ export default function StreamPage() {
       try {
         await setSinks(manualSinkId);
         const lbl = audioOutputs.find(d => d.deviceId === manualSinkId)?.label;
-        setCableSinkLabel(lbl || "Pinned output");
+        setCableSinkLabel(lbl || t("Pinned output"));
         return;
       } catch { /* pinned device gone; fall through to auto-detect */ }
     }
@@ -1485,14 +1501,14 @@ export default function StreamPage() {
     try {
       const outs = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === "audiooutput");
       diag = outs.length
-        ? ` Outputs seen: ${outs.map(d => d.label || "(hidden)").join(", ")}.`
-        : " No audio output devices enumerated at all.";
-    } catch { diag = " Could not enumerate devices."; }
+        ? t(" Outputs seen: {list}.", { list: outs.map(d => d.label || "(hidden)").join(", ") })
+        : t(" No audio output devices enumerated at all.");
+    } catch { diag = t(" Could not enumerate devices."); }
     toast({
-      title: "Virtual microphone not detected",
+      title: t("Virtual microphone not detected"),
       description: IS_MAC
-        ? `${CABLE_NAME} isn't visible to Stream Live.${diag} Install it from existential.audio/blackhole, log out and back in, then pick it in the “Audio out” dropdown. Steps: Settings → Mac Setup.`
-        : `The VB-Audio cable output device isn't visible.${diag} Pick it manually from the “Audio out” dropdown in the Broadcast panel (choose the unlabeled / VB-Cable entry), or set “Speakers (VB-Audio Virtual Cable)” as your Windows default playback device.`,
+        ? t("{cable} isn't visible to Stream Live.{diag} Install it from existential.audio/blackhole, log out and back in, then pick it in the “Audio out” dropdown. Steps: Settings → Mac Setup.", { cable: CABLE_NAME, diag })
+        : t("The VB-Audio cable output device isn't visible.{diag} Pick it manually from the “Audio out” dropdown in the Broadcast panel (choose the unlabeled / VB-Cable entry), or set “Speakers (VB-Audio Virtual Cable)” as your Windows default playback device.", { diag }),
       variant: "destructive", withContact: true,
     });
     setAudioRouteOn(false); return;
@@ -1503,7 +1519,7 @@ export default function StreamPage() {
     setAudioRouteOn(next);
     await applyAudioRoute(next);
     if (next && voiceMonitor && clonerRef.current) {
-      toast({ title: "Local monitor is on", description: "Your cloned voice also plays in your speakers. Use headphones — loudspeakers let your mic feed it back into the call." });
+      toast({ title: t("Local monitor is on"), description: t("Your cloned voice also plays in your speakers. Use headphones — loudspeakers let your mic feed it back into the call.") });
     }
   }, [audioRouteOn, applyAudioRoute, voiceMonitor, toast]);
 
@@ -1558,32 +1574,6 @@ export default function StreamPage() {
     clonerRef.current?.setMonitor(voiceMonitor && audioRouteOn);
   }, [voiceMonitor, audioRouteOn, vcActive]);
 
-  // ─── Mic-only preview for audio-only tab ───────────────────────────────────
-  const startMicPreview = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: micAudioConstraints(selectedMicId || undefined), video: false,
-      });
-      micOnlyStreamRef.current?.getTracks().forEach(t => t.stop());
-      micOnlyStreamRef.current = stream;
-      micOnlyAudioCtxRef.current?.close().catch(() => {});
-      const ctx = new AudioContext();
-      if (ctx.state !== "running") { try { await ctx.resume(); } catch { /* ignore */ } }
-      const src = ctx.createMediaStreamSource(stream);
-      const highpass = ctx.createBiquadFilter();
-      highpass.type = "highpass"; highpass.frequency.value = 90; highpass.Q.value = 0.7;
-      const an = ctx.createAnalyser(); an.fftSize = 256;
-      // The cable on this tab carries the filtered voice, not the raw one, so a call on
-      // the Audio Call tab is as clean as one on the video tabs.
-      const route = ctx.createMediaStreamDestination();
-      src.connect(highpass); highpass.connect(an); highpass.connect(route);
-      micOnlyAudioCtxRef.current = ctx;
-      micOnlyAnalyserRef.current = an;
-      micOnlyRouteStreamRef.current = route.stream;
-      setMicAnalyser(an);
-    } catch { /* ignore */ }
-  }, [selectedMicId]);
-
   // ─── Microphone check: proof that costs no minutes ─────────────────────────
   // Opens the selected microphone for a few seconds, runs the same learning the app runs inside
   // a call, and paints it on the card. Bounded on purpose — the microphone is handed back when
@@ -1600,7 +1590,7 @@ export default function StreamPage() {
     const stop = () => {
       finished = true;
       if (timer) clearInterval(timer);
-      stream?.getTracks().forEach(t => t.stop());
+      stream?.getTracks().forEach(track => track.stop());
       ctx?.close().catch(() => {});
       if (micCheckRef.current?.stop === stop) { micCheckRef.current = null; setMicChecking(false); }
     };
@@ -1610,7 +1600,7 @@ export default function StreamPage() {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: micAudioConstraints(selectedMicId || undefined), video: false,
         });
-        if (finished) { stream.getTracks().forEach(t => t.stop()); return; }
+        if (finished) { stream.getTracks().forEach(track => track.stop()); return; }
         ctx = new AudioContext();
         if (ctx.state !== "running") { try { await ctx.resume(); } catch { /* ignore */ } }
         const src = ctx.createMediaStreamSource(stream);
@@ -1636,17 +1626,6 @@ export default function StreamPage() {
   }, [selectedMicId, paintMic]);
 
   useEffect(() => () => micCheckRef.current?.stop(), []);
-
-  useEffect(() => {
-    if (activeTab === "audio-only") { startMicPreview(); }
-    else {
-      micOnlyStreamRef.current?.getTracks().forEach(t => t.stop());
-      micOnlyAudioCtxRef.current?.close().catch(() => {});
-      micOnlyStreamRef.current = null; micOnlyAnalyserRef.current = null;
-      micOnlyRouteStreamRef.current = null;
-      setMicAnalyser(null);
-    }
-  }, [activeTab, startMicPreview]);
 
   // ─── Teardown ──────────────────────────────────────────────────────────────
   const teardownStream = useCallback(async () => {
@@ -1720,7 +1699,7 @@ export default function StreamPage() {
     const id = setTimeout(() => {
       if (!sessionIdRef.current) return;
       void teardownStream();
-      toast({ title: "Out of minutes", description: endReasonMessage("out_of_minutes"), variant: "destructive" });
+      toast({ title: t("Out of minutes"), description: endReasonMessage("out_of_minutes"), variant: "destructive" });
       setLocation("/minutes");
     }, Math.max(0, stopAt - Date.now()));
     return () => clearTimeout(id);
@@ -1735,7 +1714,7 @@ export default function StreamPage() {
    * engine again first, so the sentence he ends up reading matches the number of tries
    * already spent on his behalf.
    */
-  const attemptStart = useCallback(async (tabName: TabName, needsVideo: boolean, needsVoice: boolean): Promise<StartFailure | null> => {
+  const attemptStart = useCallback(async (tabName: TabName, needsVoice: boolean): Promise<StartFailure | null> => {
     // The gateway owns this from the moment startCall answers, and teardownStream()
     // clears the page's copy of it before the failure reaches the caller — so it is
     // held here too, for the record of what the video service answered.
@@ -1767,90 +1746,80 @@ export default function StreamPage() {
       let sendStream = localStreamRef.current ?? new MediaStream();
       let micStreamForCloner: MediaStream | null = null;
 
-      if (needsVideo) {
-        const pipe = new AudioSyncPipeline();
-        pipe.onUpdate = (delay, vu, measured, live, state, cable, reason) => {
-          setSyncDelay(delay); setSyncMeasured(measured); setSyncLive(live); setSyncReason(reason);
-          paintMic(vu, state);
-          paintCable(cable);
-          clonerRef.current?.setVideoDelay(delay);
-        };
-        // The camera is sampled from its own always-present sink rather than from the
-        // picture-in-picture box, which portrait hides - a timing rule that only works in one
-        // orientation is a rule that reports "not measured" to half the customers.
-        const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined);
-        syncPipeRef.current = pipe;
-        if (streams) {
-          // The AI hears you the instant you speak. Holding it back can never line the
-          // avatar's mouth up with its own picture, because the engine renders the
-          // mouth some fraction of a second *after* it receives the word.
-          const engineTrack = streams.engine.getAudioTracks()[0];
-          if (engineTrack) { sendStream = new MediaStream([...(localStreamRef.current?.getVideoTracks() ?? []), engineTrack]); setAudioActive(true); }
-          // Only the virtual microphone is delayed, so callers hear your word at the
-          // moment the avatar's mouth makes it on the picture they are watching.
-          micRouteStreamRef.current = streams.cable;
-        }
-        micStreamForCloner = pipe.getMicStream();
+      const pipe = new AudioSyncPipeline();
+      pipe.onUpdate = (delay, vu, measured, live, state, cable, reason) => {
+        setSyncDelay(delay); setSyncMeasured(measured); setSyncLive(live); setSyncReason(reason);
+        paintMic(vu, state);
+        paintCable(cable);
+        clonerRef.current?.setVideoDelay(delay);
+      };
+      // The camera is sampled from its own always-present sink rather than from the
+      // picture-in-picture box, which portrait hides - a timing rule that only works in one
+      // orientation is a rule that reports "not measured" to half the customers.
+      const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined);
+      syncPipeRef.current = pipe;
+      if (streams) {
+        // The AI hears you the instant you speak. Holding it back can never line the
+        // avatar's mouth up with its own picture, because the engine renders the
+        // mouth some fraction of a second *after* it receives the word.
+        const engineTrack = streams.engine.getAudioTracks()[0];
+        if (engineTrack) { sendStream = new MediaStream([...(localStreamRef.current?.getVideoTracks() ?? []), engineTrack]); setAudioActive(true); }
+        // Only the virtual microphone is delayed, so callers hear your word at the
+        // moment the avatar's mouth makes it on the picture they are watching.
+        micRouteStreamRef.current = streams.cable;
       }
+      micStreamForCloner = pipe.getMicStream();
 
       // ── Start video session ────────────────────────────────────────────
-      // The Audio Call tab has no video token (ticket.token === null): it is
-      // voice-only and must never open a video session. Which of the two pipelines
-      // opens is the gateway's call, made from the account's wallet; this page only
-      // obeys it, and never says it out loud.
-      if (needsVideo) {
-        if (!ticket.token) throw new Error(`${APP}: gateway returned no video token`);
-        const gen = ++sessionGenRef.current;
-        const open = ticket.engine === "decart" ? _startTrialVideoSession : _startVideoSession;
-        const session = await open(
-          ticket.token, sendStream,
-          remote => {
-            if (sessionGenRef.current !== gen) return;
-            remoteStreamRef.current = remote;
-            if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remote;
-            window.__slRemoteStream = remote;
-            _notifyPopup(popoutRef.current); _notifyPopup(obsWindowRef.current); _notifyPopup(obsPortraitWindowRef.current);
+      // Both remaining tabs put a picture on the line, so a token always comes back.
+      // Which of the two pipelines opens is the gateway's call, made from the account's
+      // wallet; this page only obeys it, and never says it out loud.
+      if (!ticket.token) throw new Error(`${APP}: gateway returned no video token`);
+      const gen = ++sessionGenRef.current;
+      const open = ticket.engine === "decart" ? _startTrialVideoSession : _startVideoSession;
+      const session = await open(
+        ticket.token, sendStream,
+        remote => {
+          if (sessionGenRef.current !== gen) return;
+          remoteStreamRef.current = remote;
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remote;
+          window.__slRemoteStream = remote;
+          _notifyPopup(popoutRef.current); _notifyPopup(obsWindowRef.current); _notifyPopup(obsPortraitWindowRef.current);
+          setConnStatus("connected");
+        },
+        state => {
+          if (sessionGenRef.current !== gen) return;
+          if (state === "connected") {
+            if (iceGraceRef.current) { clearTimeout(iceGraceRef.current); iceGraceRef.current = null; }
             setConnStatus("connected");
-          },
-          state => {
-            if (sessionGenRef.current !== gen) return;
-            if (state === "connected") {
-              if (iceGraceRef.current) { clearTimeout(iceGraceRef.current); iceGraceRef.current = null; }
-              setConnStatus("connected");
-              return;
-            }
-            // "disconnected" / "failed" / "closed": the transport can recover on
-            // Wi-Fi, so wait a short grace window before declaring the call dead —
-            // but never leave it running, or minutes keep burning on a dead stream.
-            // Other states (new / connecting) are normal startup and ignored here.
-            if (state !== "disconnected" && state !== "failed" && state !== "closed") return;
-            if (iceGraceRef.current) return;
-            setConnStatus("reconnecting");
-            iceGraceRef.current = setTimeout(() => {
-              iceGraceRef.current = null;
-              if (sessionGenRef.current !== gen) return;
-              void teardownStream();
-              toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
-            }, 6000);
-          },
-          () => {
+            return;
+          }
+          // "disconnected" / "failed" / "closed": the transport can recover on
+          // Wi-Fi, so wait a short grace window before declaring the call dead —
+          // but never leave it running, or minutes keep burning on a dead stream.
+          // Other states (new / connecting) are normal startup and ignored here.
+          if (state !== "disconnected" && state !== "failed" && state !== "closed") return;
+          if (iceGraceRef.current) return;
+          setConnStatus("reconnecting");
+          iceGraceRef.current = setTimeout(() => {
+            iceGraceRef.current = null;
             if (sessionGenRef.current !== gen) return;
             void teardownStream();
-            toast({ title: "Call ended", description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
-          },
-          prompt, refImageB64,
-        );
-        if (sessionGenRef.current !== gen) { session.close(); return null; }
-        videoSessionRef.current = session;
-      } else {
-        // Audio-only: start mic preview
-        micStreamForCloner = micOnlyStreamRef.current;
-        micRouteStreamRef.current = micOnlyRouteStreamRef.current ?? micOnlyStreamRef.current;
-        setConnStatus("connected");
-      }
+            toast({ title: t("Call ended"), description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
+          }, 6000);
+        },
+        () => {
+          if (sessionGenRef.current !== gen) return;
+          void teardownStream();
+          toast({ title: t("Call ended"), description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
+        },
+        prompt, refImageB64,
+      );
+      if (sessionGenRef.current !== gen) { session.close(); return null; }
+      videoSessionRef.current = session;
 
       // ── Start voice cloning ────────────────────────────────────────────
-      if (needsVoice && (micStreamForCloner || micOnlyStreamRef.current)) {
+      if (needsVoice && micStreamForCloner) {
         const cloner = new VoiceCloningEngine();
         cloner.call    = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
         cloner.voiceId = vcVoiceId;
@@ -1860,8 +1829,8 @@ export default function StreamPage() {
           const el = cloneAudioRef.current;
           return !!el && !el.paused && el.readyState >= 2;
         };
-        cloner.onError = msg => toast({ title: "Voice engine problem", description: toUserMessage(msg, "The voice service had trouble. Try again."), variant: "destructive", withContact: true });
-        await cloner.start(micStreamForCloner ?? micOnlyStreamRef.current!);
+        cloner.onError = msg => toast({ title: t("Voice engine problem"), description: toUserMessage(msg, t("The voice service had trouble. Try again.")), variant: "destructive", withContact: true });
+        await cloner.start(micStreamForCloner);
         clonerRef.current = cloner;
         setVcAnalyser(cloner.getAnalyser());
         setVcActive(true);
@@ -1880,7 +1849,7 @@ export default function StreamPage() {
         if (state.ended) {
           void teardownStream();
           const oom = state.reason === "out_of_minutes";
-          toast({ title: oom ? "Out of minutes" : "Call ended", description: endReasonMessage(state.reason), variant: "destructive", withContact: true });
+          toast({ title: oom ? t("Out of minutes") : t("Call ended"), description: endReasonMessage(state.reason), variant: "destructive", withContact: true });
           if (oom) setLocation("/minutes");
         }
       }, 45_000);
@@ -1902,7 +1871,6 @@ export default function StreamPage() {
       const offMs = clockSkewMs();
       return classifyStartFailure(
         err instanceof GatewayError ? err.reason : null,
-        needsVideo,
         (err instanceof Error ? err.message : String(err))
           + (offMs === null || Math.abs(offMs) < CLOCK_NOTICE_MS
             ? "" : ` [machine clock ${describeClockSkew(offMs)} real time]`),
@@ -1924,14 +1892,14 @@ export default function StreamPage() {
     const step = () => {
       const left = until - Date.now();
       if (left <= 0 || startCancelRef.current) {
-        clearInterval(t);
+        clearInterval(waitTimer);
         setPacingSeconds(null);
         resolve();
         return;
       }
       setPacingSeconds(Math.ceil(left / 1000));
     };
-    const t = setInterval(step, 1000);
+    const waitTimer = setInterval(step, 1000);
   }), []);
 
   /**
@@ -1944,12 +1912,11 @@ export default function StreamPage() {
     // The card's listening check holds the microphone for a few seconds; a call must never
     // start while it has the device.
     micCheckRef.current?.stop();
-    const needsVideo = activeTab !== "audio-only";
     const needsVoice = activeTab !== "video-only" && vcEnabled;
 
     if (credsMissing) { setLocation(account.signedIn ? "/minutes" : "/account"); return; }
-    if (needsVideo && (!cameraReady || !localStreamRef.current)) {
-      toast({ title: "Camera not ready", description: "Enable your camera first.", variant: "destructive" }); return;
+    if (!cameraReady || !localStreamRef.current) {
+      toast({ title: t("Camera not ready"), description: t("Enable your camera first."), variant: "destructive" }); return;
     }
 
     isStartingRef.current = true; setIsStarting(true);
@@ -1959,7 +1926,7 @@ export default function StreamPage() {
       let waitsUsed = 0;
       let tries = START_TRIES;
       for (let i = 0; i < tries; i++) {
-        const failure = await attemptStart(activeTab, needsVideo, needsVoice);
+        const failure = await attemptStart(activeTab, needsVoice);
         if (!failure) return;
         last = failure;
         // Which line the gateway put this call on decides how many more asks it is worth.
@@ -1981,14 +1948,14 @@ export default function StreamPage() {
       const f = last;
       if (!f) return;
       if (f.reason === "out_of_minutes") {
-        toast({ title: "Out of minutes", description: endReasonMessage(f.reason), variant: "destructive" });
+        toast({ title: t("Out of minutes"), description: endReasonMessage(f.reason), variant: "destructive" });
         setLocation("/minutes");
         return;
       }
       // A refused old build is the one case where we can fix it ourselves: ask the
       // updater for the banner instead of leaving him stuck on a message with nowhere to go.
       if (f.reason === "update_required") getElectronAPI()?.checkForUpdate?.();
-      toast({ title: "Cannot start", description: startFailureMessage(f), variant: "destructive", withContact: true });
+      toast({ title: t("Cannot start"), description: startFailureMessage(f), variant: "destructive", withContact: true });
     } finally {
       isStartingRef.current = false; setIsStarting(false); setConnStep(null); setPacingSeconds(null);
     }
@@ -2031,7 +1998,7 @@ export default function StreamPage() {
   const handleVoiceUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; e.target.value = "";
     if (!file) return;
-    if (!account.signedIn) { toast({ title: "Sign in required", description: "Open your account to sign in before uploading a voice.", variant: "destructive" }); return; }
+    if (!account.signedIn) { toast({ title: t("Sign in required"), description: t("Open your account to sign in before uploading a voice."), variant: "destructive" }); return; }
     const name = uploadVoiceName.trim() || file.name.replace(/\.[^.]+$/, "");
     setUploadingVoice(true);
     try {
@@ -2040,9 +2007,9 @@ export default function StreamPage() {
       setSavedVoices(getSavedVoices());
       setVcVoiceId(voice.id);
       setUploadVoiceName("");
-      toast({ title: "Voice uploaded!", description: `"${voice.name}" is ready to use.` });
+      toast({ title: t("Voice uploaded!"), description: t(`"{name}" is ready to use.`, { name: voice.name }) });
     } catch (err) {
-      toast({ title: "Upload failed", description: toUserMessage(err, "Could not upload the voice. Try again."), variant: "destructive", withContact: true });
+      toast({ title: t("Upload failed"), description: toUserMessage(err, t("Could not upload the voice. Try again.")), variant: "destructive", withContact: true });
     } finally { setUploadingVoice(false); }
   }, [account.signedIn, uploadVoiceName, toast]);
 
@@ -2103,7 +2070,6 @@ export default function StreamPage() {
 
   const curStyle = STYLES.find(s => s.id === selectedStyle)!;
   const selectSt: React.CSSProperties = { width: "100%", appearance: "none", padding: "8px 32px 8px 12px", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", borderRadius: 8, color: "hsl(190 80% 96%)", fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", opacity: isStreaming ? 0.5 : 1 };
-  const needsVideo = activeTab !== "audio-only";
   const needsVoice = activeTab !== "video-only";
 
   // ─── Video output panel (portrait & landscape) ────────────────────────────
@@ -2161,9 +2127,9 @@ export default function StreamPage() {
         {connStatus === "idle" && (
           <div style={{ position: "absolute", inset: 0, zIndex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 16, background: "radial-gradient(ellipse at center, hsl(222 44% 8%) 0%, hsl(222 47% 4%) 100%)" }}>
             <Zap style={{ width: 32, height: 32, color: C }} />
-            <p style={{ fontFamily: "'Orbitron',monospace", fontSize: 14, fontWeight: 700, color: "hsl(190 80% 96%)" }}>AI Video Output</p>
+            <p style={{ fontFamily: "'Orbitron',monospace", fontSize: 14, fontWeight: 700, color: "hsl(190 80% 96%)" }}>{t("AI Video Output")}</p>
             <p style={{ fontSize: 13, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "center", padding: "0 20px" }}>
-              {isPortrait ? "Portrait mode active" : "Enable camera and click Start"}
+              {isPortrait ? t("Portrait mode active") : t("Enable camera and click Start")}
             </p>
           </div>
         )}
@@ -2171,7 +2137,7 @@ export default function StreamPage() {
         {/* Transient reconnect indicator — the call is still alive, giving WebRTC a chance to recover */}
         {connStatus === "reconnecting" && (
           <div style={{ position: "absolute", top: 12, left: 12, zIndex: 15, display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 999, background: "rgba(0,0,0,0.72)", border: "1px solid rgba(0,210,211,0.5)", color: "#fff", fontSize: 12, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
-            <Loader2 style={{ width: 14, height: 14, color: C, animation: "spin 1s linear infinite" }} /> Reconnecting…
+            <Loader2 style={{ width: 14, height: 14, color: C, animation: "spin 1s linear infinite" }} /> {t("Reconnecting…")}
           </div>
         )}
 
@@ -2189,7 +2155,7 @@ export default function StreamPage() {
                     <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "monospace" }}>● OBS WINDOW OPEN</span>
                     <button onClick={() => setObsInstructions(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16 }}>×</button>
                   </div>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS". For your voice add Sources → + → Audio Input Capture → "{IS_MAC ? CABLE_NAME : "CABLE Output (VB-Audio Virtual Cable)"}".{IS_MAC ? " Then click Start Virtual Camera in OBS and pick “OBS Virtual Camera” in your call app." : ""}</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>{t("In OBS → Sources → + → Window Capture → select \"Stream Live OBS\". For your voice add Sources → + → Audio Input Capture → \"")}{IS_MAC ? CABLE_NAME : "CABLE Output (VB-Audio Virtual Cable)"}".{IS_MAC ? t(" Then click Start Virtual Camera in OBS and pick “OBS Virtual Camera” in your call app.") : ""}</p>
                 </div>
               )}
             </div>
@@ -2216,7 +2182,7 @@ export default function StreamPage() {
                     <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "monospace" }}>● PORTRAIT OBS OPEN</span>
                     <button onClick={() => setObsPortraitInstructions(false)} style={{ background: "none", border: "none", color: "rgba(255,255,255,0.4)", cursor: "pointer", fontSize: 16 }}>×</button>
                   </div>
-                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>In OBS → Sources → + → Window Capture → select "Stream Live OBS Portrait" for a clean 9:16 feed.</p>
+                  <p style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 }}>{t("In OBS → Sources → + → Window Capture → select \"Stream Live OBS Portrait\" for a clean 9:16 feed.")}</p>
                 </div>
               )}
             </div>
@@ -2232,7 +2198,7 @@ export default function StreamPage() {
             {cameraReady && (
               <button
                 onClick={() => { if (!isStreaming) stopCamera(); }}
-                title={isStreaming ? "Stop the stream to turn off the camera" : "Turn off camera"}
+                title={isStreaming ? t("Stop the stream to turn off the camera") : t("Turn off camera")}
                 disabled={isStreaming}
                 style={{ position: "absolute", top: 4, right: 4, zIndex: 11, width: 22, height: 22, borderRadius: "50%", background: isStreaming ? "rgba(0,0,0,0.4)" : "rgba(0,0,0,0.65)", border: "1px solid rgba(255,255,255,0.25)", color: isStreaming ? "rgba(255,255,255,0.35)" : "#fff", cursor: isStreaming ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
                 <CameraOff style={{ width: 12, height: 12 }} />
@@ -2241,7 +2207,7 @@ export default function StreamPage() {
             {!cameraReady && (
               <div style={{ position: "absolute", inset: 0, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 6, background: "rgba(0,0,0,0.85)" }}>
                 <Camera style={{ width: 18, height: 18, color: "hsl(222 25% 50%)" }} />
-                <button onClick={() => startCamera()} style={{ fontSize: 10, color: C, fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>Enable Camera</button>
+                <button onClick={() => startCamera()} style={{ fontSize: 10, color: C, fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}>{t("Enable Camera")}</button>
               </div>
             )}
           </div>
@@ -2254,10 +2220,10 @@ export default function StreamPage() {
           These three spans are written by the interval above, so updating them
           never re-renders this page. */}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 45%)" }}>
-        <span ref={fpsCamRef}>Camera —</span>
+        <span ref={fpsCamRef}>{t("Camera —")}</span>
         <span>·</span>
-        <span ref={fpsAiRef}>AI picture —</span>
-        <span ref={fpsHintRef} style={{ color: "hsl(38 95% 55%)", display: "none" }}>The AI is sending fewer pictures than your camera.</span>
+        <span ref={fpsAiRef}>{t("AI picture —")}</span>
+        <span ref={fpsHintRef} style={{ color: "hsl(38 95% 55%)", display: "none" }}>{t("The AI is sending fewer pictures than your camera.")}</span>
       </div>
 
       {/* Offscreen camera sink so the camera figure keeps counting in portrait,
@@ -2276,7 +2242,7 @@ export default function StreamPage() {
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
       <button
         onClick={togglePortrait}
-        title={portraitMode ? "Switch back to widescreen (16:9)" : "Switch to tall mobile-call view (9:16)"}
+        title={portraitMode ? t("Switch back to widescreen (16:9)") : t("Switch to tall mobile-call view (9:16)")}
         style={{
           display: "flex", alignItems: "center", gap: 8,
           padding: "8px 16px", borderRadius: 10, cursor: "pointer",
@@ -2286,13 +2252,13 @@ export default function StreamPage() {
           letterSpacing: "0.06em", textTransform: "uppercase", transition: "all 0.2s",
         }}>
         {portraitMode
-          ? <><Monitor style={{ width: 13, height: 13 }} /> Switch to Landscape (16:9)</>
-          : <><Smartphone style={{ width: 13, height: 13 }} /> Switch to Portrait (9:16)</>}
+          ? <><Monitor style={{ width: 13, height: 13 }} /> {t("Switch to Landscape (16:9)")}</>
+          : <><Smartphone style={{ width: 13, height: 13 }} /> {t("Switch to Portrait (9:16)")}</>}
       </button>
       <span style={{ fontSize: 10, color: portraitMode ? C : "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif" }}>
         {portraitMode
-          ? "Portrait is live — calls and OBS receive your video tall"
-          : "Landscape is live — calls and OBS receive your video widescreen"}
+          ? t("Portrait is live — calls and OBS receive your video tall")
+          : t("Landscape is live — calls and OBS receive your video widescreen")}
       </span>
     </div>
   );
@@ -2304,52 +2270,196 @@ export default function StreamPage() {
   // mousedown and mouseup never fires onClick -- that is why Stop needed several
   // clicks. They hold no hooks, so inlining them is safe and keeps DOM identity.
   // ─── Stream button ─────────────────────────────────────────────────────────
-  const canStart = !credsMissing && (needsVideo ? cameraReady : true);
+  // Design 2's single big control: it lives in the foot bar beside the gear chips, so the
+  // one thing a customer presses is next to the things he checks before pressing it.
+  const canStart = !credsMissing && cameraReady;
+  const armed = canStart && !isStarting && !isClosing;
   const StreamBtn = () => (
-    <div data-tour="start" style={{ position: "fixed", left: `calc(${RAIL_W}px + (100vw - ${RAIL_W}px) / 2)`, transform: "translateX(-50%)", bottom: 18, zIndex: 60, width: `min(440px, calc(100vw - ${RAIL_W}px - 48px))`, filter: "drop-shadow(0 8px 24px rgba(0,0,0,0.55))" }}>
-      {!isStreaming && trialWaiting && (
-        <div data-tour="trial" style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, padding: "8px 12px", borderRadius: 10, background: "hsl(187 100% 52% / 0.1)", border: "1px solid hsl(187 100% 52% / 0.3)" }}>
-          <Sparkles style={{ width: 14, height: 14, color: C, flexShrink: 0 }} />
-          <p style={{ fontSize: 12, color: "hsl(187 60% 85%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>
-            You have free minutes waiting. They don't expire — press <b style={{ color: "hsl(190 80% 96%)" }}>Start</b> whenever you're ready.
-          </p>
+    <button data-tour="start"
+      onClick={isStreaming ? handleStop : credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStartStream}
+      disabled={!isStreaming && !armed}
+      style={{
+        flexShrink: 0, height: 52, padding: "0 30px", borderRadius: 999,
+        background: isStreaming ? "hsl(0 85% 40% / 0.3)" : armed ? `linear-gradient(135deg, ${C} 0%, hsl(200 100% 45%) 100%)` : "hsl(222 40% 11%)",
+        border: isStreaming ? "1px solid hsl(0 85% 55% / 0.5)" : "none",
+        cursor: isStreaming || armed ? "pointer" : "not-allowed",
+        color: isStreaming ? "hsl(0 85% 75%)" : armed ? "hsl(222 47% 4%)" : "hsl(222 25% 40%)",
+        fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, letterSpacing: "0.08em", textTransform: "uppercase",
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 9,
+        boxShadow: isStreaming ? "none" : armed ? "0 0 30px hsl(187 100% 52% / 0.35)" : "none",
+      }}
+      onMouseEnter={e => { if (isStreaming) (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.5)"; else if (armed) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
+      onMouseLeave={e => { if (isStreaming) (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.3)"; (e.currentTarget as HTMLElement).style.filter = "none"; }}>
+      {isStreaming ? <><Square style={{ width: 17, height: 17 }} /> {t("Stop")}</>
+        : isStarting ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Starting…")}</>
+        : isClosing ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Ending call…")}</>
+        : credsMissing ? <><Settings style={{ width: 17, height: 17 }} /> {t("Request credits")}</>
+        : !cameraReady ? <><Camera style={{ width: 17, height: 17 }} /> {t("Enable Camera")}</>
+        : <><Play style={{ width: 17, height: 17 }} /> {t("Start call")}</>}
+    </button>
+  );
+
+  /** A foot-bar chip: the label, what is chosen, and a dot that says it is ready. */
+  const BarChip = (tour: string, label: string, value: React.ReactNode, ready: boolean, wide = false) => (
+    <div data-tour={tour || undefined} style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0, padding: "9px 13px", borderRadius: 12, background: "hsl(222 44% 8%)", border: "1px solid hsl(222 40% 13%)", maxWidth: wide ? 260 : undefined }}>
+      <span style={{ fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 55%)" }}>{label}</span>
+      <span style={{ fontSize: 11.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(190 80% 92%)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{value}</span>
+      <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: ready ? "hsl(150 80% 50%)" : "hsl(222 25% 30%)" }} />
+    </div>
+  );
+
+  /** A foot-bar level bar, painted by the pipeline. */
+  const BarLevel = (label: string, add: (el: HTMLDivElement | null) => void) => (
+    <div style={{ width: 92, flexShrink: 0 }}>
+      <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 50%)", marginBottom: 5 }}>{label}</p>
+      <div style={{ height: 5, borderRadius: 3, overflow: "hidden", background: "hsl(222 40% 12%)" }}>
+        <div ref={add} style={{ height: "100%", width: "0%", borderRadius: 3, transition: "width 0.06s linear", background: C }} />
+      </div>
+    </div>
+  );
+
+  // ─── Design 2: the look card, the sync card, and the console below ─────────────
+  // His look sits in the left corner and the measurement of his voice sits opposite it,
+  // because those are the two things he checks while the picture is moving. Everything
+  // he sets once and forgets is laid out below the stage, open, where he can see it
+  // without hunting for a handle.
+  /** His look: the style and his own words, standing in the right corner of the page. */
+  const LookCard = () => (
+    <div style={{
+      background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)",
+      border: `1px solid ${C}3d`, borderRadius: 16,
+      boxShadow: "0 18px 44px hsl(226 80% 2% / 0.6)",
+    }}>
+      <p style={{ padding: "15px 16px 13px", fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.14em", fontFamily: "'Orbitron',monospace" }}>
+        {t("How you will look")}
+      </p>
+
+      <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+          {/* Style presets */}
+          <div data-tour="style">
+            <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>{t("AI Style")}</p>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+              {STYLES.map(s => (
+                <button key={s.id} onClick={() => handleStyleSelect(s.id)}
+                  style={{ padding: "7px 4px", borderRadius: 8, cursor: "pointer", background: selectedStyle === s.id ? `${s.color}22` : "hsl(222 40% 8%)", border: `1px solid ${selectedStyle === s.id ? s.color + "66" : "hsl(222 40% 12%)"}`, color: selectedStyle === s.id ? s.color : "hsl(222 25% 55%)", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Orbitron',monospace", boxShadow: selectedStyle === s.id ? `0 0 12px ${s.color}33` : "none" }}>
+                  {t(s.label)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Custom prompt — empty unless he writes one, so the app never speaks for him. */}
+          <div data-tour="prompt">
+            <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>{t("Custom Prompt")}</p>
+            <textarea value={customPrompt} onChange={e => handleCustomPromptChange(e.target.value)} placeholder={t("Describe the look you want, in your own words")} rows={3}
+              style={{ width: "100%", padding: 10, borderRadius: 8, resize: "vertical", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, outline: "none", boxSizing: "border-box" }}
+              onFocus={e => { e.target.style.borderColor = "hsl(187 100% 52% / 0.5)"; }}
+              onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
+            {customPrompt && <button onClick={() => handleCustomPromptChange("")} style={{ marginTop: 6, fontSize: 11, color: "hsl(222 25% 50%)", background: "none", border: "none", cursor: "pointer", fontFamily: "'Rajdhani',sans-serif" }}>{t("↺ Reset")}</button>}
+          </div>
         </div>
-      )}
-      <MinuteMeter modality={modalityForTab(activeTab)} />
-      {isStreaming ? (
-        <button onClick={handleStop}
-          style={{ width: "100%", height: 54, background: "hsl(0 85% 40% / 0.3)", border: "1px solid hsl(0 85% 55% / 0.5)", borderRadius: 12, cursor: "pointer", color: "hsl(0 85% 75%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.5)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.3)"; }}>
-          <Square style={{ width: 18, height: 18 }} /> Stop
-        </button>
-      ) : (
-        <button onClick={credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStartStream} disabled={isStarting || isClosing || (!credsMissing && !canStart)}
-          style={{ width: "100%", height: 54, background: (canStart && !isStarting && !isClosing) ? "linear-gradient(135deg, hsl(187 100% 52%) 0%, hsl(200 100% 45%) 100%)" : "hsl(222 40% 11%)", border: "none", borderRadius: 12, cursor: (canStart && !isStarting && !isClosing) ? "pointer" : "not-allowed", color: (canStart && !isStarting && !isClosing) ? "hsl(222 47% 4%)" : "hsl(222 25% 40%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: (canStart && !isStarting && !isClosing) ? "0 0 28px hsl(187 100% 52% / 0.3)" : "none" }}
-          onMouseEnter={e => { if (canStart && !isStarting && !isClosing) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}>
-          {isStarting ? <><Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} /> Starting…</>
-            : isClosing ? <><Loader2 style={{ width: 18, height: 18, animation: "spin 1s linear infinite" }} /> Ending call…</>
-            : credsMissing ? <><Settings style={{ width: 18, height: 18 }} /> Request credits</>
-            : !cameraReady && needsVideo ? <><Camera style={{ width: 18, height: 18 }} /> Enable Camera</>
-            : <><Play style={{ width: 18, height: 18 }} /> Start</>}
+    </div>
+  );
+
+  /**
+   * Everything else the console has always had, laid out open below the stage: the shape
+   * of the picture, how the microphone behaves, the cloned voice, and the way out to
+   * Zoom / Teams / OBS. The camera and microphone themselves are picked in the bar.
+   */
+  const Sheet = () => (
+    <div style={{ marginTop: 20 }}>
+      <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.14em", fontFamily: "'Orbitron',monospace", marginBottom: 12 }}>
+        {t("More settings")}
+      </p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, alignItems: "start" }}>
+        {OrientationToggle()}
+        {MicGateCard()}
+      </div>
+      {/* The clone is the one panel with three things inside it, so it takes the whole
+          width below the short cards instead of squeezing in beside them. */}
+      {needsVoice && <div style={{ marginTop: 14 }}>{VoicePanel()}</div>}
+      <div style={{ marginTop: 14 }}>{renderVirtualDevices(true)}</div>
+      <div style={{ marginTop: 14 }}>{renderBroadcastGuide()}</div>
+    </div>
+  );
+
+  /**
+   * His photo, in the bar: the one place the reference face is set. It shows the picture
+   * he chose, takes a new one on a tap, and takes it off again without a second control
+   * anywhere else on the page.
+   */
+  const PhotoChip = () => (
+    <div data-tour="ref" style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0, padding: "7px 12px", borderRadius: 12, background: "hsl(222 44% 8%)", border: `1px solid ${refImagePreview ? `${C}55` : "hsl(222 40% 13%)"}` }}>
+      <label title={t("Upload face reference to guide the AI")} style={{ display: "flex", alignItems: "center", gap: 9, cursor: "pointer", minWidth: 0 }}>
+        {refImagePreview
+          ? <img src={refImagePreview} alt="" style={{ width: 26, height: 26, borderRadius: 7, objectFit: "cover", flexShrink: 0 }} />
+          : <Image style={{ width: 15, height: 15, color: "hsl(222 25% 45%)", flexShrink: 0 }} />}
+        <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 50%)" }}>{t("My photo")}</span>
+          <span style={{ fontSize: 11.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(190 80% 92%)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{refImagePreview ? t("Reference Image") : t("Upload face reference")}</span>
+        </span>
+        <input type="file" accept="image/*" onChange={handleRefImage} style={{ display: "none" }} />
+      </label>
+      {refImagePreview && (
+        <button onClick={() => { setRefImagePreview(null); setRefImageB64(null); }} style={{ width: 20, height: 20, borderRadius: "50%", flexShrink: 0, background: "hsl(0 85% 55% / 0.18)", border: "1px solid hsl(0 85% 55% / 0.4)", color: "hsl(0 85% 72%)", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", padding: 0 }}>
+          <X style={{ width: 10, height: 10 }} />
         </button>
       )}
     </div>
   );
 
+  /** A device chosen from the bar: the name it picked, and the list to change it. */
+  const DeviceChip = (kind: "camera" | "mic") => {
+    const list = kind === "camera" ? cameras : mics;
+    const chosen = kind === "camera" ? selectedCamId : selectedMicId;
+    const pick = kind === "camera" ? handleCameraSwitch : (id: string) => chooseMic(id);
+    const label = kind === "camera" ? t("Camera") : t("Microphone");
+    const none = kind === "camera" ? t("No cameras found.") : t("No microphones found.");
+    const Icon = kind === "camera" ? Camera : Mic;
+    const ready = kind === "camera" ? cameraReady : list.length > 0;
+    return (
+      <div data-tour={kind === "camera" ? "camera" : undefined} style={{ display: "flex", alignItems: "center", gap: 9, flexShrink: 0, padding: "7px 12px", borderRadius: 12, background: "hsl(222 44% 8%)", border: "1px solid hsl(222 40% 13%)" }}>
+        <Icon style={{ width: 15, height: 15, color: "hsl(222 25% 45%)", flexShrink: 0 }} />
+        <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0, maxWidth: 190 }}>
+          <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 50%)" }}>{label}</span>
+          {list.length === 0 ? (
+            <span style={{ fontSize: 11.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(0 70% 65%)" }}>{none}</span>
+          ) : (
+            <select value={chosen} onChange={e => pick(e.target.value)} disabled={isStreaming}
+              title={isStreaming ? t("Stop the call first — the device is locked while you are on air.") : t("Pick your {label}", { label: label.toLowerCase() })}
+              style={{ background: "none", border: "none", padding: 0, color: "hsl(190 80% 92%)", fontSize: 11.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", cursor: isStreaming ? "not-allowed" : "pointer", outline: "none", textOverflow: "ellipsis", width: "100%" }}>
+              {list.map((d, i) => <option key={d.deviceId} value={d.deviceId} style={{ background: "hsl(222 44% 8%)" }}>{d.label || (kind === "camera" ? t("Camera {n}", { n: i + 1 }) : t("Microphone {n}", { n: i + 1 }))}</option>)}
+            </select>
+          )}
+        </span>
+        <span style={{ width: 7, height: 7, borderRadius: "50%", flexShrink: 0, background: ready ? "hsl(150 80% 50%)" : "hsl(222 25% 30%)" }} />
+      </div>
+    );
+  };
+
+  /** On air: the clock he is being billed by, in the corner of the bar he is looking at. */
+  const LiveChip = () => (
+    isStreaming && connStatus === "connected" ? (
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 14px", borderRadius: 12, flexShrink: 0, background: "hsl(0 85% 55% / 0.1)", border: "1px solid hsl(0 85% 55% / 0.25)" }}>
+        <span style={{ width: 8, height: 8, borderRadius: "50%", background: "hsl(0 85% 65%)", animation: "pulse 2s ease-in-out infinite" }} />
+        <span style={{ fontSize: 11.5, color: "hsl(0 85% 70%)", fontFamily: "'Orbitron',monospace", fontWeight: 700, whiteSpace: "nowrap" }}>{t("LIVE · {time}", { time: formatTime(elapsed) })}</span>
+      </div>
+    ) : null
+  );
+
+
   // ─── Voice cloning panel (shared between tabs) ─────────────────────────────
   const VoicePanel = () => (
-    <div data-tour="voice" style={{ background: "hsl(222 44% 6%)", border: `1px solid ${vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 11%)"}`, borderRadius: 14, padding: 16 }}>
+    <div data-tour="voice" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(187 100% 52% / 0.24)"}`, borderRadius: 14, padding: 16 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: VC, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>Voice Cloning</p>
-          {vcActive && <span style={{ fontSize: 8, fontWeight: 700, color: "#fff", background: VC, padding: "2px 6px", borderRadius: 10, fontFamily: "'Orbitron',monospace" }}>LIVE</span>}
+          <p style={{ fontSize: 10, fontWeight: 700, color: VC, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>{t("Voice Cloning")}</p>
+          {vcActive && <span style={{ fontSize: 8, fontWeight: 700, color: "#fff", background: VC, padding: "2px 6px", borderRadius: 10, fontFamily: "'Orbitron',monospace" }}>{t("LIVE")}</span>}
         </div>
         {/* Toggle */}
         <button onClick={() => {
-          if (!voiceKeySet && !vcEnabled) { toast({ title: "Out of minutes", description: "Ask your administrator to top up this bucket before using voice cloning.", variant: "destructive", withContact: true }); return; }
+          if (!voiceKeySet && !vcEnabled) { toast({ title: t("Out of minutes"), description: t("Ask your administrator to top up this bucket before using voice cloning."), variant: "destructive", withContact: true }); return; }
           setVcEnabled(v => !v);
         }}
           style={{ width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer", background: vcEnabled ? VC : "hsl(222 40% 14%)", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
@@ -2360,23 +2470,25 @@ export default function StreamPage() {
       {!voiceKeySet && (
         <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(40 100% 52% / 0.08)", border: "1px solid hsl(40 100% 52% / 0.2)", marginBottom: 10 }}>
           <p style={{ fontSize: 11, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif" }}>
-            You have no minutes left in this bucket. Ask your administrator to top up your account.{" "}
-            <button onClick={() => setLocation("/minutes")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>Request credits →</button>
+            {t("You have no minutes left in this bucket. Ask your administrator to top up your account.")}{" "}
+            <button onClick={() => setLocation("/minutes")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>{t("Request credits")} →</button>
           </p>
         </div>
       )}
 
-      {/* Voice selector */}
-      <div style={{ marginBottom: 10 }}>
-        <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 6 }}>Clone Voice</label>
+      {/* Three doors of one panel, side by side: pick a voice, add your own, see what
+          you already saved. Each sits in the same box so the row reads as one control. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, alignItems: "start" }}>
+      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 12 }}>
+        <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 6 }}>{t("Clone Voice")}</label>
         <div style={{ position: "relative" }}>
           <select value={vcVoiceId} onChange={e => setVcVoiceId(e.target.value)} disabled={isStreaming} style={{ ...selectSt, borderColor: vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)" }}>
             {savedVoices.length > 0 && (
-              <optgroup label="── Your Voices ──">
+              <optgroup label={t("── Your Voices ──")}>
                 {savedVoices.map(v => <option key={v.id} value={v.id}>★ {v.name}</option>)}
               </optgroup>
             )}
-            <optgroup label="── Built-in Voices ──">
+            <optgroup label={t("── Built-in Voices ──")}>
               {BUILTIN_VOICES.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
             </optgroup>
           </select>
@@ -2385,10 +2497,10 @@ export default function StreamPage() {
       </div>
 
       {/* Upload your own voice */}
-      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 12, marginBottom: 10 }}>
-        <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>Upload Your Voice</p>
+      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 12 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>{t("Upload Your Voice")}</p>
         <input
-          type="text" placeholder="Voice name (optional)"
+          type="text" placeholder={t("Voice name (optional)")}
           value={uploadVoiceName} onChange={e => setUploadVoiceName(e.target.value)}
           style={{ width: "100%", padding: "7px 10px", borderRadius: 7, background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", outline: "none", marginBottom: 8 }}
           onFocus={e => { e.target.style.borderColor = "hsl(265 90% 65% / 0.5)"; }}
@@ -2396,18 +2508,18 @@ export default function StreamPage() {
         />
         <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, cursor: uploadingVoice ? "not-allowed" : "pointer", background: uploadingVoice ? "hsl(222 40% 10%)" : "hsl(265 90% 65% / 0.15)", border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 12, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
           {uploadingVoice ? <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> : <Upload style={{ width: 14, height: 14 }} />}
-          {uploadingVoice ? "Uploading…" : "Upload Voice Sample (MP3/WAV/M4A)"}
+          {uploadingVoice ? t("Uploading…") : t("Upload Voice Sample (MP3/WAV/M4A)")}
           <input type="file" accept=".mp3,.wav,.m4a,audio/*" onChange={handleVoiceUpload} disabled={uploadingVoice} style={{ display: "none" }} />
         </label>
         <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 6, lineHeight: 1.4 }}>
-          Upload 30s–3min of clear speech. Your voice will be cloned and saved for future sessions.
+          {t("Upload 30s–3min of clear speech. Your voice will be cloned and saved for future sessions.")}
         </p>
       </div>
 
       {/* Saved voices list */}
       {savedVoices.length > 0 && (
-        <div style={{ marginBottom: 10 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 6 }}>Your Voices</p>
+        <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 12 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 6 }}>{t("Your Voices")}</p>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {savedVoices.map(v => (
               <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: vcVoiceId === v.id ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 8%)", border: `1px solid ${vcVoiceId === v.id ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 12%)"}`, cursor: "pointer" }}
@@ -2422,37 +2534,38 @@ export default function StreamPage() {
           </div>
         </div>
       )}
+      </div>
 
       {/* Waveform — the voice leaving the app, measured on the player itself */}
       {vcActive && (
         <div style={{ marginTop: 8 }}>
-          <p style={{ fontSize: 9, color: "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>Cloned Voice Output</p>
+          <p style={{ fontSize: 9, color: "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>{t("Cloned Voice Output")}</p>
           <Waveform analyser={vcAnalyser} color={VC} height={60} />
           <div style={{ height: 5, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden", marginTop: 6 }}>
             <div style={{ height: "100%", borderRadius: 3, transition: "width 0.08s", width: `${vcVu}%`, background: VC }} />
           </div>
           <p style={{ marginTop: 6, fontSize: 10, color: cloneAlive ? "hsl(265 60% 72%)" : "hsl(40 90% 62%)" }}>
             {cloneAlive
-              ? "This is the voice your callers and OBS are hearing. Your raw microphone is off the cable while the cloned voice is arriving."
-              : "The cloned voice has produced nothing for the last few seconds, so your own microphone is back on the cable. Your callers hear you rather than silence."}
+              ? t("This is the voice your callers and OBS are hearing. Your raw microphone is off the cable while the cloned voice is arriving.")
+              : t("The cloned voice has produced nothing for the last few seconds, so your own microphone is back on the cable. Your callers hear you rather than silence.")}
           </p>
         </div>
       )}
 
       {/* Local monitor — only meaningful where cloning actually runs */}
-      <div style={{ marginTop: 10, background: "hsl(222 44% 6%)", border: `1px solid ${voiceMonitor ? "hsl(265 90% 65% / 0.35)" : "hsl(222 40% 11%)"}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ marginTop: 10, background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${voiceMonitor ? "hsl(265 90% 65% / 0.35)" : "hsl(187 100% 52% / 0.24)"}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ width: 32, height: 32, borderRadius: 8, background: voiceMonitor ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 10%)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Headphones style={{ width: 15, height: 15, color: voiceMonitor ? VC : "hsl(222 25% 45%)" }} />
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", marginBottom: 3 }}>Hear my cloned voice</p>
+          <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", marginBottom: 3 }}>{t("Hear my cloned voice")}</p>
           <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4 }}>
             {voiceMonitor
-              ? "On — the clone also plays in your own speakers. Wear headphones; loudspeakers let your mic feed it back into the call."
-              : "Off — the clone goes to the calling app only. You hear yourself as usual."}
+              ? t("On — the clone also plays in your own speakers. Wear headphones; loudspeakers let your mic feed it back into the call.")
+              : t("Off — the clone goes to the calling app only. You hear yourself as usual.")}
           </p>
         </div>
-        <button onClick={toggleVoiceMonitor} aria-pressed={voiceMonitor} title="Toggle local monitor"
+        <button onClick={toggleVoiceMonitor} aria-pressed={voiceMonitor} title={t("Toggle local monitor")}
           style={{ flexShrink: 0, width: 46, height: 24, borderRadius: 14, border: "none", cursor: "pointer", background: voiceMonitor ? VC : "hsl(222 30% 20%)", position: "relative", transition: "background 0.15s" }}>
           <span style={{ position: "absolute", top: 3, left: voiceMonitor ? 25 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
         </button>
@@ -2460,79 +2573,32 @@ export default function StreamPage() {
     </div>
   );
 
-  // ─── Device selectors (shared) ─────────────────────────────────────────────
-  const DeviceSelectors = ({ showCamera }: { showCamera: boolean }) => (
-    <>
-      {showCamera && (
-        <div data-tour="camera" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-            <Camera style={{ width: 15, height: 15, color: C }} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em" }}>Camera</p>
-              <span style={{ fontSize: 10, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>{cameras.length} found</span>
-            </div>
-            {cameras.length === 0 ? <p style={{ fontSize: 12, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>No cameras found.</p> : (
-              <div style={{ position: "relative" }}>
-                <select value={selectedCamId} onChange={e => handleCameraSwitch(e.target.value)} disabled={isStreaming} style={selectSt}>
-                  {cameras.map((c, i) => <option key={c.deviceId} value={c.deviceId}>{c.label || `Camera ${i + 1}`}</option>)}
-                </select>
-                <ChevronDown style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "hsl(222 25% 50%)", pointerEvents: "none" }} />
-              </div>
-            )}
-          </div>
-          <button onClick={enumerateDevices} style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(222 25% 50%)", padding: 4 }}><RefreshCw style={{ width: 13, height: 13 }} /></button>
+  // ─── Microphone behaviour card (the devices themselves are picked in the bar) ──
+  const MicGateCard = () => (
+    /* Microphone handling — automatic, nothing to switch on, and live before any call */
+    <div data-tour="micgate" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(187 100% 52% / 0.42)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+        <Mic style={{ width: 15, height: 15, color: C }} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", marginBottom: 3 }}>{t("Microphone Handled Automatically")}</p>
+        <div style={{ height: 6, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden", margin: "5px 0 4px" }}>
+          <div ref={addMicBar} style={{ height: "100%", width: "0%", borderRadius: 3, transition: "width 0.06s linear", background: C }} />
         </div>
+        <p style={{ fontSize: 11, color: C, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, minHeight: 15 }}>
+          <span ref={addMicWord}>{t(MIC_CARD_WORDS.silent)}</span>
+        </p>
+        <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, marginTop: 3 }}>
+          {t("The AI always hears you the moment you open your mouth. What is held back is the room noise travelling out to your callers — nothing to switch on, nothing to set.")}
+        </p>
+      </div>
+      {!isStreaming && (
+        <button onClick={runMicCheck} disabled={micChecking}
+          style={{ flexShrink: 0, background: "hsl(187 100% 52% / 0.12)", border: "1px solid hsl(187 100% 52% / 0.35)", borderRadius: 8, padding: "7px 10px", cursor: micChecking ? "default" : "pointer", color: C, fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
+          {micChecking ? t("Listening…") : t("Check my microphone")}
+        </button>
       )}
-
-      <div data-tour="mic" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Mic style={{ width: 15, height: 15, color: C }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em" }}>Microphone</p>
-            <span style={{ fontSize: 10, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>{mics.length} found</span>
-          </div>
-          {mics.length === 0 ? <p style={{ fontSize: 12, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>No microphones found.</p> : (
-            <div style={{ position: "relative" }}>
-              <select value={selectedMicId} onChange={e => setSelectedMicId(e.target.value)} disabled={isStreaming} style={selectSt}>
-                {mics.map((m, i) => <option key={m.deviceId} value={m.deviceId}>{m.label || `Microphone ${i + 1}`}</option>)}
-              </select>
-              <ChevronDown style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "hsl(222 25% 50%)", pointerEvents: "none" }} />
-            </div>
-          )}
-        </div>
-        <button onClick={enumerateDevices} style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(222 25% 50%)", padding: 4 }}><RefreshCw style={{ width: 13, height: 13 }} /></button>
-      </div>
-
-      {/* Microphone handling — automatic, nothing to switch on, and live before any call */}
-      <div data-tour="micgate" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(187 100% 52% / 0.35)", borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
-        <div style={{ width: 32, height: 32, borderRadius: 8, background: "hsl(187 100% 52% / 0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-          <Mic style={{ width: 15, height: 15, color: C }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", marginBottom: 3 }}>Microphone Handled Automatically</p>
-          <div style={{ height: 6, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden", margin: "5px 0 4px" }}>
-            <div ref={micFillRef} style={{ height: "100%", width: "0%", borderRadius: 3, transition: "width 0.06s linear", background: C }} />
-          </div>
-          <p style={{ fontSize: 11, color: C, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, minHeight: 15 }}>
-            <span ref={micWordRef}>{MIC_CARD_WORDS.silent}</span>
-          </p>
-          <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, marginTop: 3 }}>
-            The AI always hears you the moment you open your mouth. What is held back is the
-            room noise travelling out to your callers — nothing to switch on, nothing to set.
-          </p>
-        </div>
-        {!isStreaming && (
-          <button onClick={runMicCheck} disabled={micChecking}
-            style={{ flexShrink: 0, background: "hsl(187 100% 52% / 0.12)", border: "1px solid hsl(187 100% 52% / 0.35)", borderRadius: 8, padding: "7px 10px", cursor: micChecking ? "default" : "pointer", color: C, fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
-            {micChecking ? "Listening…" : "Check my microphone"}
-          </button>
-        )}
-      </div>
-    </>
+    </div>
   );
 
   // ─── Virtual device broadcast panel (Stream Live Camera / Microphone) ─────
@@ -2544,31 +2610,31 @@ export default function StreamPage() {
       <button onClick={onClick} disabled={disabled}
         style={{ flexShrink: 0, width: 46, height: 24, borderRadius: 14, border: "none", cursor: disabled ? "not-allowed" : "pointer", background: on ? C : "hsl(222 30% 20%)", position: "relative", opacity: disabled ? 0.5 : 1, transition: "background 0.15s" }}>
         <span style={{ position: "absolute", top: 3, left: on ? 25 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
-        <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{label}</span>
+        <span style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)" }}>{t(label)}</span>
       </button>
     );
     return (
-      <div data-tour="broadcast" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>Broadcast to Calls</p>
-          <span style={{ fontSize: 9, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif" }}>Zoom · Teams · Chrome · WhatsApp</span>
+      <div data-tour="broadcast" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(187 100% 52% / 0.24)", borderRadius: 14, padding: 16 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+          <p style={{ fontSize: 17, fontWeight: 800, color: C, textTransform: "uppercase", letterSpacing: "0.10em", fontFamily: "'Orbitron',monospace" }}>{t("Broadcast to Calls")}</p>
+          <span style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 70% 78%)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.04em" }}>Zoom · Teams · Chrome · WhatsApp</span>
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: 10 }}>
           {showCamera && (IS_MAC ? (
             <div style={rowSt}>
               <div style={{ width: 28, height: 28, borderRadius: 8, background: "hsl(222 40% 10%)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
                 <Camera style={{ width: 14, height: 14, color: "hsl(222 25% 45%)" }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Camera</p>
-                <p style={{ fontSize: 10, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
-                  On a Mac, AI video leaves through OBS Virtual Camera.
+                <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Camera</p>
+                <p style={{ fontSize: 12, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+                  {t("On a Mac, AI video leaves through OBS Virtual Camera.")}
                 </p>
               </div>
               <button onClick={() => setLocation("/settings")}
-                style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, background: "hsl(187 100% 52% / 0.12)", border: "1px solid hsl(187 100% 52% / 0.35)", color: C, fontWeight: 700, fontSize: 10, fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", cursor: "pointer" }}>
-                MAC SETUP
+                style={{ flexShrink: 0, padding: "6px 12px", borderRadius: 8, background: "hsl(187 100% 52% / 0.12)", border: "1px solid hsl(187 100% 52% / 0.35)", color: C, fontWeight: 700, fontSize: 12, fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", cursor: "pointer" }}>
+                {t("MAC SETUP")}
               </button>
             </div>
           ) : (
@@ -2577,9 +2643,9 @@ export default function StreamPage() {
                 <Camera style={{ width: 14, height: 14, color: vcamEnabled ? C : "hsl(222 25% 45%)" }} />
               </div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Camera</p>
-                <p style={{ fontSize: 10, color: vcamReady ? C : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif" }}>
-                  {!vcamSupported ? "Driver layer unavailable" : vcamReady ? "Live — a call app is receiving video" : vcamEnabled ? "Waiting for a call app to open it…" : "Off"}
+                <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Camera</p>
+                <p style={{ fontSize: 12, color: vcamReady ? C : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif" }}>
+                  {!vcamSupported ? t("Driver layer unavailable") : vcamReady ? t("Live — a call app is receiving video") : vcamEnabled ? t("Waiting for a call app to open it…") : t("Off")}
                 </p>
               </div>
               {toggleBtn(vcamEnabled, toggleVCam, false, "Toggle Stream Live Camera")}
@@ -2591,49 +2657,66 @@ export default function StreamPage() {
               <Mic style={{ width: 14, height: 14, color: audioRouteOn ? VC : "hsl(222 25% 45%)" }} />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Microphone</p>
-              <p style={{ fontSize: 10, color: audioRouteOn ? VC : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {audioRouteOn ? (cableSinkLabel ? `Routing → ${cableSinkLabel}` : "Routing your voice to cable") : "Off — nothing reaches the cable"}
+              <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Microphone</p>
+              <p style={{ fontSize: 12, color: audioRouteOn ? VC : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                {audioRouteOn ? (cableSinkLabel ? t("Routing → {label}", { label: cableSinkLabel }) : t("Routing your voice to cable")) : t("Off — nothing reaches the cable")}
               </p>
             </div>
             {toggleBtn(audioRouteOn, toggleAudioRoute, false, "Toggle Stream Live Microphone")}
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <span style={{ fontSize: 10, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", flexShrink: 0 }}>Audio out:</span>
+            <span style={{ fontSize: 12, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", flexShrink: 0 }}>{t("Audio out")}:</span>
             <select
               value={manualSinkId}
               onChange={e => chooseManualSink(e.target.value)}
-              title={`Which output your voice is sent to. Pick the ${CABLE_NAME} entry if auto-detect fails.`}
-              style={{ flex: 1, minWidth: 0, background: "hsl(222 40% 8%)", color: "hsl(190 80% 90%)", border: "1px solid hsl(222 40% 16%)", borderRadius: 8, padding: "6px 8px", fontSize: 11, fontFamily: "'Rajdhani',sans-serif" }}>
-              <option value="">Auto-detect ({IS_MAC ? "BlackHole" : "VB-Cable"})</option>
+              title={t("Which output your voice is sent to. Pick the {cable} entry if auto-detect fails.", { cable: CABLE_NAME })}
+              style={{ flex: 1, minWidth: 0, background: "hsl(222 40% 8%)", color: "hsl(190 80% 90%)", border: "1px solid hsl(222 40% 16%)", borderRadius: 8, padding: "7px 9px", fontSize: 12, fontFamily: "'Rajdhani',sans-serif" }}>
+              <option value="">{t("Auto-detect ({cable})", { cable: IS_MAC ? "BlackHole" : "VB-Cable" })}</option>
               {audioOutputs.map((d, i) => (
-                <option key={d.deviceId} value={d.deviceId}>{d.label || `Output ${i + 1} (unlabeled — likely ${IS_MAC ? "BlackHole" : "VB-Cable"})`}</option>
+                <option key={d.deviceId} value={d.deviceId}>{d.label || t("Output {n} (unlabeled — likely {cable})", { n: i + 1, cable: IS_MAC ? "BlackHole" : "VB-Cable" })}</option>
               ))}
             </select>
           </div>
         </div>
+      </div>
+    );
+  };
 
-        <div style={{ marginTop: 10, padding: "8px 10px", borderRadius: 10, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)", fontSize: 10, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.55 }}>
-          <p style={{ fontWeight: 700, color: "hsl(190 80% 90%)", marginBottom: 4 }}>What to pick inside OBS / Zoom / Teams</p>
+  // ─── The one card that says what to pick inside the call app ──────────────
+  // Full width, big and bold: the customer reads this across the room while Zoom is
+  // already open on the other screen.
+  const renderBroadcastGuide = () => {
+    const line: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "hsl(190 80% 94%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.6 };
+    return (
+      <div style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(187 100% 52% / 0.42)", borderRadius: 14, padding: "18px 20px" }}>
+        <p style={{ fontSize: 17, fontWeight: 800, color: C, textTransform: "uppercase", letterSpacing: "0.10em", fontFamily: "'Orbitron',monospace", marginBottom: 14 }}>
+          {t("What to pick inside OBS / Zoom / Teams")}
+        </p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))", gap: "10px 24px", alignItems: "start" }}>
           {IS_MAC ? (
             <>
-              <p>• VIDEO → <span style={{ color: C }}>OBS Virtual Camera</span>, once OBS is capturing the “Stream Live OBS” window and Start Virtual Camera is on.</p>
-              <p>• AUDIO (your voice) → <span style={{ color: VC }}>{CABLE_NAME}</span> as the microphone. The app puts your voice in there itself — your physical mic is not needed as a second source.</p>
-              <p>• A Mac cannot host a system webcam without an Apple-approved extension, so video always goes through OBS here. Turn on “Stream Live Microphone” above and BlackHole carries your voice — or the <span style={{ color: VC }}>cloned voice</span> on the tabs where cloning is on.</p>
-              <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Window Capture → “Stream Live OBS”; then Sources → + → Audio Input Capture → “{CABLE_NAME}”. If you hear echo, mute OBS “Desktop Audio”. Full steps: Settings → Mac Setup.</p>
+              <p style={line}>{t("• VIDEO → ")}<span style={{ color: C }}>OBS Virtual Camera</span>{t(", once OBS is capturing the “Stream Live OBS” window and Start Virtual Camera is on.")}</p>
+              <p style={line}>{t("• AUDIO (your voice) → ")}<span style={{ color: VC }}>{CABLE_NAME}</span>{t(" as the microphone. The app puts your voice in there itself — your physical mic is not needed as a second source.")}</p>
+              <p style={line}>{t("• A Mac cannot host a system webcam without an Apple-approved extension, so video always goes through OBS here. Turn on “Stream Live Microphone” above and BlackHole carries your voice — or the ")}<span style={{ color: VC }}>{t("cloned voice")}</span>{t(" on the tabs where cloning is on.")}</p>
             </>
           ) : (
             <>
-              <p>• VIDEO → <span style={{ color: C }}>Stream Live Camera</span> = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.</p>
-              <p>• AUDIO (your voice) → <span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>. On fresh installs it is named <span style={{ color: VC }}>Stream Live Microphone</span> — same device, two possible names.</p>
-              <p>• Do <span style={{ color: VC }}>not</span> also add your Realtek / USB microphone as a second source. Your voice is already on that cable, and two copies of it arrive as echo.</p>
-              <p>• “Video Call” carries your natural voice, timed to the AI picture. On “Video + Audio” and “Audio Call” with voice cloning on, the cable carries the <span style={{ color: VC }}>cloned voice</span> and your natural one steps aside — and if the cloned voice stops producing, your own microphone goes straight back onto it, so your callers never sit in silence.</p>
-              <p>• Wear headphones. Your microphone stays open while the cable is playing, and loudspeakers feed it back into the call.</p>
-              <p style={{ marginTop: 4 }}>OBS recipe: Sources → + → Video Capture Device → “Stream Live Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.</p>
+              <p style={line}>{t("• VIDEO → ")}<span style={{ color: C }}>Stream Live Camera</span>{t(" = the AI video. Your physical webcam is listed next to it — don't pick that one for AI.")}</p>
+              <p style={line}>{t("• AUDIO (your voice) → ")}<span style={{ color: VC }}>CABLE Output (VB-Audio Virtual Cable)</span>{t(". On fresh installs it is named ")}<span style={{ color: VC }}>Stream Live Microphone</span>{t(" — same device, two possible names.")}</p>
+              <p style={line}>{t("• Do ")}<span style={{ color: VC }}>{t("not")}</span>{t(" also add your Realtek / USB microphone as a second source. Your voice is already on that cable, and two copies of it arrive as echo.")}</p>
+              <p style={line}>{t("• “Video Call” carries your natural voice, timed to the AI picture. On “Video + Audio”, with voice cloning on, the cable carries the ")}<span style={{ color: VC }}>{t("cloned voice")}</span>{t(" and your natural one steps aside — and if the cloned voice stops producing, your own microphone goes straight back onto it, so your callers never sit in silence.")}</p>
+              <p style={line}>{t("• Wear headphones. Your microphone stays open while the cable is playing, and loudspeakers feed it back into the call.")}</p>
             </>
           )}
         </div>
+        <p style={{ ...line, marginTop: 14, paddingTop: 12, borderTop: "1px solid hsl(187 100% 52% / 0.22)" }}>
+          {IS_MAC ? (
+            <>{t("OBS recipe: Sources → + → Window Capture → “Stream Live OBS”; then Sources → + → Audio Input Capture → “")}{CABLE_NAME}{t("”. If you hear echo, mute OBS “Desktop Audio”. Full steps: Settings → Mac Setup.")}</>
+          ) : (
+            <>{t("OBS recipe: Sources → + → Video Capture Device → “Stream Live Camera”; then Sources → + → Audio Input Capture → “CABLE Output (VB-Audio Virtual Cable)”. If you hear echo, mute OBS “Desktop Audio”.")}</>
+          )}
+        </p>
       </div>
     );
   };
@@ -2644,13 +2727,13 @@ export default function StreamPage() {
   // running perfectly and "MEASURING" on a call that has no picture to compare are two different
   // problems and the customer has to be able to tell them apart from across the room.
   const AudioSyncPanel = () => (
-    <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
+    <div style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(187 100% 52% / 0.24)", borderRadius: 14, padding: 16 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-        <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>Audio Sync</p>
+        <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>{t("Audio Sync")}</p>
         <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 20, background: audioActive ? "hsl(187 100% 52% / 0.12)" : "hsl(222 40% 9%)", border: `1px solid ${audioActive ? "hsl(187 100% 52% / 0.35)" : "hsl(222 40% 14%)"}` }}>
           {audioActive ? <Wifi style={{ width: 10, height: 10, color: C }} /> : <WifiOff style={{ width: 10, height: 10, color: "hsl(222 25% 40%)" }} />}
           <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: audioActive ? C : "hsl(222 25% 40%)" }}>
-            {!audioActive ? "IDLE" : SYNC_BADGE[syncLive ? "live" : syncReason]}
+            {!audioActive ? t("IDLE") : t(SYNC_BADGE[syncLive ? "live" : syncReason])}
           </span>
         </div>
       </div>
@@ -2661,9 +2744,9 @@ export default function StreamPage() {
             <span style={{ fontSize: 11, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>{mics.find(m => m.deviceId === selectedMicId)?.label || "Microphone"}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)" }}>
-            <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>Lip-sync delay</span>
+            <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>{t("Lip-sync delay")}</span>
             <span style={{ fontSize: 13, fontWeight: 700, color: syncMeasured || syncLive ? C : "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace" }}>
-              {syncLive ? "none needed" : syncMeasured ? `${syncDelay.toFixed(2)}s` : "not measured"}
+              {syncLive ? t("none needed") : syncMeasured ? `${syncDelay.toFixed(2)}s` : t("not measured")}
             </span>
           </div>
           {/* The copy that OBS is handed, measured after the gate and after the hold. The
@@ -2671,22 +2754,20 @@ export default function StreamPage() {
               is the one that proves what your callers are actually getting. */}
           <div>
             <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
-              <span style={{ fontSize: 10, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em" }}>Voice going out to your callers</span>
-              <span style={{ fontSize: 10, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>after the delay</span>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em" }}>{t("Voice going out to your callers")}</span>
+              <span style={{ fontSize: 10, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>{t("after the delay")}</span>
             </div>
             <div style={{ height: 6, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden" }}>
-              <div ref={cableFillRef} style={{ height: "100%", width: "0%", borderRadius: 3, transition: "width 0.06s linear", background: C }} />
+              <div ref={addCableBar} style={{ height: "100%", width: "0%", borderRadius: 3, transition: "width 0.06s linear", background: C }} />
             </div>
           </div>
           <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-            {SYNC_WORDS[syncLive ? "live" : syncReason]}
+            {t(SYNC_WORDS[syncLive ? "live" : syncReason])}
           </p>
         </div>
       ) : (
         <p style={{ fontSize: 12, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-          The AI hears you the moment you speak. Once a call starts, this card finds how late the
-          avatar&apos;s mouth is behind your voice and holds your voice out to your callers by exactly
-          that much. Until it has measured, nothing is held back.
+          {t("The AI hears you the moment you speak. Once a call starts, this card finds how late the avatar's mouth is behind your voice and holds your voice out to your callers by exactly that much. Until it has measured, nothing is held back.")}
         </p>
       )}
     </div>
@@ -2709,7 +2790,7 @@ export default function StreamPage() {
           <WatermarkOffer
             paid={account.paid}
             videoMinutesLeft={videoLeft}
-            ctaLabel="See the packages"
+            ctaLabel={t("See the packages")}
             ctaHref="/minutes"
           />
         </div>
@@ -2720,10 +2801,10 @@ export default function StreamPage() {
         <div style={{ margin: "16px 32px 0", padding: "12px 18px", borderRadius: 10, background: "hsl(40 100% 52% / 0.1)", border: "1px solid hsl(40 100% 52% / 0.35)", display: "flex", alignItems: "center", gap: 12 }}>
           <Settings style={{ width: 16, height: 16, color: "hsl(40 100% 62%)", flexShrink: 0 }} />
           <p style={{ fontSize: 13, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif", flex: 1 }}>
-            You have no minutes left in this bucket. Ask your administrator to top up your account.
+            {t("You have no minutes left in this bucket. Ask your administrator to top up your account.")}
           </p>
           <button onClick={() => setLocation("/minutes")} style={{ padding: "6px 14px", borderRadius: 8, background: "hsl(40 100% 52% / 0.25)", border: "1px solid hsl(40 100% 52% / 0.5)", color: "hsl(40 100% 80%)", fontWeight: 700, fontSize: 12, fontFamily: "'Orbitron',monospace", cursor: "pointer" }}>
-            Request credits
+            {t("Request credits")}
           </button>
         </div>
       )}
@@ -2736,24 +2817,24 @@ export default function StreamPage() {
             <Loader2 style={{ width: 40, height: 40, color: C, animation: "spin 1s linear infinite" }} />
             {pacingSeconds !== null ? (
               <div>
-                <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>One moment…</h3>
+                <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>{t("One moment…")}</h3>
                 <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
-                  Your video line from the last call is still being released. Asking again in{" "}
-                  {pacingSeconds} second{pacingSeconds === 1 ? "" : "s"}. Nothing is being charged while you wait.
+                  {t("Your video line from the last call is still being released. Asking again in")}{" "}
+                  {pacingSeconds} second{pacingSeconds === 1 ? "" : "s"}. {t("Nothing is being charged while you wait.")}
                 </p>
               </div>
             ) : (
               <div>
-                <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>Starting…</h3>
+                <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>{t("Starting…")}</h3>
                 <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
-                  {connStep === "engine" ? "2/2 · Connecting to AI engine…"
-                    : connStep === "retry" ? "2/2 · The video line didn't answer. Asking again…"
-                    : "1/2 · Authorizing your account…"}
+                  {connStep === "engine" ? t("2/2 · Connecting to AI engine…")
+                    : connStep === "retry" ? t("2/2 · The video line didn't answer. Asking again…")
+                    : t("1/2 · Authorizing your account…")}
                 </p>
               </div>
             )}
             <button onClick={() => { startCancelRef.current = true; void teardownStream(); }} style={{ padding: "10px 20px", borderRadius: 8, width: "100%", background: "transparent", border: "1px solid hsl(187 100% 52% / 0.25)", color: "hsl(187 100% 52% / 0.8)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-              <X style={{ width: 14, height: 14 }} /> Cancel
+              <X style={{ width: 14, height: 14 }} /> {t("Cancel")}
             </button>
           </div>
         </div>
@@ -2772,266 +2853,70 @@ export default function StreamPage() {
         </div>
       )}
 
-      <div style={{ padding: "24px 32px", maxWidth: 1400, margin: "0 auto" }}>
+      {/* ═══ Design 2 ═══════════════════════════════════════════════════════════
+          One stage and one foot bar. The picture the AI draws is the screen; the few
+          things he checks before pressing Start live in the bar under it; everything
+          he sets once and forgets is folded behind "More settings". Nothing was
+          dropped on the way — the fold holds the same panels, in the same order, and
+          the walk-through opens it for him so every ring still has a target. */}
+      <Stage minH="calc(100vh - 88px)">
+        <div style={{ maxWidth: 1560, margin: "0 auto", paddingBottom: 168 }}>
 
-        {/* Page header */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-          <div>
-            <h1 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 20, color: "hsl(190 80% 96%)", marginBottom: 2 }}>{APP}</h1>
-            <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>Real-time AI video &amp; voice transformation</p>
-          </div>
-          {isStreaming && connStatus === "connected" && (
-            <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 16px", borderRadius: 10, background: "hsl(0 85% 55% / 0.1)", border: "1px solid hsl(0 85% 55% / 0.2)" }}>
-              <span style={{ width: 8, height: 8, borderRadius: "50%", background: "hsl(0 85% 65%)", animation: "pulse 2s ease-in-out infinite" }} />
-              <span style={{ fontSize: 11, color: "hsl(0 85% 70%)", fontFamily: "'Rajdhani',sans-serif", fontWeight: 700 }}>LIVE · {formatTime(elapsed)}</span>
-            </div>
-          )}
-        </div>
+          {/* Head: the call type he is buying, and his own minutes opposite it. */}
+          <PageHead
+            tour="tabs"
+            name="Stream"
+            pills={
+              <PillRow>
+                {TABS.map(tab => (
+                  <Pill key={tab.id} active={activeTab === tab.id} label={tab.label} sub={tab.sub}
+                    Icon={tab.Icon} color={tab.color} onClick={() => switchTab(tab.id)} />
+                ))}
+              </PillRow>
+            }
+            card={<MinuteMeter modality={modalityForTab(activeTab)} />}
+          />
 
-        {/* ── 3 TABS ─────────────────────────────────────────────────────── */}
-        <div data-tour="tabs" style={{ display: "flex", gap: 6, marginBottom: 24, background: "hsl(222 44% 5%)", padding: 5, borderRadius: 16, border: "1px solid hsl(222 40% 10%)" }}>
-          {TABS.map(tab => {
-            const active = activeTab === tab.id;
-            return (
-              <button key={tab.id} onClick={() => switchTab(tab.id)}
-                style={{
-                  flex: 1, padding: "12px 8px", borderRadius: 12, cursor: "pointer", border: "none",
-                  transition: "all 0.25s",
-                  background: active
-                    ? `linear-gradient(135deg, ${tab.color}28, ${tab.color}10)`
-                    : "transparent",
-                  boxShadow: active
-                    ? `inset 0 0 0 1.5px ${tab.color}80, 0 0 20px ${tab.glow}`
-                    : "none",
-                }}>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
-                  {/* Icon with coloured bg circle when active */}
-                  <div style={{
-                    width: 36, height: 36, borderRadius: "50%",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    background: active ? `${tab.color}22` : "transparent",
-                    border: active ? `1px solid ${tab.color}55` : "1px solid transparent",
-                    transition: "all 0.25s",
-                  }}>
-                    <tab.Icon style={{ width: 18, height: 18, color: active ? tab.color : "hsl(222 25% 45%)" }} />
-                  </div>
-                  {/* Label */}
-                  <span style={{
-                    fontSize: 11, fontWeight: 800, fontFamily: "'Orbitron',monospace",
-                    letterSpacing: "0.05em", textTransform: "uppercase",
-                    color: active ? tab.color : "hsl(222 25% 50%)",
-                    transition: "color 0.2s",
-                  }}>
-                    {tab.label}
-                  </span>
-                  {/* Sub-label */}
-                  <span style={{
-                    fontSize: 9, fontFamily: "'Rajdhani',sans-serif",
-                    color: active ? `${tab.color}CC` : "hsl(222 25% 35%)",
-                    transition: "color 0.2s",
-                    letterSpacing: "0.02em",
-                  }}>
-                    {tab.sub}
-                  </span>
-                  {/* Active indicator dot */}
-                  {active && (
-                    <div style={{
-                      width: 5, height: 5, borderRadius: "50%",
-                      background: tab.color,
-                      boxShadow: `0 0 6px ${tab.color}`,
-                    }} />
-                  )}
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {/* TAB 1: Video + Audio                                              */}
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {activeTab === "video-audio" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 316px", gap: 20 }}>
-            {/* Left */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* AI Output video — portrait or landscape */}
+          {/* The stage: the AI picture takes the room, and the two cards he reads while
+              it moves — his look, then what his voice is doing — stand in the corner. */}
+          <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
+            <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
               {renderVideoOutput(true)}
-              {/* Orientation toggle — always outside the video, always clean */}
-              {OrientationToggle()}
-              <DeviceSelectors showCamera={true} />
-              {renderVirtualDevices(true)}
             </div>
-            {/* Right sidebar */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {/* Style presets */}
-              <div data-tour="style" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 12 }}>AI Style</p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                  {STYLES.map(s => (
-                    <button key={s.id} onClick={() => handleStyleSelect(s.id)}
-                      style={{ padding: "7px 4px", borderRadius: 8, cursor: "pointer", background: selectedStyle === s.id ? `${s.color}22` : "hsl(222 40% 8%)", border: `1px solid ${selectedStyle === s.id ? s.color + "66" : "hsl(222 40% 12%)"}`, color: selectedStyle === s.id ? s.color : "hsl(222 25% 55%)", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Orbitron',monospace", boxShadow: selectedStyle === s.id ? `0 0 12px ${s.color}33` : "none" }}>
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              {/* Custom prompt */}
-              <div data-tour="prompt" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>Custom Prompt</p>
-                <textarea value={customPrompt} onChange={e => handleCustomPromptChange(e.target.value)} placeholder={curStyle.prompt} rows={3}
-                  style={{ width: "100%", padding: 10, borderRadius: 8, resize: "vertical", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, outline: "none" }}
-                  onFocus={e => { e.target.style.borderColor = "hsl(187 100% 52% / 0.5)"; }}
-                  onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
-                {customPrompt && <button onClick={() => handleCustomPromptChange("")} style={{ marginTop: 6, fontSize: 11, color: "hsl(222 25% 50%)", background: "none", border: "none", cursor: "pointer", fontFamily: "'Rajdhani',sans-serif" }}>↺ Reset</button>}
-              </div>
+
+            <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+              {LookCard()}
               {AudioSyncPanel()}
-              {VoicePanel()}
-              {/* Reference image */}
-              <div data-tour="ref" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>Reference Image</p>
-                {refImagePreview ? (
-                  <div style={{ position: "relative" }}>
-                    <img src={refImagePreview} alt="Ref" style={{ width: "100%", aspectRatio: "16/9", objectFit: "cover", borderRadius: 8, border: "1px solid hsl(187 100% 52% / 0.3)" }} />
-                    <button onClick={() => { setRefImagePreview(null); setRefImageB64(null); }} style={{ position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: "50%", background: "rgba(220,38,38,0.8)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <X style={{ width: 10, height: 10 }} />
-                    </button>
-                  </div>
-                ) : (
-                  <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "18px 12px", borderRadius: 10, cursor: "pointer", background: "hsl(222 40% 8%)", border: "1px dashed hsl(222 40% 16%)" }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "hsl(187 100% 52% / 0.4)"; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "hsl(222 40% 16%)"; }}>
-                    <Image style={{ width: 22, height: 22, color: "hsl(222 25% 40%)" }} />
-                    <p style={{ fontSize: 12, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "center" }}>Upload face reference to guide the AI</p>
-                    <input type="file" accept="image/*" onChange={handleRefImage} style={{ display: "none" }} />
-                  </label>
-                )}
-              </div>
             </div>
+          </div>
+
+          {Sheet()}
+        </div>
+      </Stage>
+
+      {/* The bar, floating over the foot of the stage on every tab. */}
+      <div style={{ position: "fixed", left: `calc(${RAIL_W}px + (100vw - ${RAIL_W}px) / 2)`, transform: "translateX(-50%)", bottom: 16, zIndex: 60, width: `min(1500px, calc(100vw - ${RAIL_W}px - 40px))`, display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* A free minute is the one thing worth interrupting the layout for. */}
+        {!isStreaming && trialWaiting && (
+          <div data-tour="trial" style={{ display: "flex", alignItems: "center", gap: 8, alignSelf: "center", padding: "8px 12px", borderRadius: 10, background: "hsl(187 100% 52% / 0.1)", border: "1px solid hsl(187 100% 52% / 0.3)" }}>
+            <Sparkles style={{ width: 14, height: 14, color: C, flexShrink: 0 }} />
+            <p style={{ fontSize: 12, color: "hsl(187 60% 85%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>
+              {t("You have free minutes waiting. They don't expire — press")} <b style={{ color: "hsl(190 80% 96%)" }}>{t("Start")}</b> {t("whenever you're ready.")}
+            </p>
           </div>
         )}
 
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {/* TAB 2: Audio Call Only                                            */}
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {activeTab === "audio-only" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 316px", gap: 20 }}>
-            {/* Left */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {/* Waveform display */}
-              <div data-tour="wave" style={{ borderRadius: 14, overflow: "hidden", background: "hsl(222 44% 5%)", border: `1px solid ${connStatus === "connected" ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)"}`, padding: 24, boxShadow: connStatus === "connected" ? "0 0 40px hsl(265 90% 65% / 0.15)" : "none" }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(265 90% 65% / 0.15)", border: "1px solid hsl(265 90% 65% / 0.35)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <Headphones style={{ width: 20, height: 20, color: VC }} />
-                    </div>
-                    <div>
-                      <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 13, color: "hsl(190 80% 96%)" }}>Audio Call</p>
-                      <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>Voice cloning active</p>
-                    </div>
-                  </div>
-                  {connStatus === "connected" && (
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 20, background: "hsl(265 90% 65% / 0.15)", border: "1px solid hsl(265 90% 65% / 0.4)" }}>
-                      <span style={{ width: 7, height: 7, borderRadius: "50%", background: VC, animation: "pulse 2s ease-in-out infinite" }} />
-                      <span style={{ fontSize: 10, color: VC, fontFamily: "'Orbitron',monospace", fontWeight: 700 }}>LIVE</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Input waveform */}
-                <div style={{ marginBottom: 12 }}>
-                  <p style={{ fontSize: 9, color: "hsl(222 25% 40%)", fontFamily: "'Orbitron',monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>Your Voice (Input)</p>
-                  <Waveform analyser={micAnalyser} color={C} height={72} />
-                </div>
-
-                {/* Output waveform */}
-                <div>
-                  <p style={{ fontSize: 9, color: "hsl(265 70% 60%)", fontFamily: "'Orbitron',monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>Cloned Voice (Output)</p>
-                  <Waveform analyser={vcAnalyser} color={VC} height={72} />
-                </div>
-
-                {/* Volume bar */}
-                {vcActive && (
-                  <div style={{ marginTop: 12 }}>
-                    <div style={{ height: 6, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden" }}>
-                      <div style={{ height: "100%", borderRadius: 3, transition: "width 0.08s", width: `${vcVu}%`, background: `linear-gradient(90deg, ${VC}, hsl(200 80% 65%))` }} />
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                      <span style={{ fontSize: 9, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif" }}>Output level</span>
-                      <Volume2 style={{ width: 11, height: 11, color: VC }} />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <DeviceSelectors showCamera={false} />
-              {renderVirtualDevices(false)}
-            </div>
-            {/* Right */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              {VoicePanel()}
-            </div>
-          </div>
-        )}
-
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {/* TAB 3: Video Call Only                                            */}
-        {/* ══════════════════════════════════════════════════════════════════ */}
-        {activeTab === "video-only" && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 316px", gap: 20 }}>
-            {/* Left */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-              {renderVideoOutput(true)}
-              {OrientationToggle()}
-              <DeviceSelectors showCamera={true} />
-              {renderVirtualDevices(true)}
-            </div>
-            {/* Right */}
-            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-              <div data-tour="style" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 12 }}>AI Style</p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-                  {STYLES.map(s => (
-                    <button key={s.id} onClick={() => handleStyleSelect(s.id)}
-                      style={{ padding: "7px 4px", borderRadius: 8, cursor: "pointer", background: selectedStyle === s.id ? `${s.color}22` : "hsl(222 40% 8%)", border: `1px solid ${selectedStyle === s.id ? s.color + "66" : "hsl(222 40% 12%)"}`, color: selectedStyle === s.id ? s.color : "hsl(222 25% 55%)", fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", boxShadow: selectedStyle === s.id ? `0 0 12px ${s.color}33` : "none" }}>
-                      {s.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div data-tour="prompt" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>Custom Prompt</p>
-                <textarea value={customPrompt} onChange={e => handleCustomPromptChange(e.target.value)} placeholder={curStyle.prompt} rows={3}
-                  style={{ width: "100%", padding: 10, borderRadius: 8, resize: "vertical", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, outline: "none" }}
-                  onFocus={e => { e.target.style.borderColor = "hsl(187 100% 52% / 0.5)"; }}
-                  onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
-              </div>
-              {AudioSyncPanel()}
-              <div data-tour="ref" style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 16 }}>
-                <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>Reference Image</p>
-                {refImagePreview ? (
-                  <div style={{ position: "relative" }}>
-                    <img src={refImagePreview} alt="Ref" style={{ width: "100%", aspectRatio: "16/9", objectFit: "cover", borderRadius: 8, border: "1px solid hsl(187 100% 52% / 0.3)" }} />
-                    <button onClick={() => { setRefImagePreview(null); setRefImageB64(null); }} style={{ position: "absolute", top: 6, right: 6, width: 22, height: 22, borderRadius: "50%", background: "rgba(220,38,38,0.8)", border: "none", color: "#fff", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                      <X style={{ width: 10, height: 10 }} />
-                    </button>
-                  </div>
-                ) : (
-                  <label style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, padding: "18px 12px", borderRadius: 10, cursor: "pointer", background: "hsl(222 40% 8%)", border: "1px dashed hsl(222 40% 16%)" }}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = "hsl(187 100% 52% / 0.4)"; }}
-                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = "hsl(222 40% 16%)"; }}>
-                    <Image style={{ width: 22, height: 22, color: "hsl(222 25% 40%)" }} />
-                    <p style={{ fontSize: 12, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "center" }}>Upload face reference</p>
-                    <input type="file" accept="image/*" onChange={handleRefImage} style={{ display: "none" }} />
-                  </label>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "center", padding: "10px 12px", borderRadius: 16, background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${C}3d`, boxShadow: "0 18px 44px hsl(226 80% 2% / 0.6), 0 0 30px hsl(187 100% 52% / 0.1)" }}>
+          {LiveChip()}
+          {PhotoChip()}
+          {DeviceChip("camera")}
+          {DeviceChip("mic")}
+          {BarLevel(t("Your Voice (Input)"), addMicBar)}
+          {BarLevel(t("Output level"), addCableBar)}
+          <MinuteMeter modality={modalityForTab(activeTab)} compact />
+          {StreamBtn()}
+        </div>
       </div>
-
-      {/* Always-visible Start/Stop action bar (fixed, shown on every tab) */}
-      {StreamBtn()}
 
       {/* The walk-through. Never over a live or starting call — it moves the tabs about,
           and a stop that lands mid-call would cost the customer real minutes. */}
@@ -3039,7 +2924,7 @@ export default function StreamPage() {
         <GuidedTour
           stops={tourStops(tourHasTrial)}
           tab={activeTab}
-          onTab={t => setActiveTab(t)}
+          onTab={id => setActiveTab(id)}
           contact={tourContact}
           onClose={() => setTourOpen(false)}
         />

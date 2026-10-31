@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Apple, Check, Copy, Download } from "lucide-react";
 import { CABLE_NAME, IS_MAC } from "../lib/platform";
+import { t } from "../lib/i18n";
 
 const C = "hsl(187 100% 52%)";
 const VC = "hsl(265 90% 65%)";
@@ -36,7 +37,7 @@ function Cmd() {
       <button onClick={copy}
         style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", borderRadius: 7, flexShrink: 0, cursor: "pointer", background: copied ? "hsl(143 72% 40% / 0.18)" : "hsl(222 40% 11%)", border: `1px solid ${copied ? "hsl(143 72% 55% / 0.5)" : "hsl(222 40% 18%)"}`, color: copied ? "hsl(143 72% 60%)" : "hsl(222 25% 55%)", fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
         {copied ? <Check style={{ width: 11, height: 11 }} /> : <Copy style={{ width: 11, height: 11 }} />}
-        {copied ? "Copied" : "Copy"}
+        {copied ? t("Copied") : t("Copy")}
       </button>
     </div>
   );
@@ -51,7 +52,7 @@ function GetApp({ name, href, why }: { name: string; href: string; why: string }
         <span style={{ display: "block", fontSize: 12.5, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>{name}</span>
         <span style={{ display: "block", fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>{why}</span>
       </span>
-      <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", flexShrink: 0 }}>GET</span>
+      <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", flexShrink: 0 }}>{t("GET")}</span>
     </a>
   );
 }
@@ -68,65 +69,60 @@ export function MacSetupCard() {
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
         <Apple style={{ width: 15, height: 15, color: C }} />
         <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron', monospace" }}>
-          Mac Setup
+          {t("Mac Setup")}
         </p>
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-        <Step n={1} title="Approve the app in System Settings — once">
+        <Step n={1} title={t("Approve the app in System Settings — once")}>
           <p>
-            Stream Live isn't signed with a paid Apple Developer certificate, so Gatekeeper refuses the
-            first launch. Open the app once, then go to <b style={{ color: "hsl(190 80% 90%)" }}>System Settings → Privacy &amp; Security</b>,
-            scroll to Security and click <b style={{ color: "hsl(190 80% 90%)" }}>“Open Anyway”</b> beside
-            “Stream Live was blocked”. Enter your password and launch it again — it stays approved.
+            {t("Stream Live isn't signed with a paid Apple Developer certificate, so Gatekeeper refuses the first launch. Open the app once, then go to ")}<b style={{ color: "hsl(190 80% 90%)" }}>{t("System Settings → Privacy & Security")}</b>
+            {t(", scroll to Security and click ")}<b style={{ color: "hsl(190 80% 90%)" }}>{t("“Open Anyway”")}</b>
+            {t(" beside “Stream Live was blocked”. Enter your password and launch it again — it stays approved.")}
           </p>
-          <p style={{ marginTop: 6 }}>If “Open Anyway” never appears, quit the app and run this in Terminal:</p>
+          <p style={{ marginTop: 6 }}>{t("If “Open Anyway” never appears, quit the app and run this in Terminal:")}</p>
           <Cmd />
         </Step>
 
-        <Step n={2} title="Allow the camera and the microphone">
+        <Step n={2} title={t("Allow the camera and the microphone")}>
           <p>
-            In <b style={{ color: "hsl(190 80% 90%)" }}>System Settings → Privacy &amp; Security</b>, switch{" "}
-            <b style={{ color: "hsl(190 80% 90%)" }}>Stream Live</b> on under both <b style={{ color: "hsl(190 80% 90%)" }}>Camera</b> and{" "}
-            <b style={{ color: "hsl(190 80% 90%)" }}>Microphone</b>. Without them the preview stays black and no voice is cloned.
+            {t("In ")}<b style={{ color: "hsl(190 80% 90%)" }}>{t("System Settings → Privacy & Security")}</b>{t(", switch")}{" "}
+            <b style={{ color: "hsl(190 80% 90%)" }}>Stream Live</b>{t(" on under both ")}<b style={{ color: "hsl(190 80% 90%)" }}>{t("Camera")}</b>{t(" and")}{" "}
+            <b style={{ color: "hsl(190 80% 90%)" }}>{t("Microphone")}</b>{t(". Without them the preview stays black and no voice is cloned.")}
           </p>
         </Step>
 
-        <Step n={3} title="Install the two free helpers">
+        <Step n={3} title={t("Install the two free helpers")}>
           <p style={{ marginBottom: 8 }}>
-            They do the job the bundled Windows drivers do: one carries sound, one carries video.
+            {t("They do the job the bundled Windows drivers do: one carries sound, one carries video.")}
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-            <GetApp href="https://existential.audio/blackhole/" name="BlackHole 2ch" why="A silent virtual speaker — your voice goes in here" />
-            <GetApp href="https://obsproject.com/" name="OBS Studio" why="Turns the Stream Live window into a webcam" />
+            <GetApp href="https://existential.audio/blackhole/" name="BlackHole 2ch" why={t("A silent virtual speaker — your voice goes in here")} />
+            <GetApp href="https://obsproject.com/" name="OBS Studio" why={t("Turns the Stream Live window into a webcam")} />
           </div>
           <p style={{ marginTop: 8 }}>
-            After installing BlackHole, log out and back in. It then shows up under System Settings → Sound,
-            and in the “Audio out” dropdown on the stream screen.
+            {t("After installing BlackHole, log out and back in. It then shows up under System Settings → Sound, and in the “Audio out” dropdown on the stream screen.")}
           </p>
         </Step>
 
-        <Step n={4} title="Put the AI feed into a call">
+        <Step n={4} title={t("Put the AI feed into a call")}>
           <p style={{ marginBottom: 6 }}>
-            On the stream screen, open the <b style={{ color: "hsl(190 80% 90%)" }}>OBS</b> window and turn{" "}
-            <b style={{ color: VC }}>Stream Live Microphone</b> on — the cloned voice moves to {CABLE_NAME}.
+            {t("On the stream screen, open the ")}<b style={{ color: "hsl(190 80% 90%)" }}>OBS</b>{t(" window and turn")}{" "}
+            <b style={{ color: VC }}>Stream Live Microphone</b>{t(" on — the cloned voice moves to {cable}.", { cable: CABLE_NAME })}
           </p>
           <ol style={{ margin: 0, paddingLeft: 18 }}>
-            <li>In OBS: Sources → + → <b style={{ color: "hsl(190 80% 90%)" }}>Window Capture</b> → “Stream Live OBS”.</li>
-            <li>In OBS: Controls → <b style={{ color: "hsl(190 80% 90%)" }}>Start Virtual Camera</b>.</li>
-            <li>In Zoom / Teams / Meet: Camera → <b style={{ color: C }}>OBS Virtual Camera</b>, Microphone → <b style={{ color: VC }}>{CABLE_NAME}</b>.</li>
+            <li>{t("In OBS: Sources → + → ")}<b style={{ color: "hsl(190 80% 90%)" }}>{t("Window Capture")}</b>{t(" → “Stream Live OBS”.")}</li>
+            <li>{t("In OBS: Controls → ")}<b style={{ color: "hsl(190 80% 90%)" }}>{t("Start Virtual Camera")}</b>.</li>
+            <li>{t("In Zoom / Teams / Meet: Camera → ")}<b style={{ color: C }}>OBS Virtual Camera</b>{t(", Microphone → ")}<b style={{ color: VC }}>{CABLE_NAME}</b>.</li>
           </ol>
           <p style={{ marginTop: 6 }}>
-            The app puts your voice into {CABLE_NAME} itself, so the call app hears you as well as seeing the
-            picture. Wear headphones: with loudspeakers the call comes straight back out of your microphone.
+            {t("The app puts your voice into {cable} itself, so the call app hears you as well as seeing the picture. Wear headphones: with loudspeakers the call comes straight back out of your microphone.", { cable: CABLE_NAME })}
           </p>
         </Step>
       </div>
 
       <p style={{ marginTop: 16, paddingTop: 12, borderTop: "1px dashed hsl(222 40% 14%)", fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.6 }}>
-        OBS Virtual Camera carries picture only — that is why the call app must take its microphone from {CABLE_NAME}.
-        Signing and notarizing Stream Live would remove step 1; it would not remove OBS, because macOS only accepts a
-        system webcam from an app Apple has approved with a system-extension entitlement.
+        {t("OBS Virtual Camera carries picture only — that is why the call app must take its microphone from {cable}. Signing and notarizing Stream Live would remove step 1; it would not remove OBS, because macOS only accepts a system webcam from an app Apple has approved with a system-extension entitlement.", { cable: CABLE_NAME })}
       </p>
     </div>
   );

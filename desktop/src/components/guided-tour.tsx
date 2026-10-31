@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check, X } from "lucide-react";
 import type { AdminContact } from "@stream-live/client";
 import { ContactLine } from "./contact";
 import { IS_MAC } from "../lib/platform";
+import { t, useLang } from "../lib/i18n";
 
 const C = "hsl(187 100% 52%)";
 
@@ -54,7 +55,7 @@ export function useTourSeen(): boolean {
   return seen;
 }
 
-export type TourTab = "video-audio" | "audio-only" | "video-only";
+export type TourTab = "video-audio" | "video-only";
 
 /**
  * One stop of the walk-through.
@@ -75,7 +76,12 @@ export type TourStop = {
 /** The tab a new account is walked through: the one the free video minute is spent on. */
 export const TOUR_TAB: TourTab = "video-only";
 
-/** The walk-through, in the order a first call is actually set up. */
+/** The walk-through, in the order a first call is actually set up.
+ *
+ * Every line here is English, and English is the key into the language files, so a step
+ * that no language has answered yet shows in English rather than nothing. The camera's
+ * name is a hole in the sentence rather than a piece of English bolted onto the end of a
+ * translated one, because it is a driver name and stays the same in every language. */
 export const TOUR_STOPS: TourStop[] = [
   {
     tab: TOUR_TAB, anchor: "screen", title: "Video Call: the AI picture, your own voice",
@@ -83,7 +89,7 @@ export const TOUR_STOPS: TourStop[] = [
   },
   {
     tab: TOUR_TAB, anchor: "camera", title: "Point your own camera at yourself",
-    body: "Choose your real webcam in the Camera box. Do not pick " + CAM + " here — the AI has to see you to draw you. If the list is empty, allow Stream Live to use your camera in your computer's privacy settings.",
+    body: "Choose your real webcam on the Camera chip in the bar at the foot of the page. Do not pick {cam} here — the AI has to see you to draw you. If the list is empty, allow Stream Live to use your camera in your computer's privacy settings.",
   },
   {
     tab: TOUR_TAB, anchor: "style", title: "Choose what you look like",
@@ -102,12 +108,12 @@ export const TOUR_STOPS: TourStop[] = [
   {
     tab: TOUR_TAB, anchor: "broadcast", title: "How the picture gets into your call",
     body: IS_MAC
-      ? "In your call app choose " + CAM + " as the camera, and leave its microphone on your own device — this tab sends your real voice, so there is nothing to route. Settings has these steps with the free helper to install."
-      : "Turn this panel's camera switch on, then in your call app choose " + CAM + " as the camera and leave its microphone on your own device. Nothing else in the call app needs changing.",
+      ? "In your call app choose {cam} as the camera, and leave its microphone on your own device — this tab sends your real voice, so there is nothing to route. Settings has these steps with the free helper to install."
+      : "Turn this panel's camera switch on, then in your call app choose {cam} as the camera and leave its microphone on your own device. Nothing else in the call app needs changing.",
   },
   {
     tab: TOUR_TAB, anchor: "start", title: "Start, then join your call",
-    body: "Press Start and wait until the picture in that window is moving — that is the moment your minutes begin counting, and nothing is charged before it. Press Stop here when you are finished, and the meter above the button always shows what you have left.",
+    body: "Press Start and wait until the picture in that window is moving — that is the moment your minutes begin counting, and nothing is charged before it. Press Stop here when you are finished, and the meter beside the button always shows what you have left.",
   },
 ];
 
@@ -146,6 +152,9 @@ export function GuidedTour({ stops, tab, onTab, contact, onClose }: {
   const [box, setBox] = useState<Box | null>(null);
   const [cardTop, setCardTop] = useState(24);
   const cardRef = useRef<HTMLDivElement | null>(null);
+  // Reading direction for this card's arrows. The document already flips to RTL for
+  // Arabic (set once at the root); the physical arrows and arrow keys must follow it.
+  const rtl = useLang() === "ar";
   const stop = stops[Math.min(i, stops.length - 1)];
   const last = i === stops.length - 1;
   const cardW = Math.min(430, window.innerWidth - 32);
@@ -165,8 +174,8 @@ export function GuidedTour({ stops, tab, onTab, contact, onClose }: {
       tries++;
       raf = requestAnimationFrame(locate);
     };
-    const t = setTimeout(locate, 40);
-    return () => { clearTimeout(t); cancelAnimationFrame(raf); };
+    const timer = setTimeout(locate, 40);
+    return () => { clearTimeout(timer); cancelAnimationFrame(raf); };
   }, [stop]);
 
   // Resizing the window or scrolling the page must not leave the ring on the wrong panel.
@@ -198,8 +207,11 @@ export function GuidedTour({ stops, tab, onTab, contact, onClose }: {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") done();
-      else if (e.key === "ArrowRight" || e.key === "Enter") next();
-      else if (e.key === "ArrowLeft") back();
+      else if (e.key === "Enter") next();
+      // In RTL the whole card reads the other way, so the far key is the one that
+      // goes back: left and right trade jobs the same way the arrows on the buttons do.
+      else if (e.key === (rtl ? "ArrowLeft" : "ArrowRight")) next();
+      else if (e.key === (rtl ? "ArrowRight" : "ArrowLeft")) back();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -239,32 +251,32 @@ export function GuidedTour({ stops, tab, onTab, contact, onClose }: {
       }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
           <span style={{ fontSize: 9.5, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: C }}>
-            {`Step ${i + 1} of ${stops.length}`}
+            {t("Step {n} of {total}", { n: i + 1, total: stops.length })}
           </span>
-          <button onClick={done} title="That's enough, I know how to use it"
+          <button onClick={done} title={t("That's enough, I know how to use it")}
             style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(222 25% 45%)", display: "flex", padding: 2 }}>
             <X style={{ width: 15, height: 15 }} />
           </button>
         </div>
 
         <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 15, color: "hsl(190 80% 96%)", marginBottom: 8, lineHeight: 1.35 }}>
-          {stop.title}
+          {t(stop.title)}
         </h3>
         <p style={{ fontSize: 13, color: "hsl(222 25% 66%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.6, margin: 0 }}>
-          {stop.body}
+          {t(stop.body, { cam: CAM })}
         </p>
 
         {/* The walk-through ends where a stuck customer needs to be pointed. */}
         {last && (contact?.whatsapp || contact?.telegram) && (
           <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px dashed hsl(222 40% 16%)" }}>
-            <ContactLine contact={contact} note="Anything that doesn't work, tell your administrator:" />
+            <ContactLine contact={contact} note={t("Anything that doesn't work, tell your administrator:")} />
           </div>
         )}
 
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 16 }}>
           <button onClick={back} disabled={i === 0}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 14px", borderRadius: 9, cursor: i === 0 ? "default" : "pointer", background: "transparent", border: "1px solid hsl(222 40% 16%)", color: i === 0 ? "hsl(222 25% 30%)" : "hsl(222 25% 65%)", fontWeight: 700, fontSize: 12.5, fontFamily: "'Rajdhani',sans-serif" }}>
-            <ArrowLeft style={{ width: 13, height: 13 }} /> Back
+            {rtl ? <ArrowRight style={{ width: 13, height: 13 }} /> : <ArrowLeft style={{ width: 13, height: 13 }} />} {t("Back")}
           </button>
           <div style={{ flex: 1, display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap" }}>
             {stops.map((_, n) => (
@@ -273,7 +285,7 @@ export function GuidedTour({ stops, tab, onTab, contact, onClose }: {
           </div>
           <button onClick={next}
             style={{ display: "flex", alignItems: "center", gap: 6, padding: "9px 16px", borderRadius: 9, cursor: "pointer", background: C, border: "none", color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 12.5, fontFamily: "'Rajdhani',sans-serif" }}>
-            {last ? <><Check style={{ width: 13, height: 13 }} /> Got it</> : <>Next <ArrowRight style={{ width: 13, height: 13 }} /></>}
+            {last ? <><Check style={{ width: 13, height: 13 }} /> {t("Got it")}</> : rtl ? <>{t("Next")} <ArrowLeft style={{ width: 13, height: 13 }} /></> : <>{t("Next")} <ArrowRight style={{ width: 13, height: 13 }} /></>}
           </button>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Bitcoin, Copy, Check, MessageCircle, Send, Smartphone } from "lucide-react";
 import type { AdminContact, AdminPayment } from "@stream-live/client";
+import { t } from "../lib/i18n";
 
 const C = "hsl(187 100% 52%)";
 
@@ -39,13 +40,13 @@ function Row({ icon: Icon, label, value, href }: {
     <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "9px 12px", background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)", borderRadius: 9 }}>
       <Icon style={{ width: 15, height: 15, color: C, flexShrink: 0 }} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <p style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 45%)", margin: 0 }}>{label}</p>
+        <p style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 45%)", margin: 0 }}>{t(label)}</p>
         {text}
       </div>
-      <button onClick={copy} title="Copy"
+      <button onClick={copy} title={t("Copy")}
         style={{ display: "flex", alignItems: "center", gap: 5, padding: "5px 9px", borderRadius: 7, background: copied ? "hsl(143 72% 40% / 0.18)" : "hsl(222 40% 11%)", border: `1px solid ${copied ? "hsl(143 72% 55% / 0.5)" : "hsl(222 40% 18%)"}`, cursor: "pointer", color: copied ? "hsl(143 72% 60%)" : "hsl(222 25% 55%)", fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", flexShrink: 0 }}>
         {copied ? <Check style={{ width: 11, height: 11 }} /> : <Copy style={{ width: 11, height: 11 }} />}
-        {copied ? "Copied" : "Copy"}
+        {copied ? t("Copied") : t("Copy")}
       </button>
     </div>
   );
@@ -54,7 +55,7 @@ function Row({ icon: Icon, label, value, href }: {
 function Shell({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div style={{ background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 18, marginBottom: 14 }}>
-      <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron', monospace", marginBottom: 12 }}>{title}</p>
+      <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron', monospace", marginBottom: 12 }}>{t(title)}</p>
       {children}
     </div>
   );
@@ -123,7 +124,7 @@ export function ContactLine({ contact, note, stack = false }: {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, minWidth: 0 }}>
       {note && (
-        <p style={{ fontSize: 11, color: "hsl(222 25% 58%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, margin: 0 }}>{note}</p>
+        <p style={{ fontSize: 11, color: "hsl(222 25% 58%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, margin: 0 }}>{t(note)}</p>
       )}
       <div style={{ display: "flex", flexDirection: stack ? "column" : "row", gap: 6, flexWrap: "wrap" }}>
         {contact!.whatsapp && <Pill icon={MessageCircle} label="WhatsApp" href={waLink(contact!.whatsapp)} value={contact!.whatsapp} />}

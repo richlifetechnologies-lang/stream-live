@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Hourglass, TriangleAlert } from "lucide-react";
 import { bucketFor, refreshBalances, useAccount, useLease } from "../lib/gateway";
 import { countdown, drainOf, MOD_LABELS } from "../lib/minutes";
+import { t } from "../lib/i18n";
 import type { Modality } from "@stream-live/client";
 
 const C = "hsl(187 100% 52%)";
@@ -23,8 +24,12 @@ export function useTicker(periodMs = 1000): number {
  * The user's minute clock. Idle it states what the current tab can still buy;
  * on air it counts down every second and turns amber, then red, as the bucket
  * empties.
+ *
+ * The foot bar beside Start call cannot spare a card's height, so the same
+ * clock comes in a pill: the number, and the drain bar under it once a call is
+ * running.
  */
-export function MinuteMeter({ modality }: { modality: Modality }) {
+export function MinuteMeter({ modality, compact = false }: { modality: Modality; compact?: boolean }) {
   const account = useAccount();
   const lease = useLease();
   const now = useTicker();
@@ -49,6 +54,25 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
     ? 100
     : Math.max(0, Math.min(100, ((remaining ?? 0) / lease.startBalance) * 100));
 
+  if (compact) {
+    return (
+      <div data-tour="meter" style={{ flexShrink: 0, padding: "7px 14px", borderRadius: 12, background: "hsl(222 44% 8%)", border: `1px solid ${tone}44`, minWidth: 118 }}>
+        <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 55%)", display: "flex", alignItems: "center", gap: 5 }}>
+          <Hourglass style={{ width: 10, height: 10, color: tone }} />
+          {t(MOD_LABELS[modality])} {running ? (drain.waiting ? t("starting up") : t("in use")) : t("available")}
+        </p>
+        <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 19, lineHeight: 1.15, color: tone, fontVariantNumeric: "tabular-nums" }}>
+          {unlimited ? t("UNLIMITED") : countdown(remaining)}
+        </p>
+        {running && !unlimited && (
+          <div style={{ height: 4, borderRadius: 2, overflow: "hidden", background: "hsl(222 40% 12%)" }}>
+            <div style={{ width: `${pct}%`, height: "100%", borderRadius: 2, background: tone, transition: "width 0.9s linear" }} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div style={{
       marginBottom: 8, padding: "10px 14px", borderRadius: 12,
@@ -63,7 +87,7 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
             fontSize: 9.5, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase",
             fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 55%)", whiteSpace: "nowrap",
           }}>
-            {MOD_LABELS[modality]} {running ? (drain.waiting ? "starting up" : "in use") : "available"}
+            {t(MOD_LABELS[modality])} {running ? (drain.waiting ? t("starting up") : t("in use")) : t("available")}
           </span>
         </div>
 
@@ -72,19 +96,19 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
           color: tone, fontVariantNumeric: "tabular-nums", letterSpacing: "0.02em",
           textShadow: low ? `0 0 14px ${tone}55` : "none",
         }}>
-          {unlimited ? "UNLIMITED" : countdown(remaining)}
+          {unlimited ? t("UNLIMITED") : countdown(remaining)}
         </span>
 
         {empty && !unlimited && !stale && (
           <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, color: tone, fontFamily: "'Rajdhani',sans-serif" }}>
             <TriangleAlert style={{ width: 12, height: 12 }} />
-            {running ? "Out of minutes — the call stops now" : "No minutes in this bucket"}
+            {running ? t("Out of minutes — the call stops now") : t("No minutes in this bucket")}
           </span>
         )}
 
         <button onClick={() => setLocation("/minutes")}
           style={{ marginLeft: "auto", background: "none", border: "none", cursor: "pointer", padding: 0, color: tone, fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
-          Minutes dashboard →
+          {t("Minutes dashboard →")}
         </button>
       </div>
 
@@ -105,7 +129,7 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
             margin: "5px 0 0", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase",
             color: "hsl(222 25% 46%)", fontFamily: "'Orbitron',monospace", fontVariantNumeric: "tabular-nums",
           }}>
-            What is left in this bucket
+            {t("What is left in this bucket")}
           </p>
         </div>
       )}
@@ -116,20 +140,20 @@ export function MinuteMeter({ modality }: { modality: Modality }) {
           <button onClick={() => void refreshBalances()}
             style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "inherit",
               fontSize: "inherit", fontWeight: 700, fontFamily: "inherit", textDecoration: "underline" }}>
-            Try again
+            {t("Try again")}
           </button>
         </p>
       )}
 
       {drain?.waiting && (
         <p style={{ margin: "7px 0 0", fontSize: 10.5, color: "hsl(187 60% 62%)", fontFamily: "'Rajdhani',sans-serif" }}>
-          Connecting — minutes start when your video appears.
+          {t("Connecting — minutes start when your video appears.")}
         </p>
       )}
 
       {low && !empty && (
         <p style={{ margin: "7px 0 0", fontSize: 10.5, color: "hsl(35 100% 70%)", fontFamily: "'Rajdhani',sans-serif" }}>
-          Under {LOW_MINUTES} minutes left here. Ask your administrator to top up before the call drops.
+          {t("Under {n} minutes left here. Ask your administrator to top up before the call drops.", { n: LOW_MINUTES })}
         </p>
       )}
     </div>

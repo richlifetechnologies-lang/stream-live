@@ -109,6 +109,10 @@ export type CheckoutInfo = {
   prices: Record<string, number>;
 };
 
+/** The two shelves a buyer can stand at, and the one door each of them takes money
+ *  through: mobile money at home, card abroad. Both are charged in Ghana cedis. */
+export type CheckoutShelf = "gh" | "intl";
+
 /** The administrator's contact centres — WhatsApp and Telegram, nothing else. */
 export type AdminContact = {
   message: string | null;
@@ -127,6 +131,11 @@ export type Plan = {
   maxDevices: number;
   /** Minutes attached to the package per modality — what the admin credits on purchase. */
   minutes: Record<Modality, number>;
+  /** The shelf the seller lists this on: 'gh' for Ghana users, 'intl' for everyone else. */
+  market: "gh" | "intl";
+  /** For an international row, the Ghana package it was copied from — null once the seller
+   *  has priced it himself, which is what makes the "this is the Ghana figure" note leave. */
+  mirrorOf: string | null;
 };
 
 /** One round-trip to `sl_account_snapshot` — what the user dashboard shows. */
@@ -210,7 +219,7 @@ export class StreamLiveClient {
   private pingFailures = 0;
   private sessionId: string | null = null;
   private pendingEnd: string | null = null;
-  private shopCache: { at: number; info: CheckoutInfo } | null = null;
+  private shopCache: Partial<Record<CheckoutShelf, { at: number; info: CheckoutInfo }>> = {};
   /** One token exchange at a time; the refresh ticket is only spendable once. */
   private refreshing: Promise<string | null> | null = null;
 
@@ -404,7 +413,7 @@ export class StreamLiveClient {
     const data = await this.read<Record<string, any>[]>(() =>
       this.sb
         .from("plans")
-        .select("id, name, price_cents, blurb, includes, features, max_devices, video_minutes, audio_minutes, video_audio_minutes")
+        .select("id, name, price_cents, blurb, includes, features, max_devices, video_minutes, audio_minutes, video_audio_minutes, market, mirror_of")
         .eq("active", true)
         .order("price_cents", { ascending: true })
     );
@@ -421,24 +430,61 @@ export class StreamLiveClient {
         audio: Number(p.audio_minutes ?? 0),
         video_audio: Number(p.video_audio_minutes ?? 0),
       },
+      market: String(p.market ?? "gh") === "intl" ? "intl" : "gh",
+      mirrorOf: (p.mirror_of as string | null) ?? null,
     }));
   }
 
   /**
-   * The online payment shelf. A null answer means there is no online door: the service
-   * is not deployed, is switched off, or did not answer. Nothing here throws, because
-   * somebody reading prices must never be blocked by the payment service being down.
+   * Which shelf the buyer tapped, remembered against his own account so the next machine he
+   * signs in on already knows. This never blocks a screen: the app has already switched the
+   * list in front of him, and a failure here only means he is asked again somewhere else.
    */
-  async checkout(): Promise<CheckoutInfo | null> {
-    // Three screens ask for the shelf at once and the watermark banner asks on every
-    // mount, so one answer is kept for a minute rather than fetched each time.
-    if (this.shopCache && Date.now() - this.shopCache.at < 60_000) return this.shopCache.info;
+  async chooseMarket(market: "gh" | "intl"): Promise<void> {
+    await this.token();
+    try {
+      await this.sb.rpc("sl_choose_market", { p_market: market });
+    } catch { /* the tap is already showing on his screen */ }
+  }
+
+  /**
+   * The online payment shelf, or both of them. A null answer means there is no online door:
+   * the service is not deployed, is switched off, or did not answer. Nothing here throws,
+   * because somebody reading prices must never be blocked by the payment service being down.
+   *
+   * Asked with no shelf, it answers for both lists at once — every package the till will take
+   * money for, whichever shelf it sits on — because the Plans screen shows two shelves and a
+   * card it has no figure for gets no button. The answer is only figures: which door a payment
+   * goes through is chosen on the server from the package itself, never from the list he was
+   * looking at, and never from the address he called from. Ask for one shelf — `checkout("intl")`
+   * — and that is all that comes back.
+   */
+  async checkout(market?: CheckoutShelf): Promise<CheckoutInfo | null> {
+    if (market) return this.shelf(market);
+    const [gh, intl] = await Promise.all([this.shelf("gh"), this.shelf("intl")]);
+    if (!gh) return intl;
+    if (!intl) return gh;
+    // A package id belongs to one shelf only, so the two price lists simply add up.
+    return {
+      enabled: gh.enabled || intl.enabled,
+      page: gh.page,
+      currency: gh.currency,
+      prices: { ...intl.prices, ...gh.prices },
+    };
+  }
+
+  /** One shelf, read on its own and kept for a minute: three screens ask at once and the
+   *  watermark banner asks on every mount, and none of them needs a fresh answer. */
+  private async shelf(market: CheckoutShelf): Promise<CheckoutInfo | null> {
+    const held = this.shopCache[market];
+    if (held && Date.now() - held.at < 60_000) return held.info;
     let j: Record<string, unknown>;
     try {
       const token = await this.token();
-      const res = await fetch(`${this.cfg.supabaseUrl}/functions/v1/paystack-checkout`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await fetch(
+        `${this.cfg.supabaseUrl}/functions/v1/paystack-checkout?market=${market}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
       if (!res.ok) return null;
       j = await res.json() as Record<string, unknown>;
     } catch {
@@ -455,7 +501,7 @@ export class StreamLiveClient {
       if (cents > 0 && p.buyable !== false) prices[String(p.id)] = Math.round(cents) / 100;
     }
     const info: CheckoutInfo = { enabled: j.enabled === true, page, currency: String(j.currency ?? "GHS"), prices };
-    this.shopCache = { at: Date.now(), info };
+    this.shopCache = { ...this.shopCache, [market]: { at: Date.now(), info } };
     return info;
   }
 

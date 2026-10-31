@@ -1,16 +1,17 @@
 import { useState, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
-import { AppLayout } from "../components/layout";
+import { AppLayout } from "../components/layout"
+import { Stage, PageHead, Card, CardTitle, Stat, PrimaryButton, D2 } from "../components/d2";
 import { countdown, drainOf, MOD_LABELS, type LiveLease } from "../lib/minutes";
 import { useTicker } from "../components/meter";
 import { ContactCard, PayCard } from "../components/contact";
 import { WatermarkOffer } from "../components/watermark-offer";
 import { gateway, useAccount, useLease, requestTopup } from "../lib/gateway";
 import { toUserMessage } from "../lib/end-reason";
+import { t } from "../lib/i18n";
 import type { AccountSnapshot, CheckoutInfo, Modality } from "@stream-live/client";
 import { Hourglass, Radio, RefreshCw, Send, ArrowLeftRight, CircleCheck, CircleOff, CreditCard } from "lucide-react";
 
-const C = "hsl(187 100% 52%)";
 const MODS: Modality[] = ["video", "audio", "video_audio"];
 
 const TAB_TO_MODALITY: Record<string, Modality> = {
@@ -19,13 +20,6 @@ const TAB_TO_MODALITY: Record<string, Modality> = {
   "video-audio": "video_audio",
 };
 
-const panel: React.CSSProperties = {
-  background: "hsl(222 44% 6%)", border: "1px solid hsl(222 40% 11%)", borderRadius: 14, padding: 18, marginBottom: 14,
-};
-const head: React.CSSProperties = {
-  fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em",
-  fontFamily: "'Orbitron', monospace", marginBottom: 14,
-};
 const inputSt: React.CSSProperties = {
   width: "100%", padding: "9px 12px", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)",
   borderRadius: 8, color: "hsl(190 80% 96%)", fontSize: 13, fontFamily: "'Rajdhani', sans-serif", outline: "none",
@@ -72,7 +66,7 @@ export default function MinutesPage() {
       const [s, l, r] = await Promise.all([gateway.snapshot(), gateway.ledger(12), gateway.myRequests()]);
       setSnap(s); setLedger(l); setRequests(r); setError(null);
     } catch (e) {
-      setError(toUserMessage(e, "We couldn't load your minutes. Try again in a moment."));
+      setError(toUserMessage(e, t("We couldn't load your minutes. Try again in a moment.")));
     } finally {
       setLoaded(true);
     }
@@ -103,30 +97,28 @@ export default function MinutesPage() {
     e.preventDefault();
     if (sending) return;
     const minutes = Number(reqMinutes);
-    if (!(minutes > 0)) { setError("Say how many minutes you need."); return; }
+    if (!(minutes > 0)) { setError(t("Say how many minutes you need.")); return; }
     setSending(true);
     try {
       await requestTopup({ modality: reqModality, minutes, paymentReference: reqReference.trim() || undefined, note: reqNote.trim() || undefined });
       setReqReference(""); setReqNote(""); setError(null);
       await load();
     } catch (err) {
-      setError(toUserMessage(err, "Could not send the request. Try again."));
+      setError(toUserMessage(err, t("Could not send the request. Try again.")));
     } finally { setSending(false); }
   };
 
   if (!account.signedIn) {
     return (
       <AppLayout>
-        <div style={{ padding: "28px 32px", maxWidth: 620, margin: "0 auto", textAlign: "center" }}>
-          <h1 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 20, color: "hsl(190 80% 96%)", marginBottom: 8 }}>Your minutes</h1>
-          <p style={{ color: "hsl(222 25% 55%)", fontSize: 13.5, fontFamily: "'Rajdhani',sans-serif", marginBottom: 18 }}>
-            Sign in to see what is left in each bucket and watch it drain while you are live.
-          </p>
-          <button onClick={() => setLocation("/account")}
-            style={{ padding: "10px 20px", borderRadius: 10, border: "none", background: C, color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer" }}>
-            Sign in
-          </button>
-        </div>
+        <Stage>
+          <PageHead name="Your minutes" note="Sign in to see what is left in each bucket and watch it drain while you are live." />
+          <Card style={{ maxWidth: 620, margin: "0 auto", textAlign: "center" }} pad={28}>
+            <PrimaryButton onClick={() => setLocation("/account")} style={{ margin: "0 auto" }}>
+              {t("Sign in")}
+            </PrimaryButton>
+          </Card>
+        </Stage>
       </AppLayout>
     );
   }
@@ -143,19 +135,43 @@ export default function MinutesPage() {
 
   return (
     <AppLayout>
-      <div style={{ padding: "28px 32px", maxWidth: 860, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 14, marginBottom: 20, flexWrap: "wrap" }}>
-          <div>
-            <h1 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 20, color: "hsl(190 80% 96%)", marginBottom: 3 }}>Your minutes</h1>
-            <p style={{ fontSize: 13, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>
-              {account.email}{running > 0 ? ` · ${running} call${running === 1 ? "" : "s"} running` : ""}
-            </p>
-          </div>
-          <button onClick={() => void load()}
-            style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: "hsl(187 100% 52% / 0.12)", border: `1px solid ${C}44`, cursor: "pointer", color: C, fontSize: 12, fontWeight: 700, fontFamily: "'Orbitron',monospace" }}>
-            <RefreshCw style={{ width: 12, height: 12 }} /> Refresh
-          </button>
-        </div>
+      <Stage>
+      <div style={{ padding: "0 0 40px", maxWidth: 860, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+        <PageHead
+          name="Your minutes"
+          pills={
+            <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginTop: 8 }}>
+              <span style={{ fontSize: 13, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>
+                {account.email}{running > 0 ? ` · ${running === 1 ? t("{n} call running", { n: running }) : t("{n} calls running", { n: running })}` : ""}
+              </span>
+              <button onClick={() => void load()}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 14px", borderRadius: 8, background: "hsl(187 100% 52% / 0.12)", border: `1px solid ${D2}44`, cursor: "pointer", color: D2, fontSize: 12, fontWeight: 700, fontFamily: "'Orbitron',monospace" }}>
+                <RefreshCw style={{ width: 12, height: 12 }} /> {t("Refresh")}
+              </button>
+            </div>
+          }
+          card={
+            <Card pad={16}>
+              <CardTitle>{t("Total available now")}</CardTitle>
+              <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 34, lineHeight: 1, color: D2, fontVariantNumeric: "tabular-nums", margin: 0 }}>
+                {totalUnlimited ? t("UNLIMITED") : countdown(total)}
+              </p>
+              <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 6 }}>
+                {t("minutes:seconds across all three buckets · they never expire")}
+              </p>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start", marginTop: 12 }}>
+                <Badge icon={Radio} tone={running > 0 ? "hsl(143 72% 55%)" : "hsl(222 25% 45%)"} text={running > 0 ? t("{n} live now", { n: running }) : t("no calls running")} />
+                <Badge icon={Hourglass} tone={pending > 0 ? "hsl(35 100% 60%)" : "hsl(222 25% 45%)"} text={pending > 0 ? (pending === 1 ? t("{n} top-up waiting", { n: pending }) : t("{n} top-ups waiting", { n: pending })) : t("no requests waiting")} />
+                {shop?.enabled === true && (
+                  <button onClick={() => setLocation("/plans")}
+                    style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 9, border: "none", background: D2, color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 12.5, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer" }}>
+                    <CreditCard style={{ width: 13, height: 13 }} /> {t("Buy minutes")}
+                  </button>
+                )}
+              </div>
+            </Card>
+          }
+        />
 
         {snap && <WatermarkOffer paid={snap.paid} videoMinutesLeft={videoLeft} />}
 
@@ -164,29 +180,6 @@ export default function MinutesPage() {
             {error}
           </div>
         )}
-
-        {/* Total across every bucket */}
-        <div style={{ ...panel, display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap" }}>
-          <div>
-            <p style={{ ...head, marginBottom: 6 }}>Total available now</p>
-            <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 40, lineHeight: 1, color: C, fontVariantNumeric: "tabular-nums", margin: 0 }}>
-              {totalUnlimited ? "UNLIMITED" : countdown(total)}
-            </p>
-            <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 6 }}>
-              minutes:seconds across all three buckets · they never expire
-            </p>
-          </div>
-          <div style={{ marginLeft: "auto", display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-end" }}>
-            <Badge icon={Radio} tone={running > 0 ? "hsl(143 72% 55%)" : "hsl(222 25% 45%)"} text={running > 0 ? `${running} live now` : "no calls running"} />
-            <Badge icon={Hourglass} tone={pending > 0 ? "hsl(35 100% 60%)" : "hsl(222 25% 45%)"} text={pending > 0 ? `${pending} top-up${pending === 1 ? "" : "s"} waiting` : "no requests waiting"} />
-            {shop?.enabled === true && (
-              <button onClick={() => setLocation("/plans")}
-                style={{ display: "flex", alignItems: "center", gap: 7, padding: "8px 15px", borderRadius: 9, border: "none", background: C, color: "hsl(222 47% 4%)", fontWeight: 700, fontSize: 12.5, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer" }}>
-                <CreditCard style={{ width: 13, height: 13 }} /> Buy minutes
-              </button>
-            )}
-          </div>
-        </div>
 
         {/* One card per bucket */}
         {snap?.wallets.map(w => {
@@ -197,59 +190,52 @@ export default function MinutesPage() {
           const allowed = snap.modalities[w.modality];
           const zero = !w.unlimited && (remaining ?? 0) < 1;
           const low = !w.unlimited && !zero && (remaining ?? 0) < 5;
-          const tone = zero || !allowed ? "hsl(0 85% 62%)" : low ? "hsl(35 100% 60%)" : C;
+          const tone = zero || !allowed ? "hsl(0 85% 62%)" : low ? "hsl(35 100% 60%)" : D2;
           return (
-            <div key={w.modality} style={{ ...panel, borderColor: modLive ? `${C}55` : "hsl(222 40% 11%)", marginBottom: 12 }}>
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
-                <div style={{ flex: "1 1 190px", minWidth: 0 }}>
-                  <p style={{ ...head, marginBottom: 4, color: tone }}>{MOD_LABELS[w.modality]}</p>
-                </div>
+            <Card key={w.modality} accent={tone} style={{ borderColor: modLive ? `${D2}55` : "hsl(222 40% 11%)" }}>
+              <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                <CardTitle accent={tone}>{t(MOD_LABELS[w.modality])}</CardTitle>
                 <div style={{ textAlign: "right" }}>
-                  <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 26, lineHeight: 1, color: tone, fontVariantNumeric: "tabular-nums", margin: 0 }}>
-                    {w.unlimited ? "UNLIMITED" : countdown(remaining)}
-                  </p>
-                  <p style={{ fontSize: 10, color: "hsl(222 25% 42%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 4 }}>
-                    min remaining
-                  </p>
+                  <Stat label="min remaining" value={w.unlimited ? t("UNLIMITED") : countdown(remaining)} accent={tone} />
                 </div>
               </div>
 
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
                 {allowed
-                  ? <Badge icon={CircleCheck} tone="hsl(143 72% 55%)" text="this account may use it" />
-                  : <Badge icon={CircleOff} tone="hsl(0 85% 62%)" text="switched off by your administrator" />}
+                  ? <Badge icon={CircleCheck} tone="hsl(143 72% 55%)" text={t("this account may use it")} />
+                  : <Badge icon={CircleOff} tone="hsl(0 85% 62%)" text={t("switched off by your administrator")} />}
                 {(modLive || otherCall) && (
-                  <Badge icon={Radio} tone={C} text={modLive ? "draining on this device" : "in use on another device"} />
+                  <Badge icon={Radio} tone={D2} text={modLive ? t("draining on this device") : t("in use on another device")} />
                 )}
                 {/* Only what the administrator has put in, never what a call took
                     out - the balance above is already the answer to that. */}
                 <span style={{ fontSize: 10.5, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginLeft: "auto" }}>
-                  {Number(w.total_credited).toFixed(1)} min credited
+                  {t("{n} min credited", { n: Number(w.total_credited).toFixed(1) })}
                 </span>
                 {(zero || low) && (
                   shop?.enabled === true ? (
                     <button onClick={() => setLocation("/plans")}
                       style={{ padding: "6px 12px", borderRadius: 7, background: `${tone}1f`, border: `1px solid ${tone}55`, cursor: "pointer", color: tone, fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
-                      Buy minutes
+                      {t("Buy minutes")}
                     </button>
                   ) : (
                     <button onClick={() => askFor(w.modality)}
                       style={{ padding: "6px 12px", borderRadius: 7, background: `${tone}1f`, border: `1px solid ${tone}55`, cursor: "pointer", color: tone, fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
-                      Ask for minutes
+                      {t("Ask for minutes")}
                     </button>
                   )
                 )}
               </div>
-            </div>
+            </Card>
           );
         })}
 
         {/* Calls running right now */}
-        <div style={{ ...panel, marginTop: 16 }}>
-          <p style={head}>Calls running now</p>
+        <Card>
+          <CardTitle>{t("Calls running now")}</CardTitle>
           {running === 0 ? (
             <p style={{ fontSize: 13, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>
-              Nothing is metered at the moment. Minutes only leave your bucket while a call is open.
+              {t("Nothing is metered at the moment. Minutes only leave your bucket while a call is open.")}
             </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -257,81 +243,84 @@ export default function MinutesPage() {
                 <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: "9px 13px", background: "hsl(222 40% 8%)", borderRadius: 8, border: "1px solid hsl(222 40% 12%)" }}>
                   <div style={{ minWidth: 0 }}>
                     <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>
-                      {MOD_LABELS[TAB_TO_MODALITY[s.tab] ?? "video_audio"]}
-                      <span style={{ color: "hsl(222 25% 45%)", fontWeight: 400 }}> · started {fmtDate(s.started_at)}</span>
+                      {t(MOD_LABELS[TAB_TO_MODALITY[s.tab] ?? "video_audio"])}
+                      <span style={{ color: "hsl(222 25% 45%)", fontWeight: 400 }}> {t("· started {date}", { date: fmtDate(s.started_at) })}</span>
                     </p>
                     <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
-                      {s.device_id ?? "unknown device"}
+                      {s.device_id ?? t("unknown device")}
                     </p>
                   </div>
-                  <span style={{ fontSize: 10, fontWeight: 700, color: C, fontFamily: "'Orbitron',monospace", whiteSpace: "nowrap" }}>
-                    lease {leaseState(s.lease_expires_at, now)}
+                  <span style={{ fontSize: 10, fontWeight: 700, color: D2, fontFamily: "'Orbitron',monospace", whiteSpace: "nowrap" }}>
+                    {t("lease {state}", { state: leaseState(s.lease_expires_at, now) })}
                   </span>
                 </div>
               ))}
             </div>
           )}
-        </div>
+        </Card>
 
         {/* Ask for minutes */}
-        <div id="askForm" style={panel}>
-          <p style={head}>Ask your administrator for minutes</p>
-          <form onSubmit={handleAsk} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1.3fr 0.7fr", gap: 12 }}>
-              <div>
-                <label style={labelSt}>Bucket</label>
-                <select value={reqModality} onChange={e => setReqModality(e.target.value as Modality)} style={inputSt}>
-                  {MODS.map(m => <option key={m} value={m}>{MOD_LABELS[m]}</option>)}
-                </select>
+        <div id="askForm">
+          <Card>
+            <CardTitle>{t("Ask your administrator for minutes")}</CardTitle>
+            <form onSubmit={handleAsk} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.3fr 0.7fr", gap: 12 }}>
+                <div>
+                  <label style={labelSt}>{t("Bucket")}</label>
+                  <select value={reqModality} onChange={e => setReqModality(e.target.value as Modality)} style={inputSt}>
+                    {MODS.map(m => <option key={m} value={m}>{t(MOD_LABELS[m])}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={labelSt}>{t("Minutes")}</label>
+                  <input type="number" min={1} step={1} required value={reqMinutes} onChange={e => setReqMinutes(e.target.value)} style={inputSt} />
+                </div>
               </div>
               <div>
-                <label style={labelSt}>Minutes</label>
-                <input type="number" min={1} step={1} required value={reqMinutes} onChange={e => setReqMinutes(e.target.value)} style={inputSt} />
+                <label style={labelSt}>{t("Payment reference")}</label>
+                <input value={reqReference} onChange={e => setReqReference(e.target.value)} placeholder={t("What your administrator should match the payment to")} style={inputSt} />
               </div>
-            </div>
-            <div>
-              <label style={labelSt}>Payment reference</label>
-              <input value={reqReference} onChange={e => setReqReference(e.target.value)} placeholder="What your administrator should match the payment to" style={inputSt} />
-            </div>
-            <div>
-              <label style={labelSt}>Note</label>
-              <textarea value={reqNote} onChange={e => setReqNote(e.target.value)} rows={2} placeholder="Anything else they should know" style={{ ...inputSt, resize: "vertical" }} />
-            </div>
-            <button type="submit" disabled={sending}
-              style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: "10px 18px", borderRadius: 8, border: "none", background: sending ? "hsl(222 40% 11%)" : C, color: sending ? "hsl(222 25% 35%)" : "hsl(222 47% 4%)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: sending ? "not-allowed" : "pointer", width: "fit-content" }}>
-              <Send style={{ width: 14, height: 14 }} /> {sending ? "Sending…" : "Send request"}
-            </button>
-            <p style={{ fontSize: 11, color: "hsl(222 25% 42%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.5 }}>
-              {shop?.enabled === true
-                ? "Use this only when you paid outside the app — by MoMo, Bitcoin or in person. Anything bought with the Buy button needs no request; the minutes arrive on their own."
-                : "Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in this bucket once they approve it and never expire."}{" "}
-              <button onClick={() => setLocation("/plans")}
-                style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: C, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
-                See plans and prices
-              </button>
-            </p>
-          </form>
+              <div>
+                <label style={labelSt}>{t("Note")}</label>
+                <textarea value={reqNote} onChange={e => setReqNote(e.target.value)} rows={2} placeholder={t("Anything else they should know")} style={{ ...inputSt, resize: "vertical" }} />
+              </div>
+              {/* The button keeps its native form-submit type inside the form, so the form's
+                  validation and handleAsk still run; onClick is a no-op on purpose. */}
+              <PrimaryButton onClick={() => undefined} disabled={sending} style={{ width: "fit-content" }}>
+                <Send style={{ width: 14, height: 14 }} /> {sending ? t("Sending…") : t("Send request")}
+              </PrimaryButton>
+              <p style={{ fontSize: 11, color: "hsl(222 25% 42%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.5 }}>
+                {shop?.enabled === true
+                  ? t("Use this only when you paid outside the app — by MoMo, Bitcoin or in person. Anything bought with the Buy button needs no request; the minutes arrive on their own.")
+                  : t("Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in this bucket once they approve it and never expire.")}{" "}
+                <button onClick={() => setLocation("/plans")}
+                  style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: D2, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
+                  {t("See plans and prices")}
+                </button>
+              </p>
+            </form>
+          </Card>
         </div>
 
         {snap && (
           <>
-            <PayCard pay={snap.pay} title="Pay your administrator — MoMo or Bitcoin only" />
-            <ContactCard contact={snap.contact} title="Send the payment reference" />
+            <PayCard pay={snap.pay} title={t("Pay your administrator — MoMo or Bitcoin only")} />
+            <ContactCard contact={snap.contact} title={t("Send the payment reference")} />
           </>
         )}
 
         {/* Requests + recent movements */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 }}>
-          <div style={{ ...panel, marginBottom: 0 }}>
-            <p style={head}>Your requests</p>
+          <Card>
+            <CardTitle>{t("Your requests")}</CardTitle>
             {requests.length === 0 ? (
-              <p style={{ fontSize: 13, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>Nothing asked for yet.</p>
+              <p style={{ fontSize: 13, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>{t("Nothing asked for yet.")}</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {requests.map(r => (
                   <div key={String(r.id)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 12px", background: "hsl(222 40% 8%)", borderRadius: 8, border: "1px solid hsl(222 40% 12%)" }}>
                     <div style={{ minWidth: 0 }}>
-                      <p style={{ fontSize: 12, color: "hsl(190 80% 92%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>{Number(r.minutes)} min · {MOD_LABELS[r.modality as Modality] ?? String(r.modality)}</p>
+                      <p style={{ fontSize: 12, color: "hsl(190 80% 92%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>{t("{n} min · {bucket}", { n: Number(r.minutes), bucket: MOD_LABELS[r.modality as Modality] ?? String(r.modality) })}</p>
                       <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>{fmtDate(r.created_at as string)}{r.admin_note ? ` — ${String(r.admin_note)}` : ""}</p>
                     </div>
                     <span style={{ fontSize: 10, fontWeight: 700, textTransform: "uppercase", color: r.status === "approved" ? "hsl(143 72% 55%)" : r.status === "rejected" ? "hsl(0 85% 65%)" : "hsl(35 100% 65%)", fontFamily: "'Orbitron',monospace" }}>{String(r.status)}</span>
@@ -339,12 +328,12 @@ export default function MinutesPage() {
                 ))}
               </div>
             )}
-          </div>
+          </Card>
 
-          <div style={{ ...panel, marginBottom: 0 }}>
-            <p style={head}><ArrowLeftRight style={{ width: 11, height: 11, verticalAlign: -1, marginRight: 6 }} />Recent movements</p>
+          <Card>
+            <CardTitle><ArrowLeftRight style={{ width: 11, height: 11, verticalAlign: -1, marginRight: 6 }} />{t("Recent movements")}</CardTitle>
             {ledger.length === 0 ? (
-              <p style={{ fontSize: 13, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>No credits or debits recorded yet.</p>
+              <p style={{ fontSize: 13, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>{t("No credits or debits recorded yet.")}</p>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
                 {ledger.map((l, i) => {
@@ -352,7 +341,7 @@ export default function MinutesPage() {
                   return (
                     <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "7px 12px", background: "hsl(222 40% 8%)", borderRadius: 7 }}>
                       <span style={{ fontSize: 11.5, color: "hsl(222 25% 60%)", fontFamily: "'Rajdhani',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {MOD_LABELS[l.modality as Modality] ?? String(l.modality)} · {String(l.reason ?? l.kind)}
+                        {t(MOD_LABELS[l.modality as Modality] ?? String(l.modality))} · {String(l.reason ?? l.kind)}
                       </span>
                       <span style={{ fontSize: 12, fontWeight: 700, color: delta > 0 ? "hsl(143 72% 55%)" : "hsl(0 75% 62%)", fontFamily: "'Orbitron',monospace", whiteSpace: "nowrap" }}>
                         {delta > 0 ? "+" : ""}{delta.toFixed(2)}
@@ -363,12 +352,13 @@ export default function MinutesPage() {
               </div>
             )}
             <button onClick={() => setLocation("/usage")}
-              style={{ marginTop: 10, background: "none", border: "none", cursor: "pointer", padding: 0, color: C, fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
-              Full history →
+              style={{ marginTop: 10, background: "none", border: "none", cursor: "pointer", padding: 0, color: D2, fontSize: 11, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
+              {t("Full history →")}
             </button>
-          </div>
+          </Card>
         </div>
       </div>
+      </Stage>
     </AppLayout>
   );
 }
@@ -382,7 +372,7 @@ function Badge({ icon: Icon, tone, text }: { icon: React.ElementType; tone: stri
 }
 
 function leaseState(expiresAt: string | null, now: number): string {
-  if (!expiresAt) return "renewing";
+  if (!expiresAt) return t("renewing");
   const secs = Math.round((new Date(expiresAt).getTime() - now) / 1000);
-  return secs > 0 ? `${secs}s` : "expired";
+  return secs > 0 ? t("{secs}s", { secs }) : t("expired");
 }

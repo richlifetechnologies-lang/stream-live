@@ -149,6 +149,20 @@ function requestIp(req: Request): string {
   return /^[0-9a-fA-F:.]{3,45}$/.test(first) ? first : "";
 }
 
+/**
+ * The two-letter country the runtime already put on this request, kept for the flag the
+ * SELLER sees beside an account. It is taken because it costs nothing — the header is on the
+ * call whether or not anybody asks for it — and because nothing about it is decided here:
+ * no price, no package list and no payment door is ever chosen from it. The customer chooses
+ * which shelf he buys from by tapping it, and he can be standing anywhere. A customer on a
+ * VPN shows the VPN's country, and the whole of that mistake is one wrong flag on a screen
+ * only one person reads. Nothing is asked of a GeoIP service, and nothing should be.
+ */
+function requestCountry(req: Request): string | null {
+  const raw = (req.headers.get("cf-ipcountry") ?? "").trim();
+  return /^[A-Za-z][A-Za-z]$/.test(raw) ? raw : null;
+}
+
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return preflight();
   if (req.method !== "POST") return fail("method not allowed", 405);
@@ -159,9 +173,10 @@ Deno.serve(async (req: Request) => {
     // the one that has to be diagnosable afterwards, and the address is the only thing that
     // separates "two accounts, one computer" from "two computers that share a name".
     const ip = requestIp(req);
-    if (ip) {
+    const country = requestCountry(req);
+    if (ip || country) {
       try {
-        await adminClient().rpc("sl_note_network", { p_user: user.id, p_ip: ip });
+        await adminClient().rpc("sl_note_network", { p_user: user.id, p_ip: ip, p_country: country });
       } catch {
         // Bookkeeping never gets to refuse a call.
       }

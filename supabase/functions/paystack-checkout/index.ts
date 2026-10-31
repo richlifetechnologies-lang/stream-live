@@ -1,10 +1,25 @@
 // paystack-checkout — the buyer's door to an online payment.
 //
 //   GET  /                       -> the packages on sale and how they can be paid for
+//   GET  /?market=intl           -> the international shelf instead of the home one
 //   GET  /?check=<reference>     -> how that one payment is doing, asked of Paystack itself
 //   POST / { email, plan_id, method } -> opens the payment, returns Paystack's page
 //   POST / { reconcile: true }   -> with the app's own sign-in: settle every order that
 //                                   address has paid for and not been credited for
+//
+// Two shelves, one door each. `market` is which list the customer chose for himself by
+// tapping it in the app — the Ghana shelf, paid in cedis by mobile money, or the
+// international one, paid by card — and it is NEVER read off the address the request came
+// from. A Ghanaian on a VPN and a foreign visitor in Accra both get the shelf they
+// themselves picked, and the price on it is the seller's, not a machine's guess. The till
+// can also say which door it wants with `?way=card` / `?way=mobile_money`, which is what the
+// app already sends; either word lands on the same shelf.
+//
+// The door is enforced here, on the server, from the package the buyer named:
+// plans.market says whether that package is a Ghana one or an international one, and the
+// channel that does not belong to its shelf is refused before Paystack is asked for a
+// checkout. A page that was bookmarked, half-loaded or hand-typed cannot open a door the
+// shelf does not have.
 //
 // method is 'card' or 'mobile_money'. Either way the buyer is handed to Paystack's
 // own screen, which is where the card number or the wallet number is typed and
@@ -28,6 +43,24 @@ import { reconcilePending, settleByReference } from "../_shared/paystack-reconci
 
 const API = "https://api.paystack.co";
 const TIMEOUT_MS = 15_000;
+
+/** The two shelves, and nothing else. */
+type Market = "gh" | "intl";
+
+/** The one payment method each shelf takes money through. */
+const SHELF_DOOR: Record<Market, "card" | "mobile_money"> = { gh: "mobile_money", intl: "card" };
+
+/**
+ * Which shelf a request is for, from what the customer himself chose. `?market=` is the
+ * honest word; `?way=` is the one the app already puts on the till's address, and it can
+ * only ever mean one shelf. A till with neither gets the home shelf, which is what it has
+ * always been given. No address, no header, no country is looked at here.
+ */
+function shelfFor(params: URLSearchParams): Market {
+  const m = (params.get("market") || "").trim().toLowerCase();
+  if (m === "intl" || m === "gh") return m;
+  return (params.get("way") || "").trim().toLowerCase() === "card" ? "intl" : "gh";
+}
 
 function secretKey(): string {
   const s = Deno.env.get("PAYSTACK_SECRET_KEY") ?? "";
@@ -75,25 +108,30 @@ async function paystack(path: string, key: string, body?: Record<string, unknown
 }
 
 /**
- * Everything the seller lists, with the two ways they may pay for it: every package
- * switched on in the app, each with its cedi price worked out from the dollar price at
- * the live exchange figure, and a flag saying whether money can actually be taken for it
- * here. The page never has to be edited when he adds or re-prices a package —
- * sl_paystack_packages reads the same table the app's Plans screen does.
+ * One shelf: what the seller lists on it, the figure it is charged at, and the one door it
+ * takes money through. The page never has to be edited when he adds or re-prices a package —
+ * sl_paystack_packages reads the same table the app's Plans screen does, and it is the shelf,
+ * not the request, that names the door. An empty door list is passed through as it stands:
+ * a seller who switched that method off on his own panel meant it, and this server will not
+ * quietly hand his customers the other one instead.
  */
-async function packages() {
-  const { data, error } = await adminClient().rpc("sl_paystack_packages");
+async function packages(market: Market = "gh", lang: string | null = null) {
+  const { data, error } = await adminClient().rpc("sl_paystack_packages", {
+    p_market: market,
+    p_lang: lang ?? null,
+  });
   if (error) throw new Error(error.message);
   const shelf = (data?.packages ?? []) as Array<Record<string, unknown>>;
   const channels = Array.isArray(data?.channels)
-    ? data.channels.filter((c: unknown) => c === "card" || c === "mobile_money")
+    ? data.channels.filter((c: unknown) => c === SHELF_DOOR[market])
     : [];
   return {
     enabled: data?.enabled === true,
-    currency: "GHS",
+    market: data?.market === "intl" ? "intl" : market,
+    currency: String(data?.currency ?? "GHS"),
     rate: Number(data?.ghs_per_usd ?? 12),
     page: pageUrl(),
-    channels: channels.length ? channels : ["card"],
+    channels,
     packages: shelf,
   };
 }
@@ -103,6 +141,20 @@ function chosenMethod(raw: unknown, open: string[]): "card" | "mobile_money" | n
   const m = String(raw ?? "").trim().toLowerCase();
   if (m !== "card" && m !== "mobile_money") return null;
   return open.includes(m) ? m : null;
+}
+
+/**
+ * Which shelf a package belongs to, read off the package itself. This is the whole of the
+ * payment-door rule, and it does not care what the page was shown or what the buyer meant:
+ * a Ghana package is paid on mobile money and an international one by card, because that is
+ * what the seller's two shelves say. A package this table does not know has no shelf, and the
+ * order is refused further down for want of a package rather than for want of an address.
+ */
+async function shelfOfPlan(db: ReturnType<typeof adminClient>, planId: string): Promise<Market | null> {
+  if (!planId) return null;
+  const { data, error } = await db.from("plans").select("id, market").eq("id", planId).maybeSingle();
+  if (error || !data?.id) return null;
+  return data.market === "intl" ? "intl" : "gh";
 }
 
 /**
@@ -145,7 +197,7 @@ async function handle(req: Request): Promise<Response> {
       }
       return json(data ?? { ok: false, error: "unknown_reference" });
     }
-    return json(await packages());
+    return json(await packages(shelfFor(url.searchParams), url.searchParams.get("lang")));
   }
 
   if (req.method !== "POST") return fail("use GET for the package list, POST to pay", 405);
@@ -166,9 +218,28 @@ async function handle(req: Request): Promise<Response> {
 
   const key = secretKey();
   const db = adminClient();
-  const { enabled, channels, packages: shelf } = await packages();
+
+  // The shelf is the package's, not the page's. Asked first, because it is the package that
+  // says which door this order may go through — which list the customer was looking at, and
+  // what he typed into the method box, are both things a browser decides.
+  const planId = String(body.plan_id ?? "").trim();
+  const market = await shelfOfPlan(db, planId);
+  const { enabled, channels, packages: shelf } = await packages(market ?? "gh");
   if (!enabled) {
     return fail("Online payment is not switched on yet. Please pay another way for now.", 503);
+  }
+
+  // The door the shelf has, and only that door. Refused here, on the server, before Paystack
+  // is asked for a checkout: mobile money is a Ghana thing and a card abroad is a card thing,
+  // and no page — stale, bookmarked, or written by hand in a console — can put the wrong one
+  // on a package.
+  if (market && String(body.method ?? "").trim().toLowerCase() !== SHELF_DOOR[market]) {
+    return fail(
+      market === "intl"
+        ? "That package is paid by card. Mobile money is only for packages bought in Ghana."
+        : "That package is paid by mobile money. Choose mobile money and try again.",
+      400,
+    );
   }
 
   const method = chosenMethod(body.method, channels);
@@ -179,7 +250,6 @@ async function handle(req: Request): Promise<Response> {
   const email = cleanEmail(body.email);
   if (!email) return fail("Type the email address your account was created with, properly.", 400);
 
-  const planId = String(body.plan_id ?? "").trim();
   const plan = shelf.find((p: Record<string, unknown>) => p.id === planId);
   if (!plan) return fail("That package is not on sale right now.", 400);
   // The page lists every package the seller has, including one he has not finished
@@ -233,6 +303,21 @@ async function handle(req: Request): Promise<Response> {
     .select("reference")
     .single();
   if (insertError) return fail(insertError.message, 500);
+
+  // He has now paid for a shelf, which is the clearest tap there is. Remembered against his
+  // account so the next machine he signs in on opens on the same list — and it is only a
+  // memory: the door above came from the package, and this cannot change anybody's price.
+  // Bookkeeping never gets to refuse a payment, so a failure here is swallowed on purpose.
+  try {
+    await db.rpc("sl_note_market", {
+      p_user: profile.id,
+      p_market: market,
+      p_source: "tap",
+      p_country: null,
+    });
+  } catch {
+    /* the order matters, the stamp does not */
+  }
 
   const init = await paystack("/transaction/initialize", key, {
     email,

@@ -83,7 +83,7 @@
   /* Ten columns of money will not fit a narrow window; the scroller on #plansList
      lets it slide sideways instead of crushing the figures into unreadable strips.
      The editor is deliberately outside that scroller, so it is never the part cut off. */
-  #plansList table { min-width: 960px; }
+  #plansList table { min-width: 1060px; }
   tr.planoff td { opacity: .55; }
   tr.planoff td.planhold { opacity: 1; }
   .num { font-family: ui-monospace, monospace; text-align: right; white-space: nowrap; }
@@ -116,6 +116,7 @@
 </header>
 
 <div class="wrap">
+  <p id="clockNote" class="muted" style="margin:0 0 14px;font-size:12px"></p>
   <!-- Sign in -->
   <div id="authCard" class="card">
     <h2 style="font-size:14px;margin:0 0 6px">Admin sign in</h2>
@@ -731,7 +732,7 @@
         <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of that bucket, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x.</p>
         <div style="overflow:auto">
           <table id="currentRates">
-            <thead><tr><th>Bucket</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>Effective from</th><th>Note</th></tr></thead>
+            <thead><tr><th>Bucket</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>Effective from (UTC)</th><th>Note</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -743,7 +744,7 @@
         <div class="row">
           <div><label>Bucket</label><select id="brModality"><option value="video">Video Call</option><option value="audio">Audio Call</option><option value="video_audio">Video + Audio</option></select></div>
           <div><label>Multiplier</label><input id="brMult" type="number" min="0.05" step="0.05" value="1" /></div>
-          <div><label>Effective from</label><input id="brFrom" type="datetime-local" /></div>
+          <div><label>Effective from (UTC)</label><input id="brFrom" type="datetime-local" /></div>
           <div style="flex:2 1 240px"><label>Note</label><input id="brNote" placeholder="e.g. ElevenLabs price rise" /></div>
         </div>
         <div class="btns" style="margin-top:12px"><button id="saveRate" class="primary">Insert new rate</button></div>
@@ -757,7 +758,7 @@
         </div>
         <div style="overflow:auto;margin-top:12px">
           <table id="ratesTable">
-            <thead><tr><th>Bucket</th><th>Multiplier</th><th>Effective from</th><th>Retired</th><th>Note</th><th></th></tr></thead>
+            <thead><tr><th>Bucket</th><th>Multiplier</th><th>Effective from (UTC)</th><th>Retired</th><th>Note</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1161,6 +1162,7 @@
   // the trial register — without these the panel cannot say why an account got no minute.
   let hasSignupDev = false;
   let hasNetwork = false;
+  let hasShelf = false;
   let DEV_OF = {};
   let DEV_SEEN = {};
   let REG_BY_DEV = {};
@@ -1289,11 +1291,14 @@
       ? sb.from("profiles").select(cols).ilike("email", "%" + q + "%")
       : sb.from("profiles").select(cols)
     ).order("created_at", { ascending: false }).limit(q ? 40 : 60);
-    // signup_device_id only exists once the one-trial-per-computer migration has run, and
-    // the network columns only once the network record has run; naming a missing column
-    // fails the whole select, so each is dropped in turn rather than losing the list.
-    let { data: profs, error } = await askProf(profCols
-      + ", signup_device_id, network_first_ip, network_first_at, network_last_ip, network_last_at");
+    // signup_device_id only exists once the one-trial-per-computer migration has run, the
+    // network columns only once the network record has run, and the two shelf columns only
+    // once the catalogue was split; naming a missing column fails the whole select, so each
+    // is dropped in turn rather than losing the list.
+    const netCols = profCols + ", signup_device_id, network_first_ip, network_first_at, network_last_ip, network_last_at";
+    let { data: profs, error } = await askProf(netCols + ", market, country");
+    hasShelf = !error;
+    if (error) ({ data: profs, error } = await askProf(netCols));
     hasSignupDev = !error;
     hasNetwork = !error;
     if (error) {
@@ -1468,8 +1473,14 @@
       const bought = paid.has(p.id);
       const eng = engineOfAcct(p.id);
       const pin = s?.engine_override ? ' <span class="pill n" title="you pinned this account">pinned</span>' : "";
+      // Which list he taps for himself, and the country beside his account for his eyes only.
+      // Neither one decides a price: the shelf is his own tap, and a wrong country costs him
+      // nothing but a moment of curiosity.
+      const shelf = !hasShelf ? "" : (p.market === "gh" || p.market === "intl"
+        ? `<div style="margin-top:3px"><span style="font-size:11px;font-weight:700;color:${p.market === "intl" ? "#a78bfa" : "#35e0e6"}">${p.market === "intl" ? "outside-Ghana list" : "Ghana list"}</span>${p.country ? ` <span class="muted" title="only you see this. It never chooses a price or a payment method for him.">${esc(p.country)}</span>` : ""}</div>`
+        : '<div class="muted" style="margin-top:3px">has not chosen a list yet</div>');
       return `<tr data-user="${p.id}">
-        <td><b>${esc(p.email)}</b><div class="muted">since ${esc((p.created_at || "").slice(0, 10))}</div></td>
+        <td><b>${esc(p.email)}</b><div class="muted">since ${esc((p.created_at || "").slice(0, 10))}</div>${shelf}</td>
         <td class="muted">${s ? esc(plans[s.plan_id]?.name || s.plan_id) + (bought ? "" : '<div class="muted">stamped at sign-up, nothing bought</div>') : '<span class="pill none">no subscription</span>'}</td>
         <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
         <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id, p.created_at))}</div>${devOf(p.id, p.created_at)}${netOf(p)}</td>
@@ -3448,9 +3459,10 @@
   $("rateRefresh").onclick = loadRates;
 
   function setBrFromNow() {
-    const d = new Date();
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-    $("brFrom").value = d.toISOString().slice(0, 16);
+    // Filled with the server's UTC wall time and read back as UTC below, so a machine
+    // on the wrong clock or in the wrong zone cannot queue a new rate twelve hours
+    // away when you meant "from now".
+    $("brFrom").value = new Date().toISOString().slice(0, 16);
   }
 
   $("saveRate").onclick = async () => {
@@ -3461,7 +3473,7 @@
       modality: $("brModality").value,
       multiplier: mult,
       note: $("brNote").value.trim() || null,
-      effective_from: $("brFrom").value ? new Date($("brFrom").value).toISOString() : new Date().toISOString(),
+      effective_from: $("brFrom").value ? new Date($("brFrom").value + "Z").toISOString() : new Date().toISOString(),
       created_by: ADMIN_ID,
     };
     const { error } = await sb.from("burn_rates").insert(row);
@@ -3892,7 +3904,7 @@
       return;
     }
     const { data, error } = await sb.from("plans")
-      .select("id, name, price_cents, blurb, includes, max_devices, features, active, video_minutes, audio_minutes, video_audio_minutes")
+      .select("id, name, price_cents, blurb, includes, max_devices, features, active, video_minutes, audio_minutes, video_audio_minutes, market, mirror_of")
       .order("price_cents", { ascending: true });
     if (error) return msg("plansMsg", error.message, "err");
     PLAN_ROWS = data || [];
@@ -3908,6 +3920,18 @@
     renderPlans();
   }
 
+  // A package on the shelf for users outside Ghana is still somebody else's price until he
+  // types his own: the twin was copied from a Ghana row and carries the same figure. That is
+  // a comparison of two stored numbers, not a flag, so the moment he re-prices the row the
+  // warning below disappears by itself.
+  function planCopied(p) {
+    if (p.market !== "intl" || !p.mirror_of) return false;
+    const src = PLAN_ROWS.find((x) => x.id === p.mirror_of);
+    return !!src && N(src.price_cents) === N(p.price_cents);
+  }
+
+  const SHELF_NAME = { gh: "Ghana", intl: "Outside Ghana" };
+
   // The one sentence that tells him whether the catalogue is safe to sell today.
   function planSummary() {
     const priceOf = (p) => N(p.price_cents) / 100;
@@ -3915,10 +3939,15 @@
     const prices = PLAN_ROWS.map(priceOf).filter((v) => v > 0).sort((a, b) => a - b);
     const bare = PLAN_ROWS.filter((p) => !MODALITIES.some((m) => planMinutes(p)[m] > 0));
     const under = PLAN_MINCOST ? PLAN_ROWS.filter((p) => priceOf(p) > 0 && priceOf(p) < planCost({ minutes: planMinutes(p) })) : [];
+    const gh = PLAN_ROWS.filter((p) => p.market === "intl").length ? PLAN_ROWS.filter((p) => p.market !== "intl") : PLAN_ROWS;
+    const intl = PLAN_ROWS.filter((p) => p.market === "intl");
+    const copied = intl.filter(planCopied);
     $("plansSummary").innerHTML = !PLAN_ROWS.length
       ? "Nothing in the catalogue yet — press “+ New package”."
       : `${PLAN_ROWS.length} package${PLAN_ROWS.length === 1 ? "" : "s"} in the catalogue, ${live.length} on sale`
+        + ` · ${gh.length} for Ghana users, ${intl.length} for users outside Ghana`
         + (prices.length ? ` · ${pgUsd(prices[0])} to ${pgUsd(prices[prices.length - 1])}` : "")
+        + (copied.length ? `<br><span class="dirty">${copied.length} outside-Ghana package${copied.length === 1 ? "" : "s"} still carry${copied.length === 1 ? "s" : ""} the Ghana price — a buyer abroad is charged what a buyer at home pays: ${copied.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "")
         + (bare.length ? `<br><span class="dirty">${bare.length} has no minutes attached, so anyone who pays gets nothing: ${bare.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "")
         + (under.length ? `<br><span class="dirty">${under.length} priced under what it costs you: ${under.map((p) => esc(p.name || p.id)).join(", ")}</span>` : "");
   }
@@ -3926,7 +3955,7 @@
   function renderPlans() {
     $("plansList").innerHTML = !PLAN_ROWS.length ? '<p class="muted">No packages yet.</p>' : `<table>
         <thead><tr>
-          <th>Package the buyer sees</th><th class="num">Price</th>
+          <th>Package the buyer sees</th><th>Which list</th><th class="num">Price</th>
           <th class="num">Video</th><th class="num">Audio</th><th class="num">Video + Audio</th>
           <th class="num">Costs you</th><th class="num">You keep</th>
           <th>Accounts</th><th>On sale</th><th></th>
@@ -3950,11 +3979,18 @@
     const held = PLAN_HOLD[p.id] || 0;
     const dash = '<span class="muted">—</span>';
     const devices = N(p.max_devices, 1);
+    const shelf = p.market === "intl"
+      ? '<span style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(167,139,250,.16);color:#a78bfa">Outside Ghana</span>'
+      : '<span style="display:inline-block;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:700;background:rgba(53,224,230,.14);color:#35e0e6">Ghana</span>';
+    // A Ghana package with no twin abroad gets the button; once the twin exists it is gone,
+    // because a second one would be a duplicate.
+    const canTwin = p.market !== "intl" && !PLAN_ROWS.some((x) => x.id === p.id + "-intl");
     return `<tr data-plan="${esc(p.id)}"${p.active ? "" : ' class="planoff"'}>
       <td><div class="pname">${esc(p.name || p.id)}</div>
         ${p.blurb ? `<div class="pblurb">${esc(p.blurb)}</div>` : ""}
         <div class="ptags">${(p.features || []).map((f) => `<span class="ptag">${esc(FEATURE_LABEL[f] || f)}</span>`).join("")}
           <span class="ptag">${devices === 1 ? "1 device" : devices + " devices"}</span></div></td>
+      <td style="white-space:nowrap">${shelf}${planCopied(p) ? '<div class="muted" style="font-size:11px">price still copied</div>' : ""}</td>
       <td class="num">${pgUsd(price)}</td>
       ${MODALITIES.map((m) => `<td class="num">${a[m] ? mins(a[m]) : dash}</td>`).join("")}
       <td class="num">${cost === null ? dash : pgUsd(cost)}</td>
@@ -3962,7 +3998,7 @@
       <td class="planhold">${held ? `<span class="pill n">${held}</span>` : '<span class="muted">none</span>'}</td>
       <td class="planhold"><button class="switch ${p.active ? "on" : "off"}" data-p="sell" data-id="${esc(p.id)}"
         title="${p.active ? "Buyers see this one. Press to take it off the shelf." : "Not on the buyer's screen. Press to sell it."}"><span class="dot"></span>${p.active ? "On sale" : "Off sale"}</button></td>
-      <td><div class="btns"><button data-p="edit" data-id="${esc(p.id)}">${PLAN_EDIT === p.id ? "Close" : "Edit"}</button><button data-p="copy" data-id="${esc(p.id)}">Copy</button></div></td>
+      <td><div class="btns"><button data-p="edit" data-id="${esc(p.id)}">${PLAN_EDIT === p.id ? "Close" : "Edit"}</button><button data-p="copy" data-id="${esc(p.id)}">Copy</button>${canTwin ? `<button data-p="twin" data-id="${esc(p.id)}" title="Makes the same package on the list for users outside Ghana, at this price, off the shelf until you say otherwise.">Send abroad</button>` : ""}</div></td>
     </tr>`;
   }
 
@@ -3973,23 +4009,31 @@
       name: p.name ?? "", price: (N(p.price_cents) / 100).toFixed(2), blurb: p.blurb ?? "",
       includes: (p.includes || []).join("\n"), devices: N(p.max_devices, 1), feats: p.features || [],
       min_video: N(p.video_minutes, 0), min_audio: N(p.audio_minutes, 0), min_video_audio: N(p.video_audio_minutes, 0),
+      market: p.market === "intl" ? "intl" : "gh",
     } : {
       name: "", price: "", blurb: "", includes: "Minutes never expire\nWorks on every device you sign in to",
-      devices: 2, feats: ["video"], min_video: 0, min_audio: 0, min_video_audio: 0,
+      devices: 2, feats: ["video"], min_video: 0, min_audio: 0, min_video_audio: 0, market: "gh",
     };
     return `
       <div class="row">
         <div><label style="margin-top:0">Name the buyer sees</label><input data-f="name" value="${esc(v.name)}" placeholder="Starter" /></div>
         <div style="flex:0 0 130px"><label style="margin-top:0">Price (USD)</label><input data-f="price" type="number" min="0" step="0.01" value="${v.price}" placeholder="9.00" /></div>
         <div style="flex:0 0 130px"><label style="margin-top:0">Devices at once</label><input data-f="devices" type="number" min="1" value="${v.devices}" /></div>
+        <div style="flex:0 0 190px"><label style="margin-top:0">Which list it sells from</label>
+          <select data-f="market">
+            <option value="gh"${v.market === "gh" ? " selected" : ""}>Ghana users — mobile money</option>
+            <option value="intl"${v.market === "intl" ? " selected" : ""}>Users outside Ghana — card</option>
+          </select>
+        </div>
       </div>
+      <p class="phint" style="margin-top:6px">The buyer chooses his own list by tapping it in the app; nothing here guesses where he is. A package on the outside-Ghana list is offered to him with the card door only, and a Ghana package with mobile money only — so the price you type here is the price that shelf charges.</p>
       <label>Minutes this package sells — this is what lands on the buyer's account when you credit them</label>
       <div class="grid3">
         ${MODALITIES.map((m) => `<div><label style="margin-top:0">${MOD_LABEL[m]}</label><input data-f="min_${m}" type="number" min="0" step="1" value="${v["min_" + m]}" /></div>`).join("")}
       </div>
-      <label>One-line pitch</label>
+      <label>One-line pitch — your own note; the buyer's card no longer prints it</label>
       <input data-f="blurb" value="${esc(v.blurb)}" placeholder="For streamers who go live on camera" />
-      <label>What the buyer gets — one line each</label>
+      <label>What the buyer gets — one line each; also kept off the card now, for your records</label>
       <textarea data-f="includes" placeholder="300 Video Call minutes&#10;Two devices at a time">${esc(v.includes)}</textarea>
       <label>What it unlocks</label>
       <div>${FEATURES.map((f) => `<label class="feat" style="margin:0 14px 6px 0"><input type="checkbox" data-f="feat_${f}" ${v.feats.includes(f) ? "checked" : ""} /> ${FEATURE_LABEL[f]}</label>`).join("")}</div>
@@ -4025,18 +4069,20 @@
     </div>`;
   }
 
-  // Painted to match the buyer's Plans screen: name, the big price, the pitch, only the
-  // minute lines that are above zero, the bullets, then the unlock and device chips.
+  // Painted to match the buyer's card as it stands today: the name, the price, only the
+  // minute lines above zero, and the button he will press. The pitch, the bullets and the
+  // chips are off the card now, so they are off this preview too — otherwise the panel
+  // would promise a buyer a card he will never see.
   function planPreview(v) {
     const mods = MODALITIES.filter((m) => v.minutes[m] > 0);
-    return `<div class="ph">${esc(v.name || "Untitled package")}</div>
-      <div class="pp">${pgUsd(v.price)}<span>USD</span></div>
-      ${v.blurb ? `<div class="pb">${esc(v.blurb)}</div>` : ""}
+    const intl = v.market === "intl";
+    const accent = intl ? "#a78bfa" : "#35e0e6";
+    return `<div class="ph" style="color:${accent}">${esc(v.name || "Untitled package")}</div>
+      <div class="pp" style="color:${accent}">${pgUsd(v.price)}<span>USD</span></div>
       ${mods.length
         ? `<div class="pm"><p class="pml">Minutes in this package</p>${mods.map((m) => `<div class="pmm"><span>${MOD_LABEL[m]}</span><span class="mono">${v.minutes[m].toLocaleString("en-US")} min</span></div>`).join("")}</div>`
         : '<div class="pb" style="color:#facc15">No minutes attached — a buyer who pays this gets nothing.</div>'}
-      ${v.includes.length ? `<ul>${v.includes.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>` : ""}
-      <div class="pt">${v.features.map((f) => `<span>${esc(FEATURE_LABEL[f] || f)}</span>`).join("")}<span>${v.devices === 1 ? "1 device" : v.devices + " devices"}</span></div>`;
+      <div class="pt"><span style="background:${accent}1f;color:${accent}">${intl ? "Buy by card" : "Buy by mobile money"} · ${SHELF_NAME[intl ? "intl" : "gh"]} list</span></div>`;
   }
 
   function planMoney(v) {
@@ -4063,13 +4109,14 @@
       devices: Math.max(1, Math.round(num("devices"))),
       minutes: Object.fromEntries(MODALITIES.map((m) => [m, Math.max(0, Math.round(num("min_" + m)))])),
       features: FEATURES.filter((f) => get("feat_" + f)?.checked),
+      market: get("market")?.value === "intl" ? "intl" : "gh",
     };
   }
 
   // What gets written. Sale state is deliberately absent: the On sale switch owns that,
   // on its own press, so saving a description can never put a package on the shelf.
   function planToRow(v) {
-    return {
+    const row = {
       name: v.name || v.id || "Package",
       price_cents: Math.round(v.price * 100),
       currency: "usd",
@@ -4080,7 +4127,14 @@
       audio_minutes: v.minutes.audio,
       video_audio_minutes: v.minutes.video_audio,
       features: v.features,
+      market: v.market,
     };
+    // A package he moves back to the Ghana shelf is his own again, not a copy of anything,
+    // so the link that marked it as one goes. Going the other way keeps it: that is how the
+    // panel still knows, later, whether the outside-Ghana figure is one he typed or one the
+    // copy brought with him.
+    if (v.market === "gh") row.mirror_of = null;
+    return row;
   }
 
   function bindEditor() {
@@ -4206,11 +4260,37 @@
         blurb: p.blurb ?? null, includes: p.includes ?? [], max_devices: N(p.max_devices, 1),
         video_minutes: N(p.video_minutes, 0), audio_minutes: N(p.audio_minutes, 0),
         video_audio_minutes: N(p.video_audio_minutes, 0), features: p.features ?? [], active: false,
+        market: p.market === "intl" ? "intl" : "gh",
       };
       const { error } = await sb.from("plans").insert(row);
       if (error) return msg("plansMsg", error.message, "err");
       PLAN_EDIT = null; PLAN_DIRTY = false;
       msg("plansMsg", `Copied to “${row.name}” — off the shelf, so nothing changes for a buyer until you say so.`, "ok");
+      return loadPlans();
+    }
+
+    // The abroad twin of a Ghana package: same name, same minutes, the Ghana price carried
+    // across, and the link back to the row it came from so the panel can still tell him the
+    // figure is not his own yet. It starts off the shelf — a buyer abroad is not charged a
+    // price he has not looked at.
+    if (act === "twin") {
+      if (plansBusyElsewhere("send a package abroad")) return;
+      const p = PLAN_ROWS.find((x) => x.id === id);
+      if (!p || p.market === "intl") return;
+      const twinId = p.id + "-intl";
+      if (PLAN_ROWS.some((x) => x.id === twinId)) {
+        return msg("plansMsg", `“${twinId}” is already in the catalogue — change its price instead of making a second one.`, "err");
+      }
+      const { error } = await sb.from("plans").insert({
+        id: twinId, name: p.name || p.id, price_cents: N(p.price_cents), currency: "usd",
+        blurb: p.blurb ?? null, includes: p.includes ?? [], max_devices: N(p.max_devices, 1),
+        video_minutes: N(p.video_minutes, 0), audio_minutes: N(p.audio_minutes, 0),
+        video_audio_minutes: N(p.video_audio_minutes, 0), features: p.features ?? [],
+        market: "intl", mirror_of: p.id, active: false,
+      });
+      if (error) return msg("plansMsg", error.message, "err");
+      PLAN_EDIT = null; PLAN_DIRTY = false;
+      msg("plansMsg", `“${p.name || p.id}” now has its abroad twin, off the shelf and still at the Ghana price. Type your own price on it and switch it on when you are ready.`, "ok");
       return loadPlans();
     }
 
@@ -4582,6 +4662,13 @@
   };
   $("signOut").onclick = async () => { await sb.auth.signOut(); location.reload(); };
   sb.auth.onAuthStateChange((_event, session) => { if (!session) $("dash").classList.add("hidden"); });
+
+  // The strip is the point: next time a tab looks empty you can read off this line
+  // whether the machine's clock moved, instead of assuming the panel broke.
+  paintClock();
+  setInterval(paintClock, 1000);
+  // A jump while the tab was in the background is caught the moment you look again.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) void syncClock(); });
 
   sb.auth.getSession().then(({ data }) => { if (data?.session) showDash(data.session.user); });
 </script>

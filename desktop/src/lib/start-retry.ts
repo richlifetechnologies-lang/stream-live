@@ -47,7 +47,7 @@ export const PACED_WAIT_MAX_MS = 240_000;
 /** Why one ask failed, and whether asking again is the right answer to it. */
 export type StartFailure = {
   retryable: boolean;
-  stage: "gateway" | "engine" | "voice";
+  stage: "gateway" | "engine";
   detail: string;
   reason?: string;
   sessionId: string | null;
@@ -79,7 +79,6 @@ export type StartFailure = {
  */
 export function classifyStartFailure(
   pReason: string | null,
-  needsVideo: boolean,
   detail: string,
   sessionId: string | null,
   waitSeconds: number | null = null,
@@ -100,7 +99,7 @@ export function classifyStartFailure(
       waitMs,
     };
   }
-  return { retryable: needsVideo, stage: needsVideo ? "engine" : "voice", detail, sessionId, engine, waitMs: null };
+  return { retryable: true, stage: "engine", detail, sessionId, engine, waitMs: null };
 }
 
 /**

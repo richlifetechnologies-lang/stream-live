@@ -20,7 +20,7 @@
   p.lede { color: var(--muted); margin: 0 0 28px }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; margin-bottom: 14px }
   .pkgs { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)) }
-  .pkg { cursor: pointer; text-align: left; color: inherit; font: inherit; background: var(--panel);
+  .pkg { cursor: pointer; text-align: start; color: inherit; font: inherit; background: var(--panel);
     border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px }
   .pkg:hover { border-color: var(--cyan) }
   .pkg.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset }
@@ -28,21 +28,16 @@
   .pkg:disabled:hover { border-color: var(--line) }
   .pkg .name { font-weight: 700 }
   .pkg .price { font-size: 26px; font-weight: 800; margin: 8px 0 2px }
-  .pkg .price span { font-size: 12px; font-weight: 600; color: var(--muted); margin-left: 6px }
+  .pkg .price span { font-size: 12px; font-weight: 600; color: var(--muted); margin-inline-start: 6px }
   .pkg .unpriced { font-size: 17px; font-weight: 700; color: var(--muted); margin: 10px 0 4px }
-  .pkg .why { border-left: 3px solid #7c6318; background: #14100a; border-radius: 8px;
+  .pkg .why { border-inline-start: 3px solid #7c6318; background: #14100a; border-radius: 8px;
     padding: 9px 11px; margin-top: 12px; color: #f0d699; font-size: 12.5px; line-height: 1.5 }
-  .pkg .blurb { color: var(--muted); font-size: 13px; margin: 2px 0 0 }
   .pkg .mins { border: 1px solid #1b2444; background: #070d1e; border-radius: 10px; padding: 10px 12px; margin-top: 12px }
   .pkg .ml { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px }
   .pkg .mm { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; margin: 4px 0 }
   .pkg .mm b { font-weight: 700 }
-  .pkg ul { margin: 12px 0 0; padding-left: 18px; font-size: 12.5px; color: #cfe3ff }
-  .pkg .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px }
-  .pkg .tags span { border: 1px solid var(--line); background: #070d1e; border-radius: 999px;
-    padding: 2px 9px; font-size: 10.5px; color: var(--muted) }
   .ways { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) }
-  .way { cursor: pointer; text-align: left; color: inherit; font: inherit; background: #070d1e;
+  .way { cursor: pointer; text-align: start; color: inherit; font: inherit; background: #070d1e;
     border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px }
   .way:hover { border-color: var(--cyan) }
   .way.on { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan) inset }
@@ -76,7 +71,7 @@
   .rhead img, .rhead svg { width: 38px; height: 38px; border-radius: 9px; display: block }
   .wordmark { font-weight: 800; font-size: 15px; letter-spacing: .16em; text-transform: uppercase }
   .rtag { color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; margin-top: 2px }
-  .ribbon { margin-left: auto; border-radius: 999px; padding: 6px 13px; font-size: 11.5px;
+  .ribbon { margin-inline-start: auto; border-radius: 999px; padding: 6px 13px; font-size: 11.5px;
     font-weight: 800; letter-spacing: .1em; text-transform: uppercase; white-space: nowrap }
   .ribbon.ok   { background: #06281a; color: var(--good); border: 1px solid #14532d }
   .ribbon.wait { background: #241a05; color: #fbbf24; border: 1px solid #78350f }
@@ -84,7 +79,7 @@
   .rtop { padding: 20px 20px 4px }
   .rplan { font-size: 20px; font-weight: 800; line-height: 1.3 }
   .ramount { font-size: 34px; font-weight: 800; margin-top: 6px; letter-spacing: -.01em }
-  .ramount span { font-size: 14px; font-weight: 700; color: var(--muted); margin-left: 8px }
+  .ramount span { font-size: 14px; font-weight: 700; color: var(--muted); margin-inline-start: 8px }
   .rows { margin: 16px 20px 0; border-top: 1px solid var(--line) }
   .receipt .mins { border: 1px solid #1b2444; background: #070d1e; border-radius: 10px; padding: 10px 12px }
   .receipt .ml { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px }
@@ -93,7 +88,7 @@
   .row { display: flex; gap: 14px; justify-content: space-between; padding: 11px 0;
     border-bottom: 1px solid var(--line); font-size: 14px }
   .row dt { color: var(--muted); margin: 0; flex: 0 0 auto }
-  .row dd { margin: 0; text-align: right; font-weight: 600; word-break: break-word }
+  .row dd { margin: 0; text-align: end; font-weight: 600; word-break: break-word }
   .row dd.mono { font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 13px; letter-spacing: .02em }
   .rstatus { margin: 16px 20px 0; border-radius: 11px; padding: 13px 15px; font-size: 14.5px; font-weight: 600 }
   .rstatus.ok   { background: #06281a; color: #bbf7d0; border: 1px solid #14532d }
@@ -107,11 +102,20 @@
   @keyframes sl-spin { to { transform: rotate(360deg) } }
   .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid #78350f;
     border-top-color: #fbbf24; border-radius: 50%; animation: sl-spin 1s linear infinite;
-    vertical-align: -1px; margin-right: 7px }
+    vertical-align: -1px; margin-inline-end: 7px }
+  /* The customer's own language, chosen on the till and kept in this window's session. */
+  .langbar { display: flex; flex-wrap: wrap; gap: 7px; margin: 0 0 24px }
+  .langbar .pill { cursor: pointer; font: inherit; font-size: 12.5px; color: var(--muted);
+    background: #070d1e; border: 1px solid var(--line); border-radius: 999px; padding: 5px 13px }
+  .langbar .pill:hover { border-color: var(--cyan); color: var(--text) }
+  .langbar .pill.on { border-color: var(--cyan); color: var(--text); box-shadow: 0 0 0 1px var(--cyan) inset }
+  /* Words set in a stretched-out uppercase style are English type; in Arabic the letters
+     would come apart, and the script has no capitals to gain from it. */
+  [dir="rtl"] .ml, [dir="rtl"] .rtag, [dir="rtl"] .ribbon { letter-spacing: normal; text-transform: none }
   @media print {
     body { background: #fff; color: #0b1220 }
     .wrap { max-width: none; padding: 0 }
-    .rbtns, #shop { display: none }
+    .rbtns, #shop, #langbar { display: none }
     .receipt { border-color: #cbd5e1; background: #fff }
     .rhead { background: none; border-color: #cbd5e1 }
     .row { border-color: #e2e8f0 } .row dt { color: #475569 }
@@ -121,23 +125,24 @@
 </head>
 <body>
 <div class="wrap">
+  <div class="langbar" id="langbar" role="group" aria-label="Language"></div>
   <div id="shop">
-    <h1>Buy minutes</h1>
-    <p class="lede">Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.</p>
+    <h1 id="shopTitle">Buy minutes</h1>
+    <p class="lede" id="lede">Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.</p>
   </div>
 
   <div id="status"></div>
 
   <div id="buy" hidden>
-    <h3>1. Choose a package</h3>
+    <h3 id="step1">1. Choose a package</h3>
     <div class="pkgs" id="pkgs"></div>
 
     <div class="card" style="margin-top:16px">
-      <h3>2. How would you like to pay?</h3>
+      <h3 id="step2">2. How would you like to pay?</h3>
       <div class="ways" id="ways"></div>
 
-      <h3 style="margin-top:20px">3. The email address your Stream Live account was created with</h3>
-      <label for="email">Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.</label>
+      <h3 style="margin-top:20px" id="step3">3. The email address your Stream Live account was created with</h3>
+      <label for="email" id="emailLabel">Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.</label>
       <input id="email" type="email" autocomplete="email" placeholder="you@example.com" />
 
       <button class="go" id="go" disabled>Choose a package above</button>
@@ -145,10 +150,12 @@
     </div>
 
     <p class="muted" style="font-size:13.5px" id="rate"></p>
-    <p class="muted" style="font-size:13.5px">
-      Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it.
+    <p class="muted" style="font-size:13.5px" id="foot">
+      <span id="foot-a">Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it.
       With mobile money, Paystack sends a prompt to the phone number you give and the payment goes when you approve
-      it. Something wrong? <a href="https://t.me/rich_life2k15">Ask for help</a> and quote your reference.
+      it. Something wrong?</span>
+      <a href="https://t.me/rich_life2k15" id="foot-help">Ask for help</a>
+      <span id="foot-b">and quote your reference.</span>
     </p>
   </div>
 </div>
@@ -159,11 +166,577 @@ const $ = (id) => document.getElementById(id);
 let chosen = null;      // the package card that is switched on
 let method = null;      // "card" or "mobile_money"
 let ways = [];          // what the seller has open, from the server
+let lastData = null;    // the seller's list, so a language change repaints without another fetch
+let lastStatusRender = null; // how to paint the card in #status again, in any language
+let errKey = "";
 
-// The panel's own vocabulary, copied rather than re-invented so the buyer reads the
-// same words in both places.
+// The app can pin this till to a single payment method with `?way=`: the Ghana shelf is paid
+// by mobile money only, the International shelf by card only. `card` and `mobile_money` are
+// the only values it knows - an unknown value, or no `way=` at all, leaves both methods on
+// the page exactly as before.
+const urlWay = (() => {
+  const w = (new URLSearchParams(location.search).get("way") || "").toLowerCase();
+  return w === "card" || w === "mobile_money" ? w : null;
+})();
+
+// And it can say WHICH LIST the customer chose for himself, with `?market=`: `gh` is the
+// packages priced for Ghana users, `intl` the ones priced for users outside Ghana. The shelf
+// is his own tap in the app, never a reading of his address, and this page only repeats what
+// he answered. Absent or unknown, the seller's own default list is served as it always was.
+const urlMarket = (() => {
+  const m = (new URLSearchParams(location.search).get("market") || "").toLowerCase();
+  return m === "intl" || m === "gh" ? m : null;
+})();
+
+// The opening sentence names only the methods the page actually offers. Because the English
+// string is itself the dictionary key, each of these three needs its own entry in every
+// language (the both-methods one already exists as the STATIC.lede key).
+const LEDE_BOTH = "Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.";
+const LEDE_CARD = "Pay by card — Visa, Mastercard or Verve. Your card details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.";
+const LEDE_MOBILE_MONEY = "Pay by mobile money — MTN MoMo, Telecel Cash or AT Money. Your wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.";
+const ledeKey = urlWay === "card" ? LEDE_CARD : urlWay === "mobile_money" ? LEDE_MOBILE_MONEY : LEDE_BOTH;
+
+// ── Language ──────────────────────────────────────────────────────────────────
+// The till reads the customer's language the way the app does: `?lang=` on the address,
+// then what this page saved in its own session, then English. The English sentence IS the
+// key, and a key no language answers comes back as itself - so a line the dictionary has
+// not caught up with is an English line and never a blank one, on a page that takes money.
+// Because the key is English, a package name or an error the seller's server typed is not
+// in the dictionary and is handed to the customer exactly as it arrived.
+const LANGS = [
+  { code: "en", native: "English" },
+  { code: "es", native: "Español" },
+  { code: "pt", native: "Português" },
+  { code: "fr", native: "Français" },
+  { code: "ar", native: "العربية" },
+];
+// The app remembers its own choice under streamlive.lang, but this window runs on a session
+// of its own and cannot see that key, so the till remembers for itself.
+const LANG_KEY = "streamlive.checkout.lang";
+const META_DESC = "Pay by card or by Ghana mobile money — MTN MoMo, Telecel Cash, AT Money — and your minutes are added to your Stream Live account straight away.";
+let lang = "en";
+let dict = {};
+let titleKey = "Stream Live — buy minutes";
+
+/** English in, the customer's words out. A `{hole}` is filled after the lookup, so a
+ *  language can put the figure where its own grammar wants it. */
+function tr(s, vars) {
+  const words = (lang === "en" || !dict[s]) ? s : dict[s];
+  if (!vars) return words;
+  return String(words).replace(/\{(\w+)\}/g, (hole, k) => (k in vars ? String(vars[k]) : hole));
+}
+
+const DICT = {
+  es: {
+    "Stream Live — buy minutes": "Stream Live — comprar minutos",
+    "Stream Live — your receipt": "Stream Live — tu recibo",
+    "Stream Live — payment still confirming": "Stream Live — pago en confirmación",
+    "Pay by card or by Ghana mobile money — MTN MoMo, Telecel Cash, AT Money — and your minutes are added to your Stream Live account straight away.": "Paga con tarjeta o con dinero móvil de Ghana —MTN MoMo, Telecel Cash, AT Money— y tus minutos se añaden a tu cuenta de Stream Live de inmediato.",
+    "Buy minutes": "Comprar minutos",
+    "Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Paga con tarjeta o con dinero móvil; las dos las recibe Paystack. Los datos de tu tarjeta o de tu monedero van a Paystack, nunca a esta aplicación, y tus minutos aparecen en la cuenta en cuanto el pago se confirma.",
+    "Pay by mobile money — MTN MoMo, Telecel Cash or AT Money. Your wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Paga con dinero móvil: MTN MoMo, Telecel Cash o AT Money. Los datos de tu monedero van a Paystack, nunca a esta aplicación, y tus minutos aparecen en la cuenta en cuanto el pago se confirma.",
+    "Pay by card — Visa, Mastercard or Verve. Your card details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Paga con tarjeta: Visa, Mastercard o Verve. Los datos de tu tarjeta van a Paystack, nunca a esta aplicación, y tus minutos aparecen en la cuenta en cuanto el pago se confirma.",
+    "Language": "Idioma",
+    "1. Choose a package": "1. Elige un paquete",
+    "2. How would you like to pay?": "2. ¿Cómo quieres pagar?",
+    "3. The email address your Stream Live account was created with": "3. El correo electrónico con el que creaste tu cuenta de Stream Live",
+    "Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.": "Escríbelo exactamente como te registraste. Los minutos se añaden a esa cuenta: un pago hecho contra una dirección sin cuenta no se puede entregar.",
+    "Choose a package above": "Elige un paquete arriba",
+    "Choose how you want to pay": "Elige cómo quieres pagar",
+    "Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it. With mobile money, Paystack sends a prompt to the phone number you give and the payment goes when you approve it. Something wrong?": "Todo se cobra en cedis de Ghana. El cargo de la tarjeta llega en tu propia moneda después de que tu banco la convierta. Con dinero móvil, Paystack te envía una solicitud al número de teléfono que indiques y el pago se realiza cuando lo apruebas. ¿Algo va mal?",
+    "Ask for help": "Pide ayuda",
+    "and quote your reference.": "y menciona tu número de referencia.",
+    "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "Los precios que ves son los paquetes y las cifras de la lista de Planes del vendedor, en cedis de Ghana a GH₵{rate} por dólar.",
+    "Pay {amount} by {method}": "Pagar {amount} con {method}",
+    "card": "tarjeta",
+    "mobile money": "dinero móvil",
+    "Debit or credit card": "Tarjeta de débito o crédito",
+    "Visa, Mastercard or Verve. You type the card on Paystack's own screen.": "Visa, Mastercard o Verve. Escribes la tarjeta en la pantalla de Paystack.",
+    "Mobile money": "Dinero móvil",
+    "MTN MoMo, Telecel Cash (the old Vodafone Cash) or AT Money — whichever network you use. Paystack sends a prompt to your phone and the payment goes when you approve it.": "MTN MoMo, Telecel Cash (el antiguo Vodafone Cash) o AT Money, la red que uses. Paystack te envía una solicitud a tu teléfono y el pago se realiza cuando la apruebas.",
+    "Video Call": "Videollamada",
+    "Audio Call": "Llamada de audio",
+    "Video + Audio": "Vídeo + audio",
+    "Video calls": "Videollamadas",
+    "Voice / audio": "Voz / audio",
+    "Portrait OBS output": "Salida de OBS vertical",
+    "1 device": "1 dispositivo",
+    "{n} devices": "{n} dispositivos",
+    "Untitled package": "Paquete sin nombre",
+    "Price not set": "Precio sin definir",
+    "Minutes in this package": "Minutos en este paquete",
+    "min": "min",
+    "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este paquete todavía no tiene minutos asociados, así que no se puede pagar en esta página. Pídeselo al vendedor y lo preparará.",
+    "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este paquete todavía no tiene precio, así que no se puede pagar en esta página. Pídeselo al vendedor y lo preparará.",
+    "the payment service did not answer": "el servicio de pagos no respondió",
+    "Payment is not available right now": "El pago no está disponible en este momento",
+    "Nothing is on sale online yet": "Todavía no hay nada a la venta en línea",
+    "Minutes can still be added to your account by the seller — use the contact details inside the app.": "El vendedor todavía puede añadir minutos a tu cuenta; usa los datos de contacto que están dentro de la aplicación.",
+    "This is the local test page.": "Esta es la página de pruebas local.",
+    "The packages below are sample figures, not the seller's real catalogue. On the live page the cards come straight from the Plans list.": "Los paquetes de abajo son cifras de ejemplo, no el catálogo real del vendedor. En la página real las tarjetas salen directamente de la lista de Planes.",
+    "Card": "Tarjeta",
+    "Bank transfer": "Transferencia bancaria",
+    "Online payment": "Pago en línea",
+    "Mobile money USSD": "USSD de dinero móvil",
+    "test payment": "pago de prueba",
+    "Paid": "Pagado",
+    "Money received": "Dinero recibido",
+    "Not completed": "No completado",
+    "Refunded": "Reembolsado",
+    "Still checking": "Todavía comprobando",
+    "Confirming": "Confirmando",
+    "Minutes": "Minutos",
+    "Nothing to add": "Nada que añadir",
+    "adding…": "añadiendo…",
+    "not added yet": "sin añadir todavía",
+    "Open Stream Live and sign in with the same email address — the minutes are already on the account. Do not send a top-up request for this purchase; asking again does not add them twice.": "Abre Stream Live e inicia sesión con el mismo correo electrónico: los minutos ya están en la cuenta. No pidas una recarga para esta compra; pedirla otra vez no la duplica.",
+    "Do not pay again. Paystack has the money, the minutes could not be added by themselves, and the seller has been told. Re-checking this page keeps trying, and the minutes go in the moment the credit succeeds.": "No pagues otra vez. Paystack tiene el dinero, los minutos no pudieron añadirse solos y ya hemos avisado al vendedor. Al volver a comprobar esta página se sigue intentando, y los minutos entran en cuanto el abono tiene éxito.",
+    "Nothing was charged to your card or wallet. You can pick a package and try again.": "No se ha cargado nada a tu tarjeta ni a tu monedero. Puedes elegir un paquete e intentarlo de nuevo.",
+    "The money is being returned to the card or wallet you paid with — usually a few minutes for mobile money, up to a few working days for a card. No minutes were added for this order, and you do not need to do anything else.": "El dinero está volviendo a la tarjeta o al monedero con el que pagaste: suele tardar unos minutos con dinero móvil y hasta unos días hábiles con tarjeta. No se añadió ningún minuto por este pedido y no tienes que hacer nada más.",
+    "This order was no longer paid within the seller's half-hour window, but this page keeps asking Paystack anyway — if your money is there, the minutes are added by themselves and nothing needs to be paid twice.": "Este pedido dejó de estar pagado dentro de la media hora del vendedor, pero esta página sigue consultando a Paystack: si tu dinero está ahí, los minutos se añaden solos y no hay que pagar nada dos veces.",
+    "Keep this page open. The minutes are added the moment Paystack confirms the money, which is usually a few seconds after a card payment and after you approve the prompt on your phone for mobile money.": "Mantén esta página abierta. Los minutos se añaden en cuanto Paystack confirma el dinero: normalmente unos segundos con tarjeta y, con dinero móvil, después de aprobar la solicitud en tu teléfono.",
+    "Something wrong? {help} and quote reference {ref}.": "¿Algo va mal? {help} y menciona la referencia {ref}.",
+    "Ask the seller": "Escribe al vendedor",
+    "Payment receipt": "Recibo de pago",
+    "Minutes package": "Paquete de minutos",
+    "What this bought": "Lo que compraste",
+    "Paid with": "Pagado con",
+    "Account": "Cuenta",
+    "not recorded": "sin registro",
+    "Order reference": "Referencia del pedido",
+    "Paystack reference": "Referencia de Paystack",
+    "issued when the payment confirms": "se emite cuando el pago se confirma",
+    "Order opened": "Pedido iniciado",
+    "Payment confirmed": "Pago confirmado",
+    "never": "nunca",
+    "waiting": "en espera",
+    "Minutes added": "Minutos añadidos",
+    "not yet": "todavía no",
+    "Waiting for Paystack to confirm the money.": "Esperando que Paystack confirme el dinero.",
+    "Paystack, asked just now: {text}": "Paystack, consultado ahora mismo: {text}",
+    "Recorded on the order: {note}": "Anotado en el pedido: {note}",
+    "Print or save as PDF": "Imprimir o guardar como PDF",
+    "Copy the references": "Copiar las referencias",
+    "Buy another package": "Comprar otro paquete",
+    "Copied": "Copiado",
+    "Select it from the receipt above": "Cópiala del recibo de arriba",
+    "Your order": "Tu pedido",
+    "Reading the payment…": "Consultando el pago…",
+    "This page has stopped checking by itself": "Esta página dejó de comprobar por sí sola",
+    "It read your order {ref} as {state} last time. Nothing needs to be paid again and the order has not been lost: if Paystack has the money, the minutes go into the account by themselves and this page will show them.": "La última vez leyó tu pedido {ref} como {state}. No hay que pagar nada de nuevo y el pedido no se ha perdido: si Paystack tiene el dinero, los minutos entran solos en la cuenta y esta página los mostrará.",
+    "Ask it again now, or reload this page at any time.": "Vuelve a comprobarlo ahora, o recarga esta página cuando quieras.",
+    "Ask about my payment now": "Comprobar mi pago ahora",
+    "not yet read": "sin leer todavía",
+    "We could not reach the payment service": "No pudimos contactar con el servicio de pagos",
+    "Nothing needs to be paid again. Reload this page in a minute, or ask the seller and quote reference {ref}.": "No hay que pagar nada dos veces. Recarga esta página en un minuto, o escribe al vendedor y menciona la referencia {ref}.",
+    "That order is not on this till": "Ese pedido no está en esta caja",
+    "Reference {ref} is not one this page issued. If you paid, message the seller and quote it — the money and the minutes are both traceable from Paystack's own number.": "La referencia {ref} no la emitió esta página. Si pagaste, escribe al vendedor y menciónala: el dinero y los minutos se pueden rastrear con el número propio de Paystack.",
+    "Type your account email address first.": "Escribe primero el correo de tu cuenta.",
+  },
+  pt: {
+    "Stream Live — buy minutes": "Stream Live — comprar minutos",
+    "Stream Live — your receipt": "Stream Live — seu recibo",
+    "Stream Live — payment still confirming": "Stream Live — pagamento ainda em confirmação",
+    "Pay by card or by Ghana mobile money — MTN MoMo, Telecel Cash, AT Money — and your minutes are added to your Stream Live account straight away.": "Pague com cartão ou com dinheiro móvel de Gana — MTN MoMo, Telecel Cash, AT Money — e seus minutos entram na sua conta do Stream Live na hora.",
+    "Buy minutes": "Comprar minutos",
+    "Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Pague com cartão ou com dinheiro móvel — os dois são recebidos pelo Paystack. Os dados do seu cartão ou da sua carteira vão para o Paystack, nunca para este app, e seus minutos aparecem na conta assim que o pagamento é confirmado.",
+    "Pay by mobile money — MTN MoMo, Telecel Cash or AT Money. Your wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Pague com dinheiro móvel — MTN MoMo, Telecel Cash ou AT Money. Os dados da sua carteira vão para o Paystack, nunca para este app, e seus minutos aparecem na conta assim que o pagamento é confirmado.",
+    "Pay by card — Visa, Mastercard or Verve. Your card details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Pague com cartão — Visa, Mastercard ou Verve. Os dados do seu cartão vão para o Paystack, nunca para este app, e seus minutos aparecem na conta assim que o pagamento é confirmado.",
+    "Language": "Idioma",
+    "1. Choose a package": "1. Escolha um pacote",
+    "2. How would you like to pay?": "2. Como você quer pagar?",
+    "3. The email address your Stream Live account was created with": "3. O endereço de e-mail com que você criou sua conta no Stream Live",
+    "Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.": "Digite exatamente como você se cadastrou. É para essa conta que os minutos são adicionados — um pagamento feito contra um endereço sem conta não pode ser entregue.",
+    "Choose a package above": "Escolha um pacote acima",
+    "Choose how you want to pay": "Escolha como você quer pagar",
+    "Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it. With mobile money, Paystack sends a prompt to the phone number you give and the payment goes when you approve it. Something wrong?": "Tudo é cobrado em cedis de Gana. A cobrança do cartão chega na sua própria moeda depois que seu banco a converte. Com dinheiro móvel, o Paystack envia uma solicitação ao número de telefone que você informar e o pagamento é feito quando você aprova. Algum problema?",
+    "Ask for help": "Peça ajuda",
+    "and quote your reference.": "e informe a sua referência.",
+    "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "Os preços que você vê são os pacotes e os números da lista de Planos do vendedor, em cedis de Gana a GH₵{rate} por dólar.",
+    "Pay {amount} by {method}": "Pagar {amount} com {method}",
+    "card": "cartão",
+    "mobile money": "dinheiro móvel",
+    "Debit or credit card": "Cartão de débito ou crédito",
+    "Visa, Mastercard or Verve. You type the card on Paystack's own screen.": "Visa, Mastercard ou Verve. Você digita o cartão na própria tela do Paystack.",
+    "Mobile money": "Dinheiro móvel",
+    "MTN MoMo, Telecel Cash (the old Vodafone Cash) or AT Money — whichever network you use. Paystack sends a prompt to your phone and the payment goes when you approve it.": "MTN MoMo, Telecel Cash (o antigo Vodafone Cash) ou AT Money, a rede que você usar. O Paystack envia uma solicitação ao seu telefone e o pagamento vai quando você aprova.",
+    "Video Call": "Chamada de vídeo",
+    "Audio Call": "Chamada de áudio",
+    "Video + Audio": "Vídeo + áudio",
+    "Video calls": "Chamadas de vídeo",
+    "Voice / audio": "Voz / áudio",
+    "Portrait OBS output": "Saída do OBS na vertical",
+    "1 device": "1 dispositivo",
+    "{n} devices": "{n} dispositivos",
+    "Untitled package": "Pacote sem nome",
+    "Price not set": "Preço não definido",
+    "Minutes in this package": "Minutos neste pacote",
+    "min": "min",
+    "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este pacote ainda não tem minutos associados, então não pode ser pago nesta página. Peça ao vendedor e ele providencia.",
+    "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este pacote ainda não tem preço, então não pode ser pago nesta página. Peça ao vendedor e ele providencia.",
+    "the payment service did not answer": "o serviço de pagamento não respondeu",
+    "Payment is not available right now": "O pagamento não está disponível no momento",
+    "Nothing is on sale online yet": "Nada está à venda online ainda",
+    "Minutes can still be added to your account by the seller — use the contact details inside the app.": "O vendedor ainda pode adicionar minutos à sua conta — use os dados de contato que estão no app.",
+    "This is the local test page.": "Esta é a página de teste local.",
+    "The packages below are sample figures, not the seller's real catalogue. On the live page the cards come straight from the Plans list.": "Os pacotes abaixo são números de exemplo, não o catálogo real do vendedor. Na página ao vivo os cartões vêm direto da lista de Planos.",
+    "Card": "Cartão",
+    "Bank transfer": "Transferência bancária",
+    "Online payment": "Pagamento online",
+    "Mobile money USSD": "USSD de dinheiro móvel",
+    "test payment": "pagamento de teste",
+    "Paid": "Pago",
+    "Money received": "Dinheiro recebido",
+    "Not completed": "Não concluído",
+    "Refunded": "Reembolsado",
+    "Still checking": "Ainda verificando",
+    "Confirming": "Confirmando",
+    "Minutes": "Minutos",
+    "Nothing to add": "Nada a adicionar",
+    "adding…": "adicionando…",
+    "not added yet": "ainda não adicionados",
+    "Open Stream Live and sign in with the same email address — the minutes are already on the account. Do not send a top-up request for this purchase; asking again does not add them twice.": "Abra o Stream Live e entre com o mesmo endereço de e-mail — os minutos já estão na conta. Não envie um novo pedido de recarga para esta compra; pedir de novo não adiciona o dobro.",
+    "Do not pay again. Paystack has the money, the minutes could not be added by themselves, and the seller has been told. Re-checking this page keeps trying, and the minutes go in the moment the credit succeeds.": "Não pague de novo. O Paystack está com o dinheiro, os minutos não puderam ser adicionados sozinhos, e avisamos o vendedor. Ao verificar esta página de novo ele continua tentando, e os minutos entram no momento em que o crédito dá certo.",
+    "Nothing was charged to your card or wallet. You can pick a package and try again.": "Nada foi cobrado no seu cartão nem na sua carteira. Você pode escolher um pacote e tentar de novo.",
+    "The money is being returned to the card or wallet you paid with — usually a few minutes for mobile money, up to a few working days for a card. No minutes were added for this order, and you do not need to do anything else.": "O dinheiro está voltando para o cartão ou a carteira com que você pagou — normalmente alguns minutos com dinheiro móvel, até alguns dias úteis com cartão. Nenhum minuto foi adicionado por este pedido, e você não precisa fazer mais nada.",
+    "This order was no longer paid within the seller's half-hour window, but this page keeps asking Paystack anyway — if your money is there, the minutes are added by themselves and nothing needs to be paid twice.": "Este pedido deixou de estar pago dentro da meia hora do vendedor, mas esta página continua consultando o Paystack — se o seu dinheiro está lá, os minutos são adicionados sozinhos e nada precisa ser pago duas vezes.",
+    "Keep this page open. The minutes are added the moment Paystack confirms the money, which is usually a few seconds after a card payment and after you approve the prompt on your phone for mobile money.": "Deixe esta página aberta. Os minutos são adicionados assim que o Paystack confirma o dinheiro, o que costuma levar alguns segundos em cartão e, em dinheiro móvel, acontece depois que você aprova a solicitação no telefone.",
+    "Something wrong? {help} and quote reference {ref}.": "Algum problema? {help} e informe a referência {ref}.",
+    "Ask the seller": "Fale com o vendedor",
+    "Payment receipt": "Recibo de pagamento",
+    "Minutes package": "Pacote de minutos",
+    "What this bought": "O que você comprou",
+    "Paid with": "Pago com",
+    "Account": "Conta",
+    "not recorded": "não registrado",
+    "Order reference": "Referência do pedido",
+    "Paystack reference": "Referência do Paystack",
+    "issued when the payment confirms": "emitida quando o pagamento for confirmado",
+    "Order opened": "Pedido aberto",
+    "Payment confirmed": "Pagamento confirmado",
+    "never": "nunca",
+    "waiting": "aguardando",
+    "Minutes added": "Minutos adicionados",
+    "not yet": "ainda não",
+    "Waiting for Paystack to confirm the money.": "Aguardando o Paystack confirmar o dinheiro.",
+    "Paystack, asked just now: {text}": "Paystack, consultado agora: {text}",
+    "Recorded on the order: {note}": "Anotado no pedido: {note}",
+    "Print or save as PDF": "Imprimir ou salvar como PDF",
+    "Copy the references": "Copiar as referências",
+    "Buy another package": "Comprar outro pacote",
+    "Copied": "Copiado",
+    "Select it from the receipt above": "Selecione no recibo acima",
+    "Your order": "Seu pedido",
+    "Reading the payment…": "Lendo o pagamento…",
+    "This page has stopped checking by itself": "Esta página parou de verificar sozinha",
+    "It read your order {ref} as {state} last time. Nothing needs to be paid again and the order has not been lost: if Paystack has the money, the minutes go into the account by themselves and this page will show them.": "Da última vez ela leu seu pedido {ref} como {state}. Nada precisa ser pago de novo e o pedido não foi perdido: se o Paystack está com o dinheiro, os minutos entram sozinhos na conta e esta página vai mostrá-los.",
+    "Ask it again now, or reload this page at any time.": "Verifique de novo agora, ou recarregue esta página quando quiser.",
+    "Ask about my payment now": "Verificar meu pagamento agora",
+    "not yet read": "ainda não lido",
+    "We could not reach the payment service": "Não conseguimos falar com o serviço de pagamento",
+    "Nothing needs to be paid again. Reload this page in a minute, or ask the seller and quote reference {ref}.": "Nada precisa ser pago duas vezes. Recarregue esta página daqui a um minuto, ou fale com o vendedor informando a referência {ref}.",
+    "That order is not on this till": "Este pedido não está neste caixa",
+    "Reference {ref} is not one this page issued. If you paid, message the seller and quote it — the money and the minutes are both traceable from Paystack's own number.": "A referência {ref} não foi emitida por esta página. Se você pagou, mande mensagem ao vendedor e informe-a — o dinheiro e os minutos podem ser rastreados pelo número próprio do Paystack.",
+    "Type your account email address first.": "Digite primeiro o e-mail da sua conta.",
+  },
+  fr: {
+    "Stream Live — buy minutes": "Stream Live — acheter des minutes",
+    "Stream Live — your receipt": "Stream Live — ton reçu",
+    "Stream Live — payment still confirming": "Stream Live — paiement en cours de confirmation",
+    "Pay by card or by Ghana mobile money — MTN MoMo, Telecel Cash, AT Money — and your minutes are added to your Stream Live account straight away.": "Paie par carte ou par mobile money ghanéen — MTN MoMo, Telecel Cash, AT Money — et tes minutes sont ajoutées à ton compte Stream Live tout de suite.",
+    "Buy minutes": "Acheter des minutes",
+    "Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Paie par carte ou par mobile money — les deux passent par Paystack. Les données de ta carte ou de ton portefeuille mobile vont à Paystack, jamais à cette appli, et tes minutes apparaissent dans le compte dès que le paiement est confirmé.",
+    "Pay by mobile money — MTN MoMo, Telecel Cash or AT Money. Your wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Paie par mobile money — MTN MoMo, Telecel Cash ou AT Money. Les données de ton portefeuille mobile vont à Paystack, jamais à cette appli, et tes minutes apparaissent dans le compte dès que le paiement est confirmé.",
+    "Pay by card — Visa, Mastercard or Verve. Your card details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "Paie par carte — Visa, Mastercard ou Verve. Les données de ta carte vont à Paystack, jamais à cette appli, et tes minutes apparaissent dans le compte dès que le paiement est confirmé.",
+    "Language": "Langue",
+    "1. Choose a package": "1. Choisis un forfait",
+    "2. How would you like to pay?": "2. Comment veux-tu payer ?",
+    "3. The email address your Stream Live account was created with": "3. L'adresse e-mail avec laquelle ton compte Stream Live a été créé",
+    "Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.": "Saisis-la exactement comme à ton inscription. C'est à ce compte que les minutes sont ajoutées — un paiement fait sur une adresse sans compte ne peut pas être livré.",
+    "Choose a package above": "Choisis un forfait ci-dessus",
+    "Choose how you want to pay": "Choisis comment tu veux payer",
+    "Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it. With mobile money, Paystack sends a prompt to the phone number you give and the payment goes when you approve it. Something wrong?": "Tout est facturé en cedis ghanéens. La facture de ta carte arrive dans ta propre monnaie après conversion par ta banque. En mobile money, Paystack envoie une demande au numéro de téléphone que tu donnes et le paiement passe quand tu le valides. Un problème ?",
+    "Ask for help": "Demande de l'aide",
+    "and quote your reference.": "et donne ta référence.",
+    "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "Les prix que tu vois sont les forfaits et les chiffres de la liste Forfaits du vendeur, en cedis ghanéens à GH₵{rate} le dollar.",
+    "Pay {amount} by {method}": "Payer {amount} par {method}",
+    "card": "carte",
+    "mobile money": "mobile money",
+    "Debit or credit card": "Carte de débit ou de crédit",
+    "Visa, Mastercard or Verve. You type the card on Paystack's own screen.": "Visa, Mastercard ou Verve. Tu saisis la carte sur l'écran de Paystack lui-même.",
+    "Mobile money": "Mobile money",
+    "MTN MoMo, Telecel Cash (the old Vodafone Cash) or AT Money — whichever network you use. Paystack sends a prompt to your phone and the payment goes when you approve it.": "MTN MoMo, Telecel Cash (l'ancien Vodafone Cash) ou AT Money, selon le réseau que tu utilises. Paystack envoie une demande sur ton téléphone et le paiement passe quand tu la valides.",
+    "Video Call": "Appel vidéo",
+    "Audio Call": "Appel audio",
+    "Video + Audio": "Vidéo + audio",
+    "Video calls": "Appels vidéo",
+    "Voice / audio": "Voix / audio",
+    "Portrait OBS output": "Sortie OBS verticale",
+    "1 device": "1 appareil",
+    "{n} devices": "{n} appareils",
+    "Untitled package": "Forfait sans nom",
+    "Price not set": "Prix non défini",
+    "Minutes in this package": "Minutes dans ce forfait",
+    "min": "min",
+    "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Aucune minute n'est encore attachée à ce forfait, il ne peut donc pas être payé sur cette page. Préviens le vendeur et il s'en occupera.",
+    "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Aucun prix n'est encore fixé pour ce forfait, il ne peut donc pas être payé sur cette page. Préviens le vendeur et il s'en occupera.",
+    "the payment service did not answer": "le service de paiement n'a pas répondu",
+    "Payment is not available right now": "Le paiement n'est pas disponible pour le moment",
+    "Nothing is on sale online yet": "Rien n'est encore en vente en ligne",
+    "Minutes can still be added to your account by the seller — use the contact details inside the app.": "Le vendeur peut toujours ajouter des minutes à ton compte — utilise les coordonnées dans l'appli.",
+    "This is the local test page.": "Ceci est la page de test locale.",
+    "The packages below are sample figures, not the seller's real catalogue. On the live page the cards come straight from the Plans list.": "Les forfaits ci-dessous sont des chiffres d'exemple, pas le vrai catalogue du vendeur. Sur la page réelle, les cartes viennent directement de la liste Forfaits.",
+    "Card": "Carte",
+    "Bank transfer": "Virement bancaire",
+    "Online payment": "Paiement en ligne",
+    "Mobile money USSD": "USSD mobile money",
+    "test payment": "paiement d'essai",
+    "Paid": "Payé",
+    "Money received": "Argent reçu",
+    "Not completed": "Non abouti",
+    "Refunded": "Remboursé",
+    "Still checking": "Vérification en cours",
+    "Confirming": "Confirmation",
+    "Minutes": "Minutes",
+    "Nothing to add": "Rien à ajouter",
+    "adding…": "ajout en cours…",
+    "not added yet": "pas encore ajoutées",
+    "Open Stream Live and sign in with the same email address — the minutes are already on the account. Do not send a top-up request for this purchase; asking again does not add them twice.": "Ouvre Stream Live et connecte-toi avec la même adresse e-mail — les minutes sont déjà sur le compte. Ne relance pas de demande de rechargement pour cet achat ; redemander ne les ajoute pas deux fois.",
+    "Do not pay again. Paystack has the money, the minutes could not be added by themselves, and the seller has been told. Re-checking this page keeps trying, and the minutes go in the moment the credit succeeds.": "Ne repaie pas. Paystack a l'argent, les minutes n'ont pas pu s'ajouter seules, et le vendeur est prévenu. En revérifiant cette page on continue d'essayer, et les minutes arrivent dès que le crédit aboutit.",
+    "Nothing was charged to your card or wallet. You can pick a package and try again.": "Rien n'a été débité sur ta carte ni sur ton portefeuille. Tu peux choisir un forfait et réessayer.",
+    "The money is being returned to the card or wallet you paid with — usually a few minutes for mobile money, up to a few working days for a card. No minutes were added for this order, and you do not need to do anything else.": "L'argent revient vers la carte ou le portefeuille avec lequel tu as payé — quelques minutes en général en mobile money, jusqu'à quelques jours ouvrés par carte. Aucune minute n'a été ajoutée pour cette commande, et tu n'as rien d'autre à faire.",
+    "This order was no longer paid within the seller's half-hour window, but this page keeps asking Paystack anyway — if your money is there, the minutes are added by themselves and nothing needs to be paid twice.": "Cette commande n'était plus payée dans la demi-heure du vendeur, mais cette page continue de demander à Paystack — si ton argent est là, les minutes s'ajoutent seules et rien ne doit être payé deux fois.",
+    "Keep this page open. The minutes are added the moment Paystack confirms the money, which is usually a few seconds after a card payment and after you approve the prompt on your phone for mobile money.": "Garde cette page ouverte. Les minutes sont ajoutées dès que Paystack confirme l'argent : en général quelques secondes après un paiement par carte, et, en mobile money, après que tu valides la demande sur ton téléphone.",
+    "Something wrong? {help} and quote reference {ref}.": "Un problème ? {help} et donne la référence {ref}.",
+    "Ask the seller": "Écris au vendeur",
+    "Payment receipt": "Reçu de paiement",
+    "Minutes package": "Forfait de minutes",
+    "What this bought": "Ce que tu as acheté",
+    "Paid with": "Payé avec",
+    "Account": "Compte",
+    "not recorded": "non enregistré",
+    "Order reference": "Référence de commande",
+    "Paystack reference": "Référence Paystack",
+    "issued when the payment confirms": "émise quand le paiement se confirme",
+    "Order opened": "Commande ouverte",
+    "Payment confirmed": "Paiement confirmé",
+    "never": "jamais",
+    "waiting": "en attente",
+    "Minutes added": "Minutes ajoutées",
+    "not yet": "pas encore",
+    "Waiting for Paystack to confirm the money.": "En attente de la confirmation de l'argent par Paystack.",
+    "Paystack, asked just now: {text}": "Paystack, interrogé à l'instant : {text}",
+    "Recorded on the order: {note}": "Noté sur la commande : {note}",
+    "Print or save as PDF": "Imprimer ou enregistrer en PDF",
+    "Copy the references": "Copier les références",
+    "Buy another package": "Acheter un autre forfait",
+    "Copied": "Copié",
+    "Select it from the receipt above": "Sélectionne-la sur le reçu ci-dessus",
+    "Your order": "Ta commande",
+    "Reading the payment…": "Lecture du paiement…",
+    "This page has stopped checking by itself": "Cette page a cessé de vérifier toute seule",
+    "It read your order {ref} as {state} last time. Nothing needs to be paid again and the order has not been lost: if Paystack has the money, the minutes go into the account by themselves and this page will show them.": "La dernière fois, elle a lu ta commande {ref} comme {state}. Rien ne doit être repayé et la commande n'est pas perdue : si Paystack a l'argent, les minutes entrent toutes seules dans le compte et cette page les affichera.",
+    "Ask it again now, or reload this page at any time.": "Redemande maintenant, ou recharge cette page quand tu veux.",
+    "Ask about my payment now": "Vérifier mon paiement maintenant",
+    "not yet read": "pas encore lue",
+    "We could not reach the payment service": "Impossible de joindre le service de paiement",
+    "Nothing needs to be paid again. Reload this page in a minute, or ask the seller and quote reference {ref}.": "Rien ne doit être payé deux fois. Recharge cette page dans une minute, ou écris au vendeur en donnant la référence {ref}.",
+    "That order is not on this till": "Cette commande n'est pas sur cette caisse",
+    "Reference {ref} is not one this page issued. If you paid, message the seller and quote it — the money and the minutes are both traceable from Paystack's own number.": "La référence {ref} n'a pas été émise par cette page. Si tu as payé, écris au vendeur et donne-la : l'argent et les minutes se retrouvent grâce au numéro propre à Paystack.",
+    "Type your account email address first.": "Saisis d'abord l'adresse e-mail de ton compte.",
+  },
+  ar: {
+    "Stream Live — buy minutes": "Stream Live — شراء الدقائق",
+    "Stream Live — your receipt": "Stream Live — إيصالك",
+    "Stream Live — payment still confirming": "Stream Live — الدفع ما زال قيد التأكيد",
+    "Pay by card or by Ghana mobile money — MTN MoMo, Telecel Cash, AT Money — and your minutes are added to your Stream Live account straight away.": "ادفع بالبطاقة أو بالمحفظة المحمولة في غانا — MTN MoMo وTelecel Cash وAT Money — وتُضاف دقائقك إلى حسابك في Stream Live فوراً.",
+    "Buy minutes": "شراء الدقائق",
+    "Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "ادفع بالبطاقة أو بالمحفظة المحمولة — كلاهما يُحصَّل عبر Paystack. تذهب بيانات بطاقتك أو محفظتك إلى Paystack ولا تذهب إلى هذا التطبيق أبداً، وتظهر دقائقك في الحساب بمجرد تأكيد الدفع.",
+    "Pay by mobile money — MTN MoMo, Telecel Cash or AT Money. Your wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "ادفع بالمحفظة المحمولة — MTN MoMo أو Telecel Cash أو AT Money. تذهب بيانات محفظتك إلى Paystack ولا تذهب إلى هذا التطبيق أبداً، وتظهر دقائقك في الحساب بمجرد تأكيد الدفع.",
+    "Pay by card — Visa, Mastercard or Verve. Your card details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.": "ادفع بالبطاقة — Visa أو Mastercard أو Verve. تذهب بيانات بطاقتك إلى Paystack ولا تذهب إلى هذا التطبيق أبداً، وتظهر دقائقك في الحساب بمجرد تأكيد الدفع.",
+    "Language": "اللغة",
+    "1. Choose a package": "1. اختر الحزمة",
+    "2. How would you like to pay?": "2. كيف تريد أن تدفع؟",
+    "3. The email address your Stream Live account was created with": "3. البريد الإلكتروني الذي أنشأت به حسابك في Stream Live",
+    "Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.": "اكتبه تماماً كما سجلت. إليه تُضاف الدقائق — فالدفع مقابل عنوان بلا حساب لا يمكن تسليمه.",
+    "Choose a package above": "اختر حزمة أعلاه",
+    "Choose how you want to pay": "اختر طريقة الدفع",
+    "Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it. With mobile money, Paystack sends a prompt to the phone number you give and the payment goes when you approve it. Something wrong?": "كل شيء يُحاسب بالسيدي الغاني. يصلك كشف البطاقة بعملة بلدك بعد أن يحوّلها بنكك. مع المحفظة المحمولة يرسل Paystack طلباً إلى رقم الهاتف الذي تعطيه، وينفَّذ الدفع بمجرد موافقتك. هل هناك خطأ؟",
+    "Ask for help": "اطلب المساعدة",
+    "and quote your reference.": "واذكر رقم مرجعك.",
+    "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.": "الأسعار التي تراها هي الحزم والأرقام الواردة في قائمة الخطط لدى البائع، بالسيدي الغاني بسعر GH₵{rate} للدولار.",
+    "Pay {amount} by {method}": "ادفع {amount} عبر {method}",
+    "card": "البطاقة",
+    "mobile money": "المحفظة المحمولة",
+    "Debit or credit card": "بطاقة خصم أو ائتمان",
+    "Visa, Mastercard or Verve. You type the card on Paystack's own screen.": "Visa أو Mastercard أو Verve. تكتب بيانات البطاقة على شاشة Paystack نفسها.",
+    "Mobile money": "المحفظة المحمولة",
+    "MTN MoMo, Telecel Cash (the old Vodafone Cash) or AT Money — whichever network you use. Paystack sends a prompt to your phone and the payment goes when you approve it.": "MTN MoMo أو Telecel Cash (شبكة فودافون كاش سابقاً) أو AT Money — أي شبكة تستخدمها. يرسل Paystack طلباً إلى هاتفك وينفَّذ الدفع بمجرد موافقتك.",
+    "Video Call": "مكالمة فيديو",
+    "Audio Call": "مكالمة صوتية",
+    "Video + Audio": "فيديو وصوت",
+    "Video calls": "مكالمات فيديو",
+    "Voice / audio": "صوت / صوتيات",
+    "Portrait OBS output": "إخراج OBS عمودي",
+    "1 device": "جهاز واحد",
+    "{n} devices": "عدد الأجهزة: {n}",
+    "Untitled package": "حزمة بلا اسم",
+    "Price not set": "لم يُحدَّد سعر",
+    "Minutes in this package": "الدقائق في هذه الحزمة",
+    "min": "دقيقة",
+    "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "لا دقائق مرتبطة بهذه الحزمة بعد، لذلك لا يمكن دفع ثمنها في هذه الصفحة. اطلب من البائع وسيهتم بالأمر.",
+    "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "لم يُحدَّد سعر لهذه الحزمة بعد، لذلك لا يمكن دفع ثمنها في هذه الصفحة. اطلب من البائع وسيهتم بالأمر.",
+    "the payment service did not answer": "لم تردّ خدمة الدفع",
+    "Payment is not available right now": "الدفع غير متاح حالياً",
+    "Nothing is on sale online yet": "لا شيء معروض للبيع عبر الإنترنت بعد",
+    "Minutes can still be added to your account by the seller — use the contact details inside the app.": "لا يزال بوسع البائع إضافة دقائق إلى حسابك — استخدم بيانات التواصل داخل التطبيق.",
+    "This is the local test page.": "هذه صفحة اختبار محلية.",
+    "The packages below are sample figures, not the seller's real catalogue. On the live page the cards come straight from the Plans list.": "الحزم أدناه أرقام تجريبية، وليست كتالوج البائع الحقيقي. في الصفحة الحقيقية تأتي البطاقات مباشرة من قائمة الخطط.",
+    "Card": "بطاقة",
+    "Bank transfer": "تحويل بنكي",
+    "Online payment": "دفع إلكتروني",
+    "Mobile money USSD": "USSD للمحفظة المحمولة",
+    "test payment": "دفع تجريبي",
+    "Paid": "تم الدفع",
+    "Money received": "استُلم المال",
+    "Not completed": "لم يكتمل",
+    "Refunded": "تم الاسترداد",
+    "Still checking": "لا نزال نتحقق",
+    "Confirming": "قيد التأكيد",
+    "Minutes": "دقائق",
+    "Nothing to add": "لا شيء يُضاف",
+    "adding…": "جارٍ الإضافة…",
+    "not added yet": "لم تُضف بعد",
+    "Open Stream Live and sign in with the same email address — the minutes are already on the account. Do not send a top-up request for this purchase; asking again does not add them twice.": "افتح Stream Live وسجّل الدخول بالبريد الإلكتروني نفسه — الدقائق في الحساب بالفعل. لا ترسل طلب إعادة تعبئة لهذا الشراء؛ فطلبه مرة ثانية لا يضيفه مرتين.",
+    "Do not pay again. Paystack has the money, the minutes could not be added by themselves, and the seller has been told. Re-checking this page keeps trying, and the minutes go in the moment the credit succeeds.": "لا تدفع مرة أخرى. المال لدى Paystack، والدقائق لم تُضف من نفسها، وقد أُبلغ البائع. التحقق من هذه الصفحة من جديد يستمر في المحاولة، وتدخل الدقائق لحظة نجاح الإضافة.",
+    "Nothing was charged to your card or wallet. You can pick a package and try again.": "لم يُخصم شيء من بطاقتك أو محفظتك. يمكنك اختيار حزمة والمحاولة مجدداً.",
+    "The money is being returned to the card or wallet you paid with — usually a few minutes for mobile money, up to a few working days for a card. No minutes were added for this order, and you do not need to do anything else.": "يعود المال إلى البطاقة أو المحفظة التي دفعت بها — عادة دقائق قليلة مع المحفظة المحمولة، وحتى عدة أيام عمل مع البطاقة. لم تُضف أي دقائق لهذا الطلب، ولا تحتاج إلى فعل أي شيء آخر.",
+    "This order was no longer paid within the seller's half-hour window, but this page keeps asking Paystack anyway — if your money is there, the minutes are added by themselves and nothing needs to be paid twice.": "لم يعد هذا الطلب مدفوعاً داخل نصف ساعة البائع، لكن هذه الصفحة تواصل السؤال لدى Paystack — إن كان مالك هناك، تُضاف الدقائق وحدها ولا يُدفع شيء مرتين.",
+    "Keep this page open. The minutes are added the moment Paystack confirms the money, which is usually a few seconds after a card payment and after you approve the prompt on your phone for mobile money.": "أبقِ هذه الصفحة مفتوحة. تُضاف الدقائق لحظة أن يؤكد Paystack المال — وهو عادة ثوانٍ قليلة بعد الدفع بالبطاقة، وبعد موافقتك على الطلب على هاتفك في المحفظة المحمولة.",
+    "Something wrong? {help} and quote reference {ref}.": "هل هناك خطأ؟ {help} واذكر المرجع {ref}.",
+    "Ask the seller": "راسل البائع",
+    "Payment receipt": "إيصال دفع",
+    "Minutes package": "حزمة دقائق",
+    "What this bought": "ما اشتريته",
+    "Paid with": "تم الدفع عبر",
+    "Account": "الحساب",
+    "not recorded": "غير مسجَّل",
+    "Order reference": "مرجع الطلب",
+    "Paystack reference": "مرجع Paystack",
+    "issued when the payment confirms": "يُصدَر عند تأكيد الدفع",
+    "Order opened": "فتح الطلب",
+    "Payment confirmed": "تأكيد الدفع",
+    "never": "لم يحدث",
+    "waiting": "في الانتظار",
+    "Minutes added": "إضافة الدقائق",
+    "not yet": "لم تُضف بعد",
+    "Waiting for Paystack to confirm the money.": "في انتظار أن يؤكد Paystack المال.",
+    "Paystack, asked just now: {text}": "Paystack، سُئل الآن: {text}",
+    "Recorded on the order: {note}": "مسجَّل على الطلب: {note}",
+    "Print or save as PDF": "اطبع أو احفظ بصيغة PDF",
+    "Copy the references": "انسخ المراجع",
+    "Buy another package": "اشترِ حزمة أخرى",
+    "Copied": "تم النسخ",
+    "Select it from the receipt above": "اختره من الإيصال أعلاه",
+    "Your order": "طلبك",
+    "Reading the payment…": "قراءة حالة الدفع…",
+    "This page has stopped checking by itself": "توقفت هذه الصفحة عن التحقق بنفسها",
+    "It read your order {ref} as {state} last time. Nothing needs to be paid again and the order has not been lost: if Paystack has the money, the minutes go into the account by themselves and this page will show them.": "قرأت طلبك {ref} في آخر مرة على أنه {state}. لا يلزم دفع شيء مرة أخرى، ولم يضيع الطلب: إن كان المال لدى Paystack، تدخل الدقائق إلى الحساب وحدها وتعرض هذه الصفحة ذلك.",
+    "Ask it again now, or reload this page at any time.": "تحقق الآن من جديد، أو أعد تحميل هذه الصفحة في أي وقت.",
+    "Ask about my payment now": "تحقق من دفعي الآن",
+    "not yet read": "لم تُقرأ بعد",
+    "We could not reach the payment service": "لم نستطع الوصول إلى خدمة الدفع",
+    "Nothing needs to be paid again. Reload this page in a minute, or ask the seller and quote reference {ref}.": "لا يلزم دفع شيء مرتين. أعد تحميل هذه الصفحة بعد دقيقة، أو راسل البائع واذكر المرجع {ref}.",
+    "That order is not on this till": "هذا الطلب ليس في صندوق الدفع هذا",
+    "Reference {ref} is not one this page issued. If you paid, message the seller and quote it — the money and the minutes are both traceable from Paystack's own number.": "المرجع {ref} ليس من إصدار هذه الصفحة. إن كنت قد دفعت، راسل البائع واذكره — يمكن تتبّع المال والدقائق كلاهما من رقم Paystack الخاص.",
+    "Type your account email address first.": "اكتب بريد حسابك الإلكتروني أولاً.",
+  },
+};
+
+/** The sentences written in the page itself, by the id that holds them. Everything else the
+ *  page paints with innerHTML is repainted from the last thing the seller's server sent, so
+ *  a language change costs no new request. */
+const STATIC = {
+  shopTitle: "Buy minutes",
+  lede: "Pay by card or by mobile money — both are taken by Paystack. Your card or wallet details go to Paystack, never to this app, and your minutes appear in the account as soon as the payment confirms.",
+  step1: "1. Choose a package",
+  step2: "2. How would you like to pay?",
+  step3: "3. The email address your Stream Live account was created with",
+  emailLabel: "Type it exactly as you signed up. This is what the minutes are added to — a payment made against an address that has no account cannot be delivered.",
+  "foot-a": "Everything is charged in Ghana cedis. A card bill arrives in your own currency after your bank converts it. With mobile money, Paystack sends a prompt to the phone number you give and the payment goes when you approve it. Something wrong?",
+  "foot-help": "Ask for help",
+  "foot-b": "and quote your reference.",
+};
+
+/**
+ * Put the page into `lang`: the document's own language and direction, the title bar, the
+ * description a search engine reads, the static sentences, and then the cards the page drew
+ * itself. A language never reloads the page and never talks to the payment provider.
+ */
+function applyLang() {
+  dict = DICT[lang] || {};
+  const root = document.documentElement;
+  root.lang = lang;
+  root.dir = lang === "ar" ? "rtl" : "ltr"; // Arabic reads right to left and the layout flips with it
+  document.title = tr(titleKey);
+  const meta = document.querySelector('meta[name="description"]');
+  if (meta) meta.content = tr(META_DESC);
+  for (const id in STATIC) {
+    const node = $(id);
+    // The lede is the one static line whose wording changes with `?way=`: when the till is
+    // pinned to a method its sentence names only that method, so it reads `ledeKey` rather
+    // than the both-methods STATIC entry.
+    if (node) node.textContent = tr(id === "lede" ? ledeKey : STATIC[id]);
+  }
+  const bar = $("langbar");
+  if (bar) {
+    bar.setAttribute("aria-label", tr("Language"));
+    bar.querySelectorAll(".pill").forEach((p) => p.classList.toggle("on", p.dataset.lang === lang));
+  }
+  if (errKey) $("err").textContent = tr(errKey);
+  if (lastStatusRender) show(lastStatusRender());
+  if (lastData && !$("shop").hidden) paintShop(lastData);
+  refreshGo();
+  try { localStorage.setItem(LANG_KEY, lang); } catch { /* remembering is a convenience */ }
+}
+
+const pickLang = (want) => (LANGS.some((l) => l.code === want) ? want : "en");
+
+/** The app's choice on the address first, then what this page saved for itself, then English.
+ *  English has to be able to win too: a customer who reads the till in Arabic once and then
+ *  switches the app back to English must not be handed the Arabic page again. */
+function resolveLang() {
+  const want = (new URLSearchParams(location.search).get("lang") || "").toLowerCase();
+  if (LANGS.some((l) => l.code === want)) return want;
+  try { return pickLang(localStorage.getItem(LANG_KEY) || "en"); } catch { return "en"; }
+}
+
+function setLang(next) {
+  const code = pickLang(next);
+  if (code === lang) return;
+  lang = code;
+  applyLang();
+}
+
+/** The control sits above everything the customer reads, receipt included, because someone
+ *  who cannot read the page cannot find the setting that would translate it. */
+function initLang() {
+  const bar = $("langbar");
+  bar.innerHTML = LANGS.map((l) =>
+    '<button class="pill" data-lang="' + l.code + '">' + l.native + "</button>").join("");
+  bar.querySelectorAll(".pill").forEach((p) => { p.onclick = () => setLang(p.dataset.lang); });
+  lang = resolveLang();
+  applyLang();
+}
+
+/** Remember how a card was painted, so the next language can paint it again in words. */
+function paint(render) { lastStatusRender = render; show(render()); }
+function setTitle(key) { titleKey = key; document.title = tr(key); }
+function setErr(key) { errKey = key || ""; $("err").textContent = key ? tr(key) : ""; }
+
+// The minutes' own words, copied from the panel rather than re-invented so the buyer reads
+// the same names in both places.
 const MOD_LABEL = { video: "Video Call", audio: "Audio Call", video_audio: "Video + Audio" };
-const FEATURE_LABEL = { video: "Video calls", voice: "Voice / audio", portrait_obs: "Portrait OBS output" };
 const MODS = ["video", "audio", "video_audio"];
 const minutesOf = (p) => MODS.map((m) => [m, Number(p[m + "_minutes"] || 0)]).filter(([, v]) => v > 0);
 
@@ -204,100 +777,128 @@ function notBuyable(p) {
 }
 
 /**
- * One card, painted the way the panel's Plans tab paints a package: name, price,
- * the short line under it, "Minutes in this package", the list of what is included,
- * then the feature tags and the device count. The only difference he asked for is
- * the price: cedis instead of dollars. A package the seller lists but cannot yet
- * sell stays on the page and says why on the card.
+ * One card: the package's own name, its price in cedis, and the minutes it carries. The
+ * seller's marketing line, the list of what is included and the feature tags used to be
+ * printed here too; he took them off every package, in the app and on this page, so the
+ * buyer sees one figure and one number of minutes and nothing to read. A package the
+ * seller lists but cannot yet sell stays on the page and says why on the card.
+ *
+ * The body is a function rather than a string kept in the button, so that changing the
+ * language can look every word up again instead of leaving the card dressed in the
+ * language it was first painted in.
  */
-function cardHtml(p) {
+function cardBodyHtml(p) {
   const mods = minutesOf(p);
   const why = notBuyable(p);
-  const tags = [...(p.features || []), null].map((f) =>
-    f ? "<span>" + esc(FEATURE_LABEL[f] || f) + "</span>"
-      : "<span>" + (Number(p.max_devices || 1) === 1 ? "1 device" : Number(p.max_devices || 1) + " devices") + "</span>");
-  return '<div class="name">' + esc(p.name || "Untitled package") + "</div>"
+  return '<div class="name">' + esc(tr(p.name || "Untitled package")) + "</div>"
     + (Number(p.listed_price_ghp) > 0
         ? '<div class="price">' + money(p.listed_price_ghp) + "<span>GHS</span></div>"
-        : '<div class="unpriced">Price not set</div>')
-    + (p.blurb ? '<div class="blurb">' + esc(p.blurb) + "</div>" : "")
+        : '<div class="unpriced">' + tr("Price not set") + "</div>")
     + (mods.length
-        ? '<div class="mins"><p class="ml">Minutes in this package</p>'
-          + mods.map(([m, v]) => '<div class="mm"><span>' + MOD_LABEL[m] + "</span><b>"
-            + Number(v).toLocaleString("en-US") + " min</b></div>").join("") + "</div>"
+        ? '<div class="mins"><p class="ml">' + tr("Minutes in this package") + "</p>"
+          + mods.map(([m, v]) => '<div class="mm"><span>' + tr(MOD_LABEL[m]) + "</span><b>"
+            + Number(v).toLocaleString("en-US") + " " + tr("min") + "</b></div>").join("") + "</div>"
         : "")
-    + (why ? '<div class="why">' + why + "</div>" : "")
-    + ((p.includes || []).length ? "<ul>" + p.includes.map((l) => "<li>" + esc(l) + "</li>").join("") + "</ul>" : "")
-    + '<div class="tags">' + tags.join("") + "</div>";
+    + (why ? '<div class="why">' + tr(why) + "</div>" : "");
 }
 
 /** Once a package and a way are both switched on, the button says exactly what it will do. */
 function refreshGo() {
   const go = $("go");
-  if (!chosen) { go.disabled = true; go.textContent = "Choose a package above"; return; }
-  if (!method) { go.disabled = true; go.textContent = "Choose how you want to pay"; return; }
+  if (!chosen) { go.disabled = true; go.textContent = tr("Choose a package above"); return; }
+  if (!method) { go.disabled = true; go.textContent = tr("Choose how you want to pay"); return; }
   go.disabled = false;
-  go.textContent = "Pay " + money(chosen.price_ghp) + " by " + WAY_NAME[method];
+  go.textContent = tr("Pay {amount} by {method}",
+    { amount: money(chosen.price_ghp), method: tr(WAY_NAME[method]) });
 }
 
 function renderWays() {
   $("ways").innerHTML = ways.map((c) =>
-    '<button class="way" data-way="' + esc(c) + '"><b>' + esc(WAY_TEXT[c].title) + "</b><small>"
-    + esc(WAY_TEXT[c].sub) + "</small></button>"
+    '<button class="way" data-way="' + esc(c) + '"><b>' + esc(tr(WAY_TEXT[c].title)) + "</b><small>"
+    + esc(tr(WAY_TEXT[c].sub)) + "</small></button>"
   ).join("");
   $("ways").querySelectorAll(".way").forEach((node) => {
+    // A repaint keeps whichever way is switched on switched on, in the new words.
+    node.classList.toggle("on", node.dataset.way === method);
     node.onclick = () => {
       method = node.dataset.way;
       $("ways").querySelectorAll(".way").forEach((n) => n.classList.toggle("on", n === node));
-      $("err").textContent = "";
+      setErr("");
       refreshGo();
     };
   });
   // One way open is not a choice, so the page does not make the buyer click it.
   if (ways.length === 1) {
     const only = $("ways").querySelector('.way[data-way="' + ways[0] + '"]');
-    if (only) only.onclick();
+    if (only && method !== ways[0]) only.onclick();
   }
 }
 
 async function renderPackages() {
   let data;
-  try { data = await api(""); }
-  catch (e) { return show('<div class="card"><h2>Payment is not available right now</h2><p class="muted">' + e.message + "</p></div>"); }
+  // The shelf he chose in the app is the shelf the seller's server answers for. Asked with no
+  // market on the address, the service answers with its own default list, so a till opened
+  // straight from a link still works exactly as it did before.
+  try { data = await api(urlMarket ? "?market=" + urlMarket : ""); }
+  catch (e) {
+    return paint(() => '<div class="card"><h2>' + tr("Payment is not available right now")
+      + '</h2><p class="muted">' + tr(e.message) + "</p></div>");
+  }
 
   if (!data.enabled || !data.packages.length) {
-    return show('<div class="card"><h2>Nothing is on sale online yet</h2><p class="muted">Minutes can still be added to ' +
-      'your account by the seller — use the contact details inside the app.</p></div>');
+    return paint(() => '<div class="card"><h2>' + tr("Nothing is on sale online yet")
+      + '</h2><p class="muted">'
+      + tr("Minutes can still be added to your account by the seller — use the contact details inside the app.")
+      + "</p></div>");
   }
   if (data.sample) {
-    show('<div class="card"><b>This is the local test page.</b> <span class="muted">The packages below are sample ' +
-      'figures, not the seller\'s real catalogue. On the live page the cards come straight from the Plans list.</span></div>');
+    paint(() => '<div class="card"><b>' + tr("This is the local test page.") + '</b> <span class="muted">'
+      + tr("The packages below are sample figures, not the seller's real catalogue. On the live page the cards come straight from the Plans list.")
+      + "</span></div>");
   }
 
+  lastData = data;
+  paintShop(data);
+}
+
+/** The shop, painted from the list we already hold: choosing a language redraws the cards,
+ *  the buttons and the figures in the new words without asking the seller again. */
+function paintShop(data) {
   ways = Array.isArray(data.channels) && data.channels.length ? data.channels : ["card"];
 
+  // When the app pins the till to one method, only that channel is offered and renderWays()
+  // switches to it on its own. But if the seller's server has not actually got that method
+  // open, the pinned filter would leave an empty button row - so the force is dropped and
+  // the server's own list stands, because a buyer with no way to pay is worse than a buyer
+  // shown one method the app did not intend.
+  if (urlWay) {
+    const pinned = ways.filter((c) => c === urlWay);
+    if (pinned.length) ways = pinned;
+  }
   // Every package the seller lists is on this page. The ones the server will not take
   // money for are shown with the reason and cannot be chosen.
   const off = data.packages.map((p) => notBuyable(p) !== null);
   $("pkgs").innerHTML = data.packages.map((p, i) =>
     '<button class="pkg" data-id="' + esc(p.id) + '"' + (off[i] ? " disabled" : "") + ">"
-    + cardHtml(p) + "</button>"
+    + cardBodyHtml(p) + "</button>"
   ).join("");
   const nodes = $("pkgs").querySelectorAll(".pkg");
   nodes.forEach((node, i) => {
     if (off[i]) return;
     const p = data.packages[i];
+    node.classList.toggle("on", p === chosen);
     node.onclick = () => {
       chosen = p;
       nodes.forEach((n) => n.classList.toggle("on", n === node));
-      $("err").textContent = "";
+      setErr("");
       refreshGo();
     };
   });
 
   renderWays();
-  $("rate").textContent = "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis " +
-    "at GH₵" + Number(data.rate || 12) + " to the dollar.";
+  $("rate").textContent = tr(
+    "The prices you see are the packages and figures on the seller's Plans list, in Ghana cedis at GH₵{rate} to the dollar.",
+    { rate: Number(data.rate || 12) });
   $("buy").hidden = false;
 }
 
@@ -320,13 +921,15 @@ const CURRENCY = { GHS: "GH₵", NGN: "₦", USD: "$", ZAR: "R", GNF: "GNF ", XO
 const amount = (a, cur) => (CURRENCY[cur] || (cur ? cur + " " : "GH₵"))
   + (Number(a || 0) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Paystack's own channel name is more exact than the two buttons the buyer chose from
-// ("mobile_money" becomes "MTN MoMo" once it has actually gone through a network).
+// The provider's own channel name is more exact than the two buttons the buyer chose from
+// ("mobile_money" becomes "MTN MoMo" once it has actually gone through a network). The
+// networks' names stay as they are; our own words move, and the company behind the till
+// is never printed on the buyer's screen.
 const PAID_BY = (s) => {
-  const ch = { mobile_money: "Mobile money", card: "Card", bank: "Bank transfer",
+  const ch = tr({ mobile_money: "Mobile money", card: "Card", bank: "Bank transfer",
     bank_transfer: "Bank transfer", qrcode: "Paystack QR", hussle: "Bank transfer",
-    banktransfer: "Bank transfer", stripe: "Card", ussd: "Mobile money USSD" }[s.channel] || "Online payment";
-  return s.integration === "test" ? ch + " — test payment" : ch;
+    banktransfer: "Bank transfer", stripe: "Card", ussd: "Mobile money USSD" }[s.channel] || "Online payment");
+  return s.integration === "test" ? ch + " — " + tr("test payment") : ch;
 };
 
 /** A UTC timestamp from the server, shown in the minute the browser is standing in. */
@@ -342,25 +945,25 @@ const row = (k, v, mono) => v ? '<div class="row"><dt>' + k + "</dt><dd"
 
 /** credited and failed are final; 'paid' means the money is in and the credit needs the seller. */
 function ribbon(s) {
-  if (s.status === "credited") return { cls: "ok", text: "Paid" };
-  if (s.status === "paid") return { cls: "ok", text: "Money received" };
-  if (s.status === "failed") return { cls: "bad", text: "Not completed" };
-  if (s.status === "refunded") return { cls: "bad", text: "Refunded" };
-  return { cls: "wait", text: s.gone_quiet ? "Still checking" : "Confirming" };
+  if (s.status === "credited") return { cls: "ok", text: tr("Paid") };
+  if (s.status === "paid") return { cls: "ok", text: tr("Money received") };
+  if (s.status === "failed") return { cls: "bad", text: tr("Not completed") };
+  if (s.status === "refunded") return { cls: "bad", text: tr("Refunded") };
+  return { cls: "wait", text: s.gone_quiet ? tr("Still checking") : tr("Confirming") };
 }
 
 function receiptHtml(s, waiting) {
   const r = ribbon(s);
   const grants = Array.isArray(s.grants) ? s.grants : [];
   const minutes = grants.length
-    ? grants.map((g) => '<div class="mm"><span>' + esc(MOD_LABEL[g.modality] || g.modality || "Minutes")
-      + "</span><b>" + Number(g.minutes || 0).toLocaleString("en-US") + " min</b></div>").join("")
-    : '<div class="mm"><span>' + (r.cls === "bad" ? "Nothing to add" : "Minutes")
-      + "</span><b>" + (waiting ? "adding…" : "not added yet") + "</b></div>";
+    ? grants.map((g) => '<div class="mm"><span>' + esc(tr(MOD_LABEL[g.modality] || g.modality || "Minutes"))
+      + "</span><b>" + Number(g.minutes || 0).toLocaleString("en-US") + " " + tr("min") + "</b></div>").join("")
+    : '<div class="mm"><span>' + esc(tr(r.cls === "bad" ? "Nothing to add" : "Minutes"))
+      + "</span><b>" + esc(waiting ? tr("adding…") : tr("not added yet")) + "</b></div>";
 
   // The plain sentence under the status box is what a customer actually reads, so each
   // state gets its own rather than a shared "thank you".
-  const closing = s.status === "credited"
+  const closing = tr(s.status === "credited"
     ? "Open Stream Live and sign in with the same email address — the minutes are already on the account. Do not send a top-up request for this purchase; asking again does not add them twice."
     : s.status === "paid"
     ? "Do not pay again. Paystack has the money, the minutes could not be added by themselves, and the seller has been told. Re-checking this page keeps trying, and the minutes go in the moment the credit succeeds."
@@ -370,56 +973,62 @@ function receiptHtml(s, waiting) {
     ? "The money is being returned to the card or wallet you paid with — usually a few minutes for mobile money, up to a few working days for a card. No minutes were added for this order, and you do not need to do anything else."
     : s.gone_quiet
     ? "This order was no longer paid within the seller's half-hour window, but this page keeps asking Paystack anyway — if your money is there, the minutes are added by themselves and nothing needs to be paid twice."
-    : "Keep this page open. The minutes are added the moment Paystack confirms the money, which is usually a few seconds after a card payment and after you approve the prompt on your phone for mobile money.";
+    : "Keep this page open. The minutes are added the moment Paystack confirms the money, which is usually a few seconds after a card payment and after you approve the prompt on your phone for mobile money.");
 
-  const help = "Something wrong? <a href=\"https://t.me/rich_life2k15\">Ask the seller</a> and quote reference <b class=\"mono\">"
-    + esc(s.reference || "") + "</b>.";
+  // One sentence, with the link and the reference as holes inside it, so a language can put
+  // them where its own grammar wants rather than where English does.
+  const help = tr("Something wrong? {help} and quote reference {ref}.", {
+    help: '<a href="https://t.me/rich_life2k15">' + tr("Ask the seller") + "</a>",
+    ref: '<b class="mono">' + esc(s.reference || "") + "</b>",
+  });
 
   return '<div class="receipt">'
     + '<div class="rhead">' + LOGO
-      + '<div><div class="wordmark">Stream Live</div><div class="rtag">Payment receipt</div></div>'
+      + '<div><div class="wordmark">Stream Live</div><div class="rtag">' + tr("Payment receipt") + "</div></div>"
       + '<div class="ribbon ' + r.cls + '">' + esc(r.text) + "</div></div>"
-    + '<div class="rtop"><div class="rplan">' + esc(s.plan || "Minutes package") + "</div>"
+    + '<div class="rtop"><div class="rplan">' + esc(tr(s.plan || "Minutes package")) + "</div>"
       + '<div class="ramount">' + amount(s.amount, s.currency || "GHS")
       // "GH₵6.00 GHS" says the same thing twice; the code only earns its place when
       // the figure above is spelled with it.
       + (CURRENCY[s.currency || "GHS"] ? "" : "<span>" + esc(s.currency || "") + "</span>")
       + "</div></div>"
     + '<div class="mins" style="margin:16px 20px 0">'
-      + '<p class="ml">What this bought</p>' + minutes + "</div>"
+      + '<p class="ml">' + tr("What this bought") + "</p>" + minutes + "</div>"
     + '<dl class="rows">'
-      + row("Paid with", esc(PAID_BY(s)))
-      + row("Account", esc(s.account || "not recorded"))
-      + row("Order reference", esc(s.reference || ""), true)
-      + row("Paystack reference", s.paystack_reference ? esc(s.paystack_reference)
-            : '<span class="muted">issued when the payment confirms</span>', true)
-      + row("Order opened", esc(when(s.opened_at)))
-      + row("Payment confirmed", esc(when(s.paid_at) || (r.cls === "bad" ? "never" : "waiting")))
-      + row("Minutes added", esc(when(s.credited_at) || (waiting ? "waiting" : "not yet")))
+      + row(tr("Paid with"), esc(PAID_BY(s)))
+      + row(tr("Account"), esc(tr(s.account || "not recorded")))
+      + row(tr("Order reference"), esc(s.reference || ""), true)
+      + row(tr("Paystack reference"), s.paystack_reference ? esc(s.paystack_reference)
+            : '<span class="muted">' + tr("issued when the payment confirms") + "</span>", true)
+      + row(tr("Order opened"), esc(when(s.opened_at)))
+      + row(tr("Payment confirmed"), esc(when(s.paid_at) || (r.cls === "bad" ? tr("never") : tr("waiting"))))
+      + row(tr("Minutes added"), esc(when(s.credited_at) || (waiting ? tr("waiting") : tr("not yet"))))
     + "</dl>"
     + '<div class="rstatus ' + r.cls + '">' + (waiting && r.cls === "wait" ? '<span class="spin"></span>' : "")
-      + esc(s.message || "Waiting for Paystack to confirm the money.") + "</div>"
+      + esc(tr(s.message || "Waiting for Paystack to confirm the money.")) + "</div>"
     + (s.paystack_says && r.cls !== "ok"
-        ? '<p class="muted" style="margin:10px 20px 0;font-size:13px">Paystack, asked just now: '
-          + esc(s.paystack_says) + (s.chase ? " (" + esc(s.chase) + ")" : "") + "</p>" : "")
+        ? '<p class="muted" style="margin:10px 20px 0;font-size:13px">'
+          + tr("Paystack, asked just now: {text}", { text: esc(s.paystack_says) + (s.chase ? " (" + esc(s.chase) + ")" : "") })
+          + "</p>" : "")
     + (s.note && r.cls !== "ok"
-        ? '<p class="muted" style="margin:8px 20px 0;font-size:13px">Recorded on the order: ' + esc(s.note) + "</p>" : "")
+        ? '<p class="muted" style="margin:8px 20px 0;font-size:13px">'
+          + tr("Recorded on the order: {note}", { note: esc(s.note) }) + "</p>" : "")
     + '<div class="rfoot">' + esc(closing) + '<div class="rbtns">'
-      + '<button class="rbtn" id="print">Print or save as PDF</button>'
-      + '<button class="rbtn" id="copy">Copy the references</button>'
-      + '<button class="rbtn" id="again">Buy another package</button></div>'
+      + '<button class="rbtn" id="print">' + tr("Print or save as PDF") + "</button>"
+      + '<button class="rbtn" id="copy">' + tr("Copy the references") + "</button>"
+      + '<button class="rbtn" id="again">' + tr("Buy another package") + "</button></div>"
       + '<p style="margin:14px 0 0">' + help + "</p></div></div>";
 }
 
 /** The frame shown before the server has answered anything, so the page is never blank. */
 function waitingReceipt(reference) {
   return '<div class="receipt"><div class="rhead">' + LOGO
-    + '<div><div class="wordmark">Stream Live</div><div class="rtag">Payment receipt</div></div>'
-    + '<div class="ribbon wait">Confirming</div></div>'
-    + '<div class="rtop"><div class="rplan">Your order</div>'
-    + '<div class="ramount" style="font-size:20px"><span class="spin"></span>Reading the payment…</div></div>'
-    + '<dl class="rows">' + row("Order reference", esc(reference), true) + "</dl>"
-    + '<div class="rstatus wait">Waiting for Paystack to confirm the money.</div></div>';
+    + '<div><div class="wordmark">Stream Live</div><div class="rtag">' + tr("Payment receipt") + "</div></div>"
+    + '<div class="ribbon wait">' + tr("Confirming") + "</div></div>"
+    + '<div class="rtop"><div class="rplan">' + tr("Your order") + "</div>"
+    + '<div class="ramount" style="font-size:20px"><span class="spin"></span>' + tr("Reading the payment…") + "</div></div>"
+    + '<dl class="rows">' + row(tr("Order reference"), esc(reference), true) + "</dl>"
+    + '<div class="rstatus wait">' + tr("Waiting for Paystack to confirm the money.") + "</div></div>";
 }
 
 function wireReceipt(reference) {
@@ -431,23 +1040,27 @@ function wireReceipt(reference) {
   const on = (id, fn) => { const el = $(id); if (el) el.onclick = fn; };
   on("print", () => window.print());
   on("again", () => {
-    history.replaceState(null, "", location.pathname);
-    document.title = "Stream Live — buy minutes";
+    // The order is over, so the check goes off the address; the language stays on it,
+    // because a reload that dropped back to English would lose the customer's words.
+    history.replaceState(null, "", location.pathname + (lang === "en" ? "" : "?lang=" + lang));
+    setTitle("Stream Live — buy minutes");
     $("shop").hidden = false;
     $("buy").hidden = false;
     renderPackages();
   });
   on("copy", async (e) => {
+    // Left in English on purpose: this line is not read on the page, it is pasted to the
+    // seller, and the same words in it are what the seller's own records are searched with.
     const txt = "Stream Live order " + reference
       + (window.__receipt && window.__receipt.paystack_reference
           ? ", Paystack reference " + window.__receipt.paystack_reference : "");
     try {
       await navigator.clipboard.writeText(txt);
-      e.target.textContent = "Copied";
+      e.target.textContent = tr("Copied");
     } catch {
-      e.target.textContent = "Select it from the receipt above";
+      e.target.textContent = tr("Select it from the receipt above");
     }
-    setTimeout(() => { const b = $("copy"); if (b) b.textContent = "Copy the references"; }, 2500);
+    setTimeout(() => { const b = $("copy"); if (b) b.textContent = tr("Copy the references"); }, 2500);
   });
 }
 
@@ -461,22 +1074,23 @@ function wireReceipt(reference) {
  * gives the one control that matters.
  */
 function stoppedCard(reference, s) {
-  const state = (s && s.status) || "not yet read";
-  return '<div class="card"><h2>This page has stopped checking by itself</h2>'
-    + '<p class="muted">It read your order <b>' + esc(reference) + '</b> as <b>' + esc(state)
-    + '</b> last time. Nothing needs to be paid again and the order has not been lost: if'
-    + ' Paystack has the money, the minutes go into the account by themselves and this page'
-    + ' will show them.</p>'
-    + '<p class="muted">Ask it again now, or reload this page at any time.</p>'
-    + '<div class="rbtns" style="padding:0 0 4px"><button class="rbtn" id="recheck">Ask about my payment now</button></div></div>';
+  const state = tr((s && s.status) || "not yet read");
+  return '<div class="card"><h2>' + tr("This page has stopped checking by itself") + "</h2>"
+    + '<p class="muted">' + tr(
+        "It read your order {ref} as {state} last time. Nothing needs to be paid again and the order has not been lost: if Paystack has the money, the minutes go into the account by themselves and this page will show them.",
+        { ref: "<b>" + esc(reference) + "</b>", state: "<b>" + esc(state) + "</b>" })
+    + "</p>"
+    + '<p class="muted">' + tr("Ask it again now, or reload this page at any time.") + "</p>"
+    + '<div class="rbtns" style="padding:0 0 4px"><button class="rbtn" id="recheck">'
+    + tr("Ask about my payment now") + "</button></div></div>";
 }
 
 // After Paystack takes the payment it sends the buyer back here with ?check=<reference>.
 async function follow(reference) {
   $("shop").hidden = true;
   $("buy").hidden = true;
-  document.title = "Stream Live — your receipt";
-  show(waitingReceipt(reference));
+  setTitle("Stream Live — your receipt");
+  paint(() => waitingReceipt(reference));
   wireReceipt(reference);
 
   // Card payments confirm in seconds; a mobile money prompt waits until the customer
@@ -497,25 +1111,28 @@ async function follow(reference) {
       // A customer who paid must not be abandoned on a dead page because one request was
       // dropped: two more are tried before this says anything about the payment service.
       if (++misses < 3) continue;
-      show('<div class="card"><h2>We could not reach the payment service</h2><p class="muted">' + esc(e.message) +
-        "</p><p class=\"muted\">Nothing needs to be paid again. Reload this page in a minute, or ask the seller and quote reference <b>" +
-        esc(reference) + "</b>.</p></div>");
+      paint(() => '<div class="card"><h2>' + tr("We could not reach the payment service")
+        + '</h2><p class="muted">' + esc(tr(e.message))
+        + "</p><p class=\"muted\">" + tr("Nothing needs to be paid again. Reload this page in a minute, or ask the seller and quote reference {ref}.", { ref: "<b>" + esc(reference) + "</b>" })
+        + "</p></div>");
       return;
     }
     if (!s || s.ok === false) {
-      show('<div class="card"><h2>That order is not on this till</h2><p class="muted">Reference <b>' +
-        esc(reference) + '</b> is not one this page issued. If you paid, message the seller and quote it — the money and the minutes are both traceable from Paystack\'s own number.</p></div>');
+      paint(() => '<div class="card"><h2>' + tr("That order is not on this till")
+        + '</h2><p class="muted">'
+        + tr("Reference {ref} is not one this page issued. If you paid, message the seller and quote it — the money and the minutes are both traceable from Paystack's own number.", { ref: "<b>" + esc(reference) + "</b>" })
+        + "</p></div>");
       return;
     }
     window.__receipt = s;
     const settled = s.status === "credited" || s.status === "failed"
       || s.status === "refunded" || s.status === "paid";
-    show(receiptHtml(s, !settled));
+    paint(() => receiptHtml(s, !settled));
     wireReceipt(reference);
     if (settled) return;
     if (spent > FINAL_MS) {
-      document.title = "Stream Live — payment still confirming";
-      show(stoppedCard(reference, s));
+      setTitle("Stream Live — payment still confirming");
+      paint(() => stoppedCard(reference, s));
       $("recheck").onclick = () => follow(reference);
       return;
     }
@@ -524,14 +1141,14 @@ async function follow(reference) {
 
 $("go").onclick = async () => {
   const email = $("email").value.trim();
-  if (!email) { $("err").textContent = "Type your account email address first."; return; }
+  if (!email) { setErr("Type your account email address first."); return; }
   $("go").disabled = true;
-  $("err").textContent = "";
+  setErr("");
   try {
     const r = await post("", { method: "POST", body: JSON.stringify({ email, plan_id: chosen.id, method }) });
     location.href = r.checkout_url;
   } catch (e) {
-    $("err").textContent = e.message;
+    setErr(e.message);
     $("go").disabled = false;
   }
 };
@@ -540,6 +1157,7 @@ $("go").onclick = async () => {
 // `?check=` this page asks for, so a customer who paid that way still lands on a receipt.
 const params = new URLSearchParams(location.search);
 const ref = params.get("check") || params.get("reference") || params.get("trxref") || "";
+initLang();
 if (/^sl-[0-9a-f]{12,24}$/.test(ref)) follow(ref); else renderPackages();
 </script>
 </body>

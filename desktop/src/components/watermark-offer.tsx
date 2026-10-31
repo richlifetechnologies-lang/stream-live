@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { Sparkles } from "lucide-react";
 import { gateway } from "../lib/gateway";
 import { openTill } from "../lib/shop";
+import { t } from "../lib/i18n";
 
 const GOLD = "hsl(38 100% 58%)";
 
@@ -64,21 +65,19 @@ export function WatermarkOffer({
           margin: "0 0 5px", fontSize: 10, fontWeight: 700, letterSpacing: "0.16em",
           textTransform: "uppercase", fontFamily: "'Orbitron', monospace", color: GOLD,
         }}>
-          Your free minute is used
+          {t("Your free minute is used")}
         </p>
         <h2 style={{
           margin: 0, fontSize: 19, fontWeight: 700, lineHeight: 1.25,
           fontFamily: "'Orbitron', monospace", color: "hsl(45 100% 96%)",
         }}>
-          The watermark was the trial. Minutes you buy have none.
+          {t("The watermark was the trial. Minutes you buy have none.")}
         </h2>
         <p style={{
           margin: "9px 0 0", fontSize: 14, lineHeight: 1.55,
           fontFamily: "'Rajdhani', sans-serif", color: "hsl(40 60% 88%)",
         }}>
-          Free trial video carries a mark on the picture. That mark is the only thing the
-          trial limits. Once minutes are in your account your output video is clean — the
-          same picture into OBS, into a call, anywhere you send it.
+          {t("Free trial video carries a mark on the picture. That mark is the only thing the trial limits. Once minutes are in your account your output video is clean — the same picture into OBS, into a call, anywhere you send it.")}
         </p>
       </div>
 
@@ -93,7 +92,7 @@ export function WatermarkOffer({
           onMouseEnter={e => { (e.currentTarget as HTMLElement).style.filter = "brightness(1.08)"; }}
           onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}
         >
-          Buy minutes
+          {t("Buy minutes")}
         </button>
       ) : (
       <button
@@ -107,7 +106,7 @@ export function WatermarkOffer({
         onMouseEnter={e => { (e.currentTarget as HTMLElement).style.filter = "brightness(1.08)"; }}
         onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}
       >
-        {ctaLabel}
+        {t(ctaLabel)}
       </button>
       )}
     </div>
