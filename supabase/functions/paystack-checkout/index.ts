@@ -125,15 +125,90 @@ function cleanEmail(raw: unknown): string | null {
 }
 
 /**
- * The two-letter country the runtime already put on this request, kept only for the flag the
- * SELLER sees beside an account. Nothing here is decided from it: no price, no shelf, no door
- * and no payment is touched by it — the customer picks his own shelf by tapping it, and the
- * amount charged is the seller's figure either way. A customer on a VPN shows the VPN's
- * country, and the whole of that mistake is one wrong flag on a screen only he reads.
+ * The two-letter country the platform put on this request, when it puts one at all. Proved on
+ * this project on 2026-10-31 that this runtime is NOT handed `cf-ipcountry` - the probe
+ * received `cf-connecting-ip`, `cf-ray` and `x-forwarded-for` but no country - so this is the
+ * cheap first try and the address lookup below is what actually fills a flag.
  */
 function requestCountry(req: Request): string | null {
   const raw = (req.headers.get("cf-ipcountry") ?? "").trim();
   return /^[A-Za-z][A-Za-z]$/.test(raw) ? raw : null;
+}
+
+/**
+ * The address the platform saw this request come from, and it is a real one here: the probe
+ * showed `cf-connecting-ip` equal to the caller's own public address, with the same address
+ * first in `x-forwarded-for`. Only an entry shaped like a bare address is taken.
+ */
+function requestIp(req: Request): string {
+  const raw = req.headers.get("cf-connecting-ip")
+    || req.headers.get("x-forwarded-for")
+    || req.headers.get("sb-forwarded-for")
+    || "";
+  const first = raw.split(",")[0].trim();
+  return /^[0-9a-fA-F:.]{3,45}$/.test(first) ? first : "";
+}
+
+/** Loopback, private, carrier-NAT, link-local and multicast addresses are never sent anywhere. */
+function isPublicIp(ip: string): boolean {
+  if (/^([0-9]{1,3}\.){3}[0-9]{1,3}$/.test(ip)) {
+    const [a, b] = ip.split(".").map(Number);
+    if (a === 0 || a === 10 || a === 127 || a >= 224) return false;
+    if (a === 100 && b >= 64 && b <= 127) return false;
+    if (a === 169 && b === 254) return false;
+    if (a === 172 && b >= 16 && b <= 31) return false;
+    if (a === 192 && b === 168) return false;
+    return true;
+  }
+  // IPv6: only global unicast (2000::/3) is worth asking about, so a link-local or loopback
+  // answer is never put on the wire.
+  const hextet = ip.split(":")[0] ?? "";
+  return ip.includes(":") && /^[23][0-9a-fA-F]{0,3}$/.test(hextet);
+}
+
+/**
+ * The country behind an address, from one free look-up service, display only.
+ *
+ * This is the only part of the flag that costs anything or reaches a third party, so its
+ * limits are narrow and they are enforced here: it runs only when the platform gave no
+ * country, only for an account that has no flag yet, only for a public address, at most once
+ * per account per app boot, and with a short timeout. A timeout, an error or an answer that
+ * is not two letters all mean "no flag", which is what the panel already says out loud rather
+ * than a guess. Nothing that costs the buyer money is ever read from it - no price, shelf,
+ * door or amount.
+ */
+async function countryOfAddress(ip: string): Promise<string | null> {
+  const res = await fetch("https://ipwho.is/" + ip, { signal: AbortSignal.timeout(2500) });
+  if (!res.ok) return null;
+  const body = await res.json().catch(() => null) as Record<string, unknown> | null;
+  if (!body || body.success !== true) return null;
+  const cc = String(body.country_code ?? "").trim().toUpperCase();
+  return /^[A-Z][A-Z]$/.test(cc) ? cc : null;
+}
+
+/**
+ * Put a flag beside this account, and never get in the way of the payment check that the
+ * caller actually came for - so every failure here is swallowed by the caller.
+ */
+async function noteCountry(req: Request, userId: string): Promise<void> {
+  let cc = requestCountry(req);
+  if (!cc) {
+    const db = adminClient();
+    const { data } = await db
+      .from("profiles")
+      .select("country, network_last_ip")
+      .eq("id", userId)
+      .maybeSingle();
+    // An account already carrying a flag is left exactly as it is: that value came from his
+    // own Ghana tap or from the seller, and the rule "only the first reading wins" is the
+    // database's, not something to re-litigate on every boot.
+    if (data?.country) return;
+    const ip = requestIp(req) || String(data?.network_last_ip ?? "");
+    if (isPublicIp(ip)) cc = await countryOfAddress(ip);
+  }
+  if (!cc) return;
+  const { error } = await adminClient().rpc("sl_note_network", { p_user: userId, p_ip: null, p_country: cc });
+  if (error) console.error("country stamp:", error.message);
 }
 
 async function paystack(path: string, key: string, body?: Record<string, unknown>) {
@@ -260,18 +335,15 @@ async function handle(req: Request): Promise<Response> {
   if (body.reconcile === true) {
     const user = await requireUser(req);
     // The flag beside his account. This is the one gateway call a signed-in customer's app
-    // makes just by being opened, so it records a country for everybody — not only for the
-    // few who go on to start a call. The address is deliberately left null: this is the
-    // payment door, and an address read here would be the buyer's network rather than his
-    // device's, which is not the thing the seller's IP rules are for. Bookkeeping never
-    // gets to refuse a payment check, so a failure here is swallowed and the check runs.
-    const country = requestCountry(req);
-    if (country) {
-      try {
-        await adminClient().rpc("sl_note_network", { p_user: user.id, p_ip: null, p_country: country });
-      } catch {
-        // Bookkeeping, not money.
-      }
+    // makes just by being opened, so it records a country for everybody - not only for the few
+    // who go on to start a call, and not only for those who update their app. The address is
+    // deliberately left for the call door to record: this is the payment door, and the country
+    // here is only ever a display reading. Bookkeeping never gets to refuse a payment check,
+    // so any failure at all is swallowed and the check runs.
+    try {
+      await noteCountry(req, user.id);
+    } catch {
+      // Bookkeeping, not money.
     }
     if (!user.email) return fail("this sign-in has no email address to check payments against", 403);
     const done = await reconcilePending(user.email, 10);
