@@ -2680,6 +2680,26 @@
       notes += `<p class="muted" style="margin:6px 0 0;font-size:12px">${usd(N(p.live.untracked) * perSec)} counted off since the reading came from a call whose serving key was not recorded on the session, so no row below can show it.</p>`;
     }
 
+    // His own meter, not fal's: the windows that opened and never showed a frame.
+    // Counted only once a window has closed, so a call still handshaking is not
+    // accused of a leak it may not become.
+    const secs = (v) => `${N(v).toFixed(1)}s`;
+    const nf = p.no_frame;
+    let frameLine = `<p class="muted" style="margin:14px 0 0;font-size:12px">Opened with no picture: <b>no figure in this read</b> — the count could not be taken this time.</p>`;
+    if (nf) {
+      const price = perSec && N(nf.today.seconds) + N(nf.month.seconds) > 0
+        ? ` · ${usd(N(nf.today.seconds) * perSec)} today, ${usd(N(nf.month.seconds) * perSec)} this month at ${usd(perSec)} a second`
+        : "";
+      const colour = N(nf.month.seconds) > 0 ? "#facc15" : "#35e0e6";
+      const quiet = N(nf.today.seconds) + N(nf.month.seconds) === 0;
+      const why = quiet
+        ? " — every call that opened has sent a frame."
+        : " — fal was running for that long without ever sending a frame, so no customer was charged minutes for it.";
+      frameLine = `<p class="muted" style="margin:14px 0 0;font-size:12px">Opened with no picture: <b style="color:${colour}">${secs(nf.today.seconds)}</b> today`
+        + ` (${N(nf.today.sessions)} call${N(nf.today.sessions) === 1 ? "" : "s"}) · <b style="color:${colour}">${secs(nf.month.seconds)}</b> this month`
+        + ` (${N(nf.month.sessions)} call${N(nf.month.sessions) === 1 ? "" : "s"})${price}${why}</p>`;
+    }
+
     box.innerHTML = `
       <div style="display:flex;flex-wrap:wrap;gap:32px;align-items:flex-end;margin-top:12px">
         <div>
@@ -2701,6 +2721,7 @@
           <div class="muted" style="font-size:12px">spent this month</div>
         </div>
       </div>
+      ${frameLine}
       ${notes}
       <p class="muted" style="margin:12px 0 0;font-size:12px">checked ${balAgo(Date.now() - at)}${p.from_cache ? " — the reading is held for a minute so this page never hammers fal.ai" : ""} · ${esc(p.detail || "")}${BAL_LIVE ? " · the big figure falls between readings, counted off by your own live calls" : ""}</p>`;
     tickBalance();

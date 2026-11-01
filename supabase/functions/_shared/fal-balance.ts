@@ -76,6 +76,32 @@ export type FalLive = {
   untracked: number;
 };
 
+/**
+ * How long the gateway held a fal window that never showed a frame.
+ *
+ * A video call is billed from the first frame, so his customers are charged nothing
+ * for these windows — but fal was asked to stream for them, and the seconds he pays
+ * fal for are not the same clock. This is the one figure that says how much picture
+ * nobody saw, so it can be watched week to week instead of dug out in an audit.
+ */
+export type FalWindowCount = {
+  sessions: number;
+  seconds: number;
+};
+
+/**
+ * How long the gateway held a fal window that never showed a frame.
+ *
+ * A video call is billed to the customer from the first frame, so they are charged
+ * nothing for these windows — but the seconds were still spent on fal's account.
+ * This is the figure that says how much picture nobody saw, watchable week to week
+ * instead of dug out in an audit.
+ */
+export type FalNoFrame = {
+  today: FalWindowCount;
+  month: FalWindowCount;
+};
+
 export type FalBalancePayload = {
   ok: boolean;
   /** Nothing to ask fal with: no fal_watch row and no FAL_BILLING_KEY secret. */
@@ -94,6 +120,7 @@ export type FalBalancePayload = {
   minutes_left: number | null;
   keys: FalKeyRow[];
   live: FalLive | null;
+  no_frame: FalNoFrame | null;
   checked_at: string;
   from_cache: boolean;
   detail: string;
@@ -259,6 +286,44 @@ async function liveBurn(perSecond: number | null, since: string): Promise<FalLiv
 }
 
 /**
+ * The windows his own meter recorded as "never showed a frame", summed for today and
+ * this month.
+ *
+ * Only a closed window is counted: a call still inside its lease may yet deliver the
+ * first frame, and charging its waiting time to this line would invent a leak that has
+ * not happened. The clock runs from the moment the gateway opened the session to the
+ * earlier of the end the app reported and the expiry nobody renewed past. lease_started_
+ * at is deliberately NOT the start — the settle writes it equal to the end, so using it
+ * would make every closed window read zero seconds.
+ */
+async function noFrame(monthStart: string): Promise<FalNoFrame | null> {
+  const db = adminClient();
+  const { data, error } = await db
+    .from("usage_sessions")
+    .select("started_at, lease_expires_at, ended_at")
+    .eq("engine", "fal")
+    .is("media_started_at", null)
+    .gte("started_at", monthStart)
+    .limit(5000);
+  if (error) return null;
+
+  const now = Date.now(), dayStart = Date.parse(utcDayStart());
+  const gap = { sessions: 0, seconds: 0 }, mon = { sessions: 0, seconds: 0 };
+  for (const s of data ?? []) {
+    const open = ms(s.started_at);
+    if (open === null) continue;
+    const closed = ms(s.ended_at) ?? ms(s.lease_expires_at);
+    if (closed === null || closed > now || closed <= open) continue;
+    const took = (closed - open) / 1000;
+    mon.sessions += 1;
+    mon.seconds += took;
+    if (open >= dayStart) { gap.sessions += 1; gap.seconds += took; }
+  }
+  const r = (v: number) => Math.round(v * 10) / 10;
+  return { today: { sessions: gap.sessions, seconds: r(gap.seconds) }, month: { sessions: mon.sessions, seconds: r(mon.seconds) } };
+}
+
+/**
  * The whole card in one call: balance, what fal charged since UTC midnight and since
  * the first of the month, and the same two figures per stored key.
  */
@@ -269,6 +334,7 @@ export async function falBalance(): Promise<FalBalancePayload> {
   if (cache && Date.now() - cache.at < cache.ttl) {
     const held = { ...cache.payload, from_cache: true };
     held.live = await liveBurn(held.per_second, held.checked_at);
+    held.no_frame = await noFrame(utcMonthStart());
     return held;
   }
 
@@ -297,6 +363,7 @@ export async function falBalance(): Promise<FalBalancePayload> {
     minutes_left: null,
     keys: [],
     live: null,
+    no_frame: null,
     checked_at: new Date().toISOString(),
     from_cache: false,
     detail: secret
@@ -307,19 +374,20 @@ export async function falBalance(): Promise<FalBalancePayload> {
     cache = { at: Date.now(), ttl: payload.ok ? FRESH_MS : STALE_FAIL_MS, payload };
     return payload;
   };
-  if (!secret) return keep(base);
+  if (!secret) return keep({ ...base, no_frame: await noFrame(utcMonthStart()) });
 
   // One set of window edges for the whole reading, so the per-key figures can never
   // add up to a different day than the account figure above them.
   const day = utcDayStart(), monthStart = utcMonthStart(), end = new Date().toISOString();
-  const [bal, today, month, known, cfg] = await Promise.all([
+  const [bal, today, month, known, cfg, nf] = await Promise.all([
     falAccountBalance(secret),
     falSpend(secret, day, end),
     falSpend(secret, monthStart, end),
     falKeyList(secret),
     db.from("billing_config").select("lucy_video_per_sec_cost").eq("id", 1).maybeSingle(),
+    noFrame(monthStart),
   ]);
-  if ("err" in bal) return keep({ ...base, detail: `${bal.err}. The key stored ends ${base.tail}.` });
+  if ("err" in bal) return keep({ ...base, detail: `${bal.err}. The key stored ends ${base.tail}.`, no_frame: nf });
 
   const t = "err" in today ? null : today;
   const m = "err" in month ? null : month;
@@ -367,6 +435,7 @@ export async function falBalance(): Promise<FalBalancePayload> {
     minutes_left: perSecond && perSecond > 0 ? Math.floor(bal.balance / perSecond / 60) : null,
     keys: rows,
     live: await liveBurn(perSecond, base.checked_at),
+    no_frame: nf,
     detail: failed || "All figures read from fal.ai.",
   });
 }
