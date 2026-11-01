@@ -124,6 +124,18 @@ function cleanEmail(raw: unknown): string | null {
   return /^[^\s@,;:<>"'\\]+@[^\s@,;:<>"'\\.]+(\.[^\s@,;:<>"'\\.]+)+$/.test(e) ? e : null;
 }
 
+/**
+ * The two-letter country the runtime already put on this request, kept only for the flag the
+ * SELLER sees beside an account. Nothing here is decided from it: no price, no shelf, no door
+ * and no payment is touched by it — the customer picks his own shelf by tapping it, and the
+ * amount charged is the seller's figure either way. A customer on a VPN shows the VPN's
+ * country, and the whole of that mistake is one wrong flag on a screen only he reads.
+ */
+function requestCountry(req: Request): string | null {
+  const raw = (req.headers.get("cf-ipcountry") ?? "").trim();
+  return /^[A-Za-z][A-Za-z]$/.test(raw) ? raw : null;
+}
+
 async function paystack(path: string, key: string, body?: Record<string, unknown>) {
   const res = await fetch(API + path, {
     method: body ? "POST" : "GET",
@@ -247,6 +259,20 @@ async function handle(req: Request): Promise<Response> {
   // address — nobody can use it to poke at somebody else's money.
   if (body.reconcile === true) {
     const user = await requireUser(req);
+    // The flag beside his account. This is the one gateway call a signed-in customer's app
+    // makes just by being opened, so it records a country for everybody — not only for the
+    // few who go on to start a call. The address is deliberately left null: this is the
+    // payment door, and an address read here would be the buyer's network rather than his
+    // device's, which is not the thing the seller's IP rules are for. Bookkeeping never
+    // gets to refuse a payment check, so a failure here is swallowed and the check runs.
+    const country = requestCountry(req);
+    if (country) {
+      try {
+        await adminClient().rpc("sl_note_network", { p_user: user.id, p_ip: null, p_country: country });
+      } catch {
+        // Bookkeeping, not money.
+      }
+    }
     if (!user.email) return fail("this sign-in has no email address to check payments against", 403);
     const done = await reconcilePending(user.email, 10);
     if (done.length) console.log(`paystack reconcile ${user.email}: ${done.map((d) => `${d.reference} ${d.result}`).join(", ")}`);
