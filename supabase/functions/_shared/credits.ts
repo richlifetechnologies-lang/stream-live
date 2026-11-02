@@ -110,6 +110,12 @@ export async function readAccount(userId: string, modality: Modality): Promise<A
   if (!sub) return { ...state, ok: false, reason: "no_subscription" };
   if (sub.status !== "active") return { ...state, ok: false, reason: `status_${sub.status}` };
   if (state.maintenance) return { ...state, ok: false, reason: "maintenance" };
+  // The global cloning switch sits beside the per-account tick, not underneath it: one box in the
+  // panel closes the tab for every account, and a dial refused here is refused with the same reason
+  // the app already greys the tab out for.
+  if (modality === "video_audio" && cfgRaw?.cloning_enabled === false) {
+    return { ...state, ok: false, reason: "clone_closed" };
+  }
   if (!state.enabled) return { ...state, ok: false, reason: "modality_disabled" };
 
   return state;

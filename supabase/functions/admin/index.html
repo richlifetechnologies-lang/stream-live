@@ -873,6 +873,10 @@
             <label class="feat" style="margin:0"><input type="checkbox" id="cfgMaint" /> Maintenance mode</label>
             <div class="muted" style="margin-top:6px">Blocks every new call while on.</div>
           </div>
+          <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
+            <label class="feat" style="margin:0"><input type="checkbox" id="cfgCloning" /> Voice cloning open for every account</label>
+            <div class="muted" style="margin-top:6px">One switch for the whole software. Off, the Video + Audio tab goes dead on <b>every</b> screen whatever the account's own tick says: no cloning call starts, a call already running closes at its next voice ask, and no voice key is spent on it. Switch it back on and every account returns to its own tick, untouched.</div>
+          </div>
         </div>
         <label>Maintenance message</label>
         <textarea id="cfgMaintMsg" placeholder="Shown to users while maintenance mode is on"></textarea>
@@ -1191,6 +1195,9 @@
   let hasSignupDev = false;
   let hasNetwork = false;
   let hasShelf = false;
+  // The gateway-wide voice-cloning switch, read off app_config. Unknown until a tab that asks
+  // for it has loaded, so it starts null and every reader treats null as "not closed".
+  let CLONING_OPEN = null;
   let DEV_OF = {};
   let DEV_SEEN = {};
   let REG_BY_DEV = {};
@@ -1379,7 +1386,7 @@
       }
     }
     const subCols = "user_id, plan_id, status, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions";
-    const [subsRes, balRes, paidRes] = await Promise.all([
+    const [subsRes, balRes, paidRes, cloneRes] = await Promise.all([
       (async () => {
         // engine_override and trial_granted_at only exist once the dual-engine
         // migration has run, and a select that names a missing column fails the
@@ -1397,7 +1404,11 @@
       // row at once instead of asking the database 60 times. Reason is compared in
       // JS because a missing reason is still a real credit; SQL's <> skips NULLs.
       sb.from("credit_ledger").select("user_id, reason").in("user_id", ids).eq("kind", "credit"),
+      // An account's own cloning tick only means something while the gateway-wide switch is on,
+      // so the list asks for it here rather than calling a dead tab "cloning on".
+      sb.from("app_config").select("cloning_enabled").eq("id", 1).maybeSingle(),
     ]);
+    if (cloneRes && !cloneRes.error) CLONING_OPEN = cloneRes.data?.cloning_enabled !== false;
     const subOf = Object.fromEntries((subsRes.data || []).map((s) => [s.user_id, s]));
     const wallet = {};
     (balRes.data || []).forEach((b) => {
@@ -1525,7 +1536,9 @@
         <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
         <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id, p.created_at))}</div>${devOf(p.id, p.created_at)}${netOf(p)}</td>
         <td>${cell("video", s?.video_enabled)}</td>
-        <td>${s?.video_audio_enabled === false ? '<span class="pill no">cloning off</span>' : '<span class="pill yes">cloning on</span>'}</td>
+        <td>${s?.video_audio_enabled === false ? '<span class="pill no">cloning off</span>'
+          : CLONING_OPEN === false ? '<span class="pill no" title="the gateway-wide switch is off, so this tab is dead for every account whatever the tick says">cloning off (global switch)</span>'
+          : '<span class="pill yes">cloning on</span>'}</td>
         <td class="muted mono">+${mins1(credited)} / −${mins1(spent)}</td>
         <td style="white-space:nowrap"><button data-act="open" data-id="${p.id}" class="primary">Credit minutes</button>${ADMIN_OF[p.id] ? "" : ` <button data-act="del-acct" data-id="${p.id}" class="danger">Delete</button>`}</td></tr>`;
     }).join("") || '<tr><td colspan="8" class="muted">No account matches that filter.</td></tr>';
@@ -3884,6 +3897,7 @@
   // panel can be redeployed before that SQL runs, so probe for it instead of
   // sending a column that does not exist and failing the whole save.
   let hasVideoCeiling = false;
+  let hasCloningCfg = false;
 
   async function loadConfig() {
     const { data, error } = await sb.from("app_config").select("*").eq("id", 1).maybeSingle();
@@ -3900,6 +3914,14 @@
     $("cfgSignup").checked = data.signup_enabled !== false;
     $("cfgMaint").checked = data.maintenance === true;
     $("cfgMaintMsg").value = data.maintenance_message || "";
+
+    // The one global cloning switch: asked for on its own, because a database that has not run
+    // 20261101220000 yet has no such column, and naming a missing column fails the whole select.
+    const probeClone = await sb.from("app_config").select("cloning_enabled").eq("id", 1).maybeSingle();
+    hasCloningCfg = !probeClone.error;
+    $("cfgCloning").disabled = !hasCloningCfg;
+    if (hasCloningCfg) CLONING_OPEN = probeClone.data?.cloning_enabled !== false;
+    $("cfgCloning").checked = CLONING_OPEN !== false;
 
     const probeTrial = await sb.from("app_config").select("trial_enabled").eq("id", 1).maybeSingle();
     hasTrialCfg = !probeTrial.error;
@@ -3930,9 +3952,15 @@
       const ceiling = N($("cfgVideoCeiling").value, 0);
       row.max_concurrent_video_sessions = ceiling > 0 ? Math.floor(ceiling) : null;
     }
+    if (hasCloningCfg) {
+      row.cloning_enabled = $("cfgCloning").checked;
+      CLONING_OPEN = row.cloning_enabled;
+    }
     const { error } = await sb.from("app_config").update(row).eq("id", 1);
     if (error) return msg("cfgMsg", error.message);
-    msg("cfgMsg", "Gateway config saved — applies to the next call.", "ok");
+    msg("cfgMsg", hasCloningCfg && !row.cloning_enabled
+      ? "Gateway config saved — voice cloning is now closed for every account. It lands on the next read each app makes, so a tab that is open on someone's screen goes dead at their next Start."
+      : "Gateway config saved — applies to the next call.", "ok");
   };
 
   async function loadPool() {

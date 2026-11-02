@@ -92,14 +92,14 @@ Deno.serve(async (req: Request) => {
       }
       // The administrator's Video + Audio tick closes this door while the call is running, not only
       // at the next Start. A lease opened a minute ago is no reason to keep spending a voice key on
-      // an account he has just shut.
+      // an account he has just shut. The global switch shuts the same door for every account at once.
       if (session.modality === "video_audio") {
-        const { data: sub } = await db
-          .from("subscriptions")
-          .select("video_audio_enabled")
-          .eq("user_id", user.id)
-          .maybeSingle();
-        if (sub && sub.video_audio_enabled !== true) {
+        const [perAccount, globally] = await Promise.all([
+          db.from("subscriptions").select("video_audio_enabled").eq("user_id", user.id).maybeSingle(),
+          db.from("app_config").select("cloning_enabled").eq("id", 1).maybeSingle(),
+        ]);
+        const sub = perAccount.data;
+        if (globally.data?.cloning_enabled === false || (sub && sub.video_audio_enabled !== true)) {
           return fail("voice cloning is closed on your account", 403, { reason: "clone_closed" });
         }
       }
