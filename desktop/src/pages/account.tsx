@@ -258,7 +258,7 @@ export default function AccountPage() {
 
           {/* What minutes cost and who to pay */}
           <Card pad={0}>
-            <button onClick={() => setLocation("/minutes")}
+            <button onClick={() => setLocation("/plans")}
               style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%", cursor: "pointer", textAlign: "left", background: "transparent", border: "none", padding: 18 }}>
               <span style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <CreditCard style={{ width: 16, height: 16, color: D2 }} />

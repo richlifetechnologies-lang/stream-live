@@ -389,7 +389,7 @@ export default function PlansPage() {
               : t("The minutes above land in your account when your administrator confirms the payment, and they never expire. Prices and minutes are set by them — Stream Live takes no card details, charges nothing inside the app, and there is no trial balance.")}
           </p>
           {online && tillOpensInApp() && (
-            <button onClick={() => openTillInBrowser(shop!.page)}
+            <button onClick={() => openTillInBrowser(shop!.page, SHELF_WAY[shelf], shelf)}
               style={{ background: "none", border: "none", padding: 0, marginTop: 8, cursor: "pointer", color: "hsl(222 25% 55%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline", textAlign: "left" }}>
               {t("Open the payment page in my browser instead")}
             </button>

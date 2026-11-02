@@ -1,8 +1,5 @@
-import { useEffect, useState } from "react";
 import { useLocation } from "wouter";
 import { Sparkles } from "lucide-react";
-import { gateway } from "../lib/gateway";
-import { openTill } from "../lib/shop";
 import { t } from "../lib/i18n";
 
 const GOLD = "hsl(38 100% 58%)";
@@ -17,33 +14,28 @@ const GOLD = "hsl(38 100% 58%)";
  * account and this leaves with the next snapshot, whether or not the money has been
  * spent yet.
  *
- * While the seller has online payment open the button opens the payment window inside
- * this app — choosing a package and paying is one click away, not a form to fill in.
+ * This button never opens the payment window itself. The till is reached from Plans & prices,
+ * where the customer first says which list he is buying from - the packages sold to Ghana, with
+ * the method those pay by, or the packages for everyone else. A button that skipped that step
+ * dropped him on a checkout page offering both methods at once, which is neither of his two
+ * shelves and tells him nothing about what he is about to buy.
  */
 export function WatermarkOffer({
   paid,
   videoMinutesLeft,
   ctaLabel = "Buy minutes",
-  ctaHref = "/minutes",
+  ctaHref = "/plans",
   ctaOnClick,
 }: {
   paid: boolean;
   videoMinutesLeft: number | null;
-  /** Where the button leads when there is no online till. */
+  /** Where the button leads. */
   ctaLabel?: string;
   ctaHref?: string;
   /** Set instead of a route when the answer is further up or down the same page. */
   ctaOnClick?: () => void;
 }) {
   const [, setLocation] = useLocation();
-  const [page, setPage] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (paid || videoMinutesLeft === null || videoMinutesLeft >= 1) return;
-    let alive = true;
-    gateway.checkout().then(c => { if (alive && c?.enabled) setPage(c.page); });
-    return () => { alive = false; };
-  }, [paid, videoMinutesLeft]);
 
   if (paid) return null;
   // A minute is the smallest thing the app sells, and under a minute no call can
@@ -81,20 +73,6 @@ export function WatermarkOffer({
         </p>
       </div>
 
-      {page ? (
-        <button onClick={() => openTill(page)}
-          style={{
-            alignSelf: "center", padding: "14px 22px", borderRadius: 11, border: "none",
-            background: GOLD, color: "hsl(222 47% 6%)", fontWeight: 700, fontSize: 14,
-            fontFamily: "'Orbitron', monospace", letterSpacing: "0.04em", cursor: "pointer",
-            whiteSpace: "nowrap", boxShadow: `0 0 26px ${GOLD}55`,
-          }}
-          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.filter = "brightness(1.08)"; }}
-          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}
-        >
-          {t("Buy minutes")}
-        </button>
-      ) : (
       <button
         onClick={() => (ctaOnClick ? ctaOnClick() : setLocation(ctaHref))}
         style={{
@@ -108,7 +86,6 @@ export function WatermarkOffer({
       >
         {t(ctaLabel)}
       </button>
-      )}
     </div>
   );
 }
