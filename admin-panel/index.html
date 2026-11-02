@@ -4158,8 +4158,10 @@
       <p class="phint" style="margin-top:6px">The buyer chooses his own list by tapping it in the app; nothing here guesses where he is. A package on the outside-Ghana list is offered to him with the card door only, and a Ghana package with mobile money only — so the price you type here is the price that shelf charges.</p>
       <label>Minutes this package sells — this is what lands on the buyer's account when you credit them</label>
       <div class="grid2">
-        ${CALL_MODALITIES.map((m) => `<div><label style="margin-top:0">${MOD_LABEL[m]}</label><input data-f="min_${m}" type="number" min="0" step="1" value="${v["min_" + m]}" /></div>`).join("")}
+        <div><label style="margin-top:0">${MOD_LABEL.video} <span class="muted">· both call tabs</span></label><input data-f="min_video" type="number" min="0" step="1" value="${v.min_video}" /></div>
       </div>
+      <input type="hidden" data-f="min_video_audio" value="${v.min_video_audio}" />
+      ${v.min_video_audio > 0 ? `<p class="phint" style="margin-top:6px">This package still holds ${mins(v.min_video_audio)} on the retired Video + Audio line, from when that tab drew from a bucket of its own. There is one pool now, so a buyer who pays this gets ${mins(v.min_video + v.min_video_audio)} min to spend on either call tab — the figure stays on the record, and no box here can change it.</p>` : ""}
       ${v.min_audio > 0 ? `<p class="phint" style="margin-top:6px">This package also holds ${mins(v.min_audio)} of Audio Call minutes from when the app had an audio-only tab. There is no such call now, so they are kept on the record and left out when the package is credited — no box here can change them.</p>` : ""}
       <input type="hidden" data-f="min_audio" value="${v.min_audio}" />
       <label>One-line pitch — your own note; the buyer's card no longer prints it</label>
@@ -4168,7 +4170,7 @@
       <textarea data-f="includes" placeholder="300 Video Call minutes&#10;Two devices at a time">${esc(v.includes)}</textarea>
       <label>What it unlocks</label>
       <div>${FEATURES.map((f) => `<label class="feat" style="margin:0 14px 6px 0"><input type="checkbox" data-f="feat_${f}" ${v.feats.includes(f) ? "checked" : ""} /> ${FEATURE_LABEL[f]}</label>`).join("")}</div>
-      <p class="phint">Those two boxes decide which call tabs a buyer holding this package may use — the app has a Video + Audio call and a Video-only call, and nothing else. The two numbers are how the package is priced and stay exactly as you set them; they are not two wallets. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” puts the whole of it into the one pool both call tabs spend from, in one click.</p>`;
+      <p class="phint">Those two boxes decide which call tabs a buyer holding this package may use — the app has a Video + Audio call and a Video-only call, and nothing else. The minutes are one pool: both of those tabs spend from that single number, each at its own rate on the Burn rates tab, so there is no second figure to sell. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” puts the whole of it into the one pool both call tabs spend from, in one click.</p>`;
   }
 
   function planEditor(p) {
@@ -4508,7 +4510,10 @@
   // real minute. These are only the fallbacks for a blank field or a failed read; the
   // saved billing_config row normally supplies the number.
   const PG_DEFAULT = { falMin: 1.2, voiceMin: 0.18, margin: 40 };
-  const PG_MINCOL = { video: "video_minutes", audio: "audio_minutes", video_audio: "video_audio_minutes" };
+  // Which column each ladder package's minutes are written into. A "Video + voice" package
+  // gets pool minutes, not a second bucket: the tab spends the same figure at its own rate, and
+  // the database now refuses to leave a figure on the retired line at all.
+  const PG_MINCOL = { video: "video_minutes", audio: "audio_minutes", video_audio: "video_minutes" };
   const PG_SHOP_LABEL = { video: "Video only", audio: "Voice only", video_audio: "Video + voice" };
   const PG_QUICK = [15, 30, 60, 120, 300, 600];
   const PG_PLURAL = (n) => (N(n) === 1 ? "" : "s");
