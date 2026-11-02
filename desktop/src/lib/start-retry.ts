@@ -49,17 +49,19 @@ export const PICTURE_GIVE_UP_MS = 40_000;
 /**
  * A call that showed no picture ends with this machine held off the next one, in seconds.
  *
- * The number is the longest hold the server's own machine gate (sl_start_session) ever
- * announces, so pressing Start when this runs out is never refused: the wait the customer
- * sees is the whole wait, not the first half of it. Holding is the point - a machine that
- * re-dials the instant a call dies pays the dial cost again for a picture that is not
- * arriving, and the dial is the only money this product loses on a blank screen.
+ * This is the ordinary hold the server's own machine gate (sl_start_session) puts on a device,
+ * so it is the wait the customer is told and the wait he can see counting down. Holding it at
+ * the server's longest figure instead would keep a man out for four minutes when his line
+ * released at two - dead time for him and unsold minutes for the seller. When this machine
+ * really is on the longer window, his first press after the count is refused and the answer
+ * carries the exact seconds left, which the button then counts; the wait is corrected by the
+ * only party that measured it, and a refused press costs nobody anything.
  */
-export const BLIND_RETRY_HOLD_SECONDS = 240;
+export const BLIND_RETRY_HOLD_SECONDS = 120;
 export const BLIND_RETRY_HOLD_MS = BLIND_RETRY_HOLD_SECONDS * 1000;
 /** A wait the server announced, clamped: one second is not a pause, an hour is not his day. */
 export const PACED_WAIT_MIN_MS = 5_000;
-export const PACED_WAIT_MAX_MS = BLIND_RETRY_HOLD_MS;
+export const PACED_WAIT_MAX_MS = 240_000;
 
 /** Why one ask failed, and whether asking again is the right answer to it. */
 export type StartFailure = {

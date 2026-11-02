@@ -47,7 +47,7 @@ const REASON_COPY: Record<string, string> = {
   // only thing left to tell him is the wait - and the wait has to be true: it is the same
   // number the server holds this machine for, and the button counts it down in front of him
   // instead of dialing again on its own.
-  picture_hold: "No picture arrived, so the app ended your call instead of letting it run. Nothing was used - your minutes are exactly where they were. This computer has to wait about four minutes for the video line to release before its next call, and the Start button is counting that time down. Press it again when it reaches zero; starting sooner only gets refused.",
+  picture_hold: "No picture arrived, so the app ended your call instead of letting it run. Nothing was used - your minutes are exactly where they were. This computer has to wait about two minutes for the video line to release before its next call, and the Start button is counting that time down. Press it again when it reaches zero; starting sooner only gets refused.",
   no_lease: "Your call was ended because its booking lapsed. Try starting again.",
   // The video software checks the call pass against the clock on the machine it runs on. A
   // computer set hours away from real time therefore reads a minutes-old pass as already

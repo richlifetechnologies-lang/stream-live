@@ -83,12 +83,16 @@ eq("but this press does not make that ask", startRetryWaitMs(paced, 0), null);
 eq("nor does any later ask in it", startRetryWaitMs(paced, 1), null);
 
 // ── The wait a blank call ends with ──────────────────────────────────────────
-// The server's machine gate holds an address for 120 s, and for 240 s once three of its
-// passes came out blank. The app's own hold is the longer of the two, so pressing Start when
-// his countdown reaches zero is never refused: the wait he was shown is the whole wait.
-eq("a blind call holds the machine for the server's longest hold", BLIND_RETRY_HOLD_MS, 240_000);
-eq("which is the four minutes the sentence promises", BLIND_RETRY_HOLD_SECONDS, 240);
-eq("and is the same ceiling an announced wait is capped at", PACED_WAIT_MAX_MS, BLIND_RETRY_HOLD_MS);
+// The server's machine gate holds an address for 120 s, and for 240 s once three of its last
+// three passes came out blank. The app holds the ordinary window: keeping a man out for four
+// minutes whose line freed at two is dead time he cannot get back, and a press that turns out
+// to be early costs him nothing but a refusal that names the seconds truly left.
+eq("a blind call holds the machine for the server's ordinary window", BLIND_RETRY_HOLD_MS, 120_000);
+eq("which is the two minutes the sentence promises", BLIND_RETRY_HOLD_SECONDS, 120);
+// The long window is not guessed at - it arrives as the server's own number and is capped only
+// so a broken answer cannot hold a machine for an hour.
+eq("an announced wait may run to the server's longest hold", PACED_WAIT_MAX_MS, 240_000);
+ok("and the announced ceiling is above the app's own hold", PACED_WAIT_MAX_MS > BLIND_RETRY_HOLD_MS);
 // The give-up has to land before the check-in that would close the call itself, or the
 // customer watches the gateway do it and the engine has been running five seconds longer.
 ok("the app gives up inside its own heartbeat interval", PICTURE_GIVE_UP_MS + 5_000 <= 45_000);

@@ -1766,9 +1766,11 @@ export default function StreamPage() {
    *
    * A call that showed no picture has already cost the seller its dial, and the customer got
    * nothing for it, so the two things that matter here are that he is told a wait that is
-   * true and that nothing re-dials during it. The number is the server's own machine hold, so
-   * pressing Start the second this runs out is never refused - which is the difference
-   * between a wait and a loop.
+   * true and that nothing re-dials during it. When the server announced the number, that is the
+   * wait - it measured this machine. When the app gave up by itself it holds the ordinary
+   * window, because a man kept out for four minutes whose line freed at two has lost time he
+   * will not get back; if he is on the long window his first press is refused and the refusal
+   * carries the seconds truly left, which the button then counts.
    *
    * `why` is the sentence that goes with that particular wait. The button cannot explain
    * itself, and something does have to be said when the OBS cable asks for a call of its own
