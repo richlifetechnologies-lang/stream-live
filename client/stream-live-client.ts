@@ -21,15 +21,17 @@ export type TabName = "video-only" | "audio-only" | "video-audio";
 export const ALL_MODALITIES: Modality[] = ["video", "audio", "video_audio"];
 
 /**
- * The buckets minutes are actually kept in. A Video + Audio call pays from the video
- * bucket — its own rate is charged, but the pile it comes out of is shared — so there is
- * no third pile to show, credit or ask for.
+ * The buckets minutes are actually kept in. A Video + Audio call and a voice-only cloning call both
+ * pay from the video bucket — each keeps its own rate, but the pile they come out of is shared — so
+ * the video line is the one pool. The audio row is still read and shown, because accounts that were
+ * credited one before the pool exists still have the row, and blanking a figure a customer has
+ * always been shown is not how a fold is explained to him.
  */
 export const POCKET_BUCKETS: Modality[] = ["video", "audio"];
 
 /** The bucket a call type is charged against. */
 export function payBucket(modality: Modality): Modality {
-  return modality === "video_audio" ? "video" : modality;
+  return modality === "video_audio" || modality === "audio" ? "video" : modality;
 }
 
 export type GatewayConfig = {
@@ -622,8 +624,13 @@ export class StreamLiveClient {
    * for whichever video pipeline this account runs on.
    * Throws GatewayError with reason out_of_minutes / concurrent_limit / device_* /
    * modality_disabled / update_required / maintenance.
+   *
+   * `voiceOnly` is the cloning side of the Video + Audio tab running by itself: the tab is still
+   * the tab, but the call carries no picture, so the gateway meters it as the audio line at the
+   * audio rate and mints no video key. It stays on the tab because that is where the voice lives —
+   * the call records and the panel read the MODALITY for what kind of call it was.
    */
-  async startCall(tab: TabName, deviceId?: string): Promise<CallTicket> {
+  async startCall(tab: TabName, deviceId?: string, voiceOnly = false): Promise<CallTicket> {
     // A Stop whose hand-back never landed leaves this id behind. Send it again now:
     // it cannot disturb the call about to open (ending an already-closed session is a
     // no-op server-side), and it returns the minutes the abandoned lease is holding.
@@ -633,6 +640,7 @@ export class StreamLiveClient {
     const res = await this.invoke("start-session", {
       appId: this.cfg.falAppId,
       tab,
+      voiceOnly,
       deviceId,
       appVersion: this.cfg.appVersion,
     });

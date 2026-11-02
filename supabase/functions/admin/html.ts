@@ -182,9 +182,17 @@ export const ADMIN_HTML = `<!doctype html>
               <label>What this account may use</label>
               <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
                 <label class="feat" style="margin:0 0 8px"><input type="checkbox" id="swVideo" /> Video Call</label>
-                <label class="feat" style="margin:0"><input type="checkbox" id="swBoth" /> Voice cloning (the Video + Audio tab)</label>
+                <div style="margin-top:10px">
+                  <label style="margin-top:0">Voice cloning for this account</label>
+                  <select id="acctClone">
+                    <option value="off">Closed — nothing that clones</option>
+                    <option value="voice_only">Voice only — calls with no picture</option>
+                    <option value="voice_video">Voice + video — the whole tab</option>
+                  </select>
+                  <div class="muted" id="acctCloneNow" style="margin-top:6px"></div>
+                </div>
               </div>
-              <div class="muted" style="margin-top:6px">A call type he has not ticked is refused the moment he presses Start, even while his pool holds minutes. <b>Voice cloning</b> is the door to the Video + Audio tab: off, that tab goes dead on his screen — he still sees it, every control in it greys, the Start button refuses him, a call already running is closed at its next voice ask, and his saved voices are out of reach until you switch it back on. It costs him no minutes and takes nothing off his video pool. The app has no audio-only call any more, so that switch is gone here; if this account's record still has one, saving leaves it exactly as it is.</div>
+              <div class="muted" style="margin-top:6px">A call type he has not allowed is refused the moment he presses Start, even while his pool holds minutes. <b>Voice cloning</b> is one door with three positions, and this box is his account's own line; the gateway-wide line on the Gateway tab can only close it further, never open it. <b>Closed</b> — the Video + Audio tab goes dead on his screen: he still sees it, every control in it greys, Start refuses him, a call already running is closed at its next voice ask, and his saved voices are out of reach. <b>Voice only</b> — that tab's own Start button (picture with the voice) stays dead, and his <b>Start voice cloning only (no video)</b> button works: an audio call from the same tab, with the cloned voice sent to his software microphone. <b>Voice + video</b> — both buttons work, and the two never run on one machine at the same time: whichever he starts first holds the machine, and starting the other closes the first and hands its unbilled minutes back. This line costs him no minutes and takes nothing off his pool — the call pays from the same pool, at its own rate. A trial account is refused cloning whatever is set here; only an account that has bought minutes can clone.</div>
             </div>
             <div>
               <label>Max concurrent sessions (devices calling at once)</label>
@@ -730,7 +738,7 @@ export const ADMIN_HTML = `<!doctype html>
     <section id="tab-burn" class="hidden">
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px">Currently effective multiplier</h2>
-        <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of his pool, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x. Both rates are read against the same pool — the call type decides how fast it drains, not which wallet it comes from.</p>
+        <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of his pool, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x. All three rates are read against the same pool — the call type decides how fast it drains, not which wallet it comes from. <b>Voice only (no video)</b> is the rate a cloning call with no picture runs at: the same button's minutes, priced on its own line.</p>
         <div style="overflow:auto">
           <table id="currentRates">
             <thead><tr><th>Call type</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>Effective from (UTC)</th><th>Note</th></tr></thead>
@@ -743,7 +751,7 @@ export const ADMIN_HTML = `<!doctype html>
         <h2 style="font-size:14px;margin:0 0 4px">Post a new rate</h2>
         <p class="muted" style="margin:0 0 12px">Rates are versioned history: never edit a rate that already ran, post a new row. A lease in flight keeps the multiplier it started with.</p>
         <div class="row">
-          <div><label>Call type</label><select id="brModality"><option value="video">Video Call</option><option value="video_audio">Video + Audio</option></select></div>
+          <div><label>Call type</label><select id="brModality"><option value="video">Video Call</option><option value="audio">Voice only (no video)</option><option value="video_audio">Video + Audio</option></select></div>
           <div><label>Multiplier</label><input id="brMult" type="number" min="0.05" step="0.05" value="1" /></div>
           <div><label>Effective from (UTC)</label><input id="brFrom" type="datetime-local" /></div>
           <div style="flex:2 1 240px"><label>Note</label><input id="brNote" placeholder="e.g. ElevenLabs price rise" /></div>
@@ -876,8 +884,14 @@ export const ADMIN_HTML = `<!doctype html>
             <div class="muted" style="margin-top:6px">Blocks every new call while on.</div>
           </div>
           <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
-            <label class="feat" style="margin:0"><input type="checkbox" id="cfgCloning" /> Voice cloning open for every account</label>
-            <div class="muted" style="margin-top:6px">One switch for the whole software. Off, the Video + Audio tab goes dead on <b>every</b> screen whatever the account's own tick says: no cloning call starts, a call already running closes at its next voice ask, and no voice key is spent on it. Switch it back on and every account returns to its own tick, untouched.</div>
+            <label style="margin-top:0">Voice cloning across the whole software</label>
+            <select id="cfgCloningMode">
+              <option value="off">Closed — everything that clones is shut</option>
+              <option value="voice_only">Voice only — no picture on that tab, for anyone</option>
+              <option value="voice_video">Voice + video — accounts run on their own line</option>
+            </select>
+            <div class="muted" style="margin-top:6px">One line for the whole software, and it can only ever close what an account has opened — never open what an account has closed. <b>Closed</b> shuts <b>everything</b> on the Video + Audio tab for <b>every</b> screen whatever each account's own line says: no voice-and-picture call and no voice-only call starts, the tab's controls grey, a call already running of either kind closes at its next voice ask, and no voice key is spent on it. <b>Voice only</b> keeps the picture half of that tab dead for everyone and leaves voice-only calls to those accounts whose own line allows them. <b>Voice + video</b> leaves the door to each account's own line, untouched. It lands on the next read each app makes — there is nothing to restart on anybody's machine.</div>
+            <div class="muted" id="cfgCloningNow" style="margin-top:6px"></div>
           </div>
         </div>
         <label>Maintenance message</label>
@@ -1072,13 +1086,95 @@ export const ADMIN_HTML = `<!doctype html>
   const FEATURES = ["video", "voice", "portrait_obs"];
   const FEATURE_LABEL = { video: "Video calls", voice: "Voice / audio", portrait_obs: "Portrait OBS output" };
   const MODALITIES = ["video", "audio", "video_audio"];
-  const MOD_LABEL = { video: "Video Call", audio: "Audio Call", video_audio: "Video + Audio" };
-  // The app has exactly two call tabs — Video + Audio and Video only — so an Audio Call of
-  // one's own can never be started, and minutes in that bucket can never be spent. Every
-  // choice the panel offers therefore comes from this list. MODALITIES stays the full
-  // vocabulary for READING: wallets, ledger rows, rates and packages that were priced before
-  // the audio tab went keep their stored numbers, and nothing here writes a silent zero.
+  const MOD_LABEL = { video: "Video Call", audio: "Voice only (no video)", video_audio: "Video + Audio" };
+  // Two call tabs, three kinds of call: the Video + Audio tab answers for both a voice-and-picture
+  // call and a voice-only one, and the modality on the record is what says which. CALL_MODALITIES
+  // is what a BUYER can be given — minutes are sold in two figures because both video calls draw
+  // the one pool; a third box for the voice-only call would be a price nobody has ever been
+  // charged, and the plans guard refuses it. RATE_MODALITIES is what this panel can PRICED and
+  // READ at the meter: the voice-only call is billed at the stored audio rate, which is the rate
+  // he asked to keep a handle on. MODALITIES stays the full vocabulary for READING: wallets,
+  // ledger rows, rates and packages that were priced before the audio tab went keep their stored
+  // numbers, and nothing here writes a silent zero.
   const CALL_MODALITIES = ["video", "video_audio"];
+  const RATE_MODALITIES = ["video", "audio", "video_audio"];
+
+  // ── THE CLONING DOOR, THREE POSITIONS ───────────────────────────────────────
+  // app_config.cloning_mode and subscriptions.cloning_mode, folded by the database into one
+  // answer per account (sl_cloning_mode) and mirrored onto the older booleans this panel may
+  // still find on a database that has not run 20261102120000 yet. Ranked, because the fold picks
+  // the lowest common position and a panel that shows a door as wider than the gateway has set it
+  // tells the owner a lie about his own switch.
+  const CLONE_MODES = ["off", "voice_only", "voice_video"];
+  const CLONE_LABEL = {
+    off: "closed",
+    voice_only: "voice only (no video)",
+    voice_video: "voice + video",
+  };
+  // The account's own line, off one row as the database reads it. A subscription row that does
+  // not exist has been promised nothing, which is the same answer sl_cloning_mode gives.
+  const acctCloneMode = (s) => {
+    if (!s) return "off";
+    if (CLONE_MODES.includes(s.cloning_mode)) return s.cloning_mode;
+    return s.video_audio_enabled === false ? "off" : "voice_video";
+  };
+  const cloneFold = (globalMode, accountMode) => {
+    const g = CLONE_MODES.includes(globalMode) ? globalMode : "voice_video";
+    const a = CLONE_MODES.includes(accountMode) ? accountMode : "voice_video";
+    if (g === "off" || a === "off") return "off";
+    if (g === "voice_only" || a === "voice_only") return "voice_only";
+    return "voice_video";
+  };
+  // What the account's screen actually does, and who decided it. The pill answers for the folded
+  // position because that is what he sees when he presses Start; when the gateway line is the
+  // reason, the pill says so, because an account list that reads "closed" beside a tick he left
+  // open looks like his own finger slipped.
+  const cloneCell = (s) => {
+    const own = acctCloneMode(s);
+    const eff = cloneFold(CLONING_MODE, own);
+    if (eff === "off" && CLONING_MODE === "off") {
+      return '<span class="pill no" title="the gateway-wide line is closed, so nothing that clones is open for anyone whatever this account says">cloning off (gateway line)</span>';
+    }
+    if (eff === "off") return '<span class="pill no" title="voice cloning is closed on this account">cloning off</span>';
+    if (eff === "voice_only") {
+      const why = own === "voice_only" ? "this account's own line" : "the gateway-wide line";
+      return \`<span class="pill past_due" title="voice-only calls with no picture are open, the Video + Audio Start button is not — closed by \${why}">voice only</span>\`;
+    }
+    return '<span class="pill yes">cloning on (voice + video)</span>';
+  };
+  // The gateway-wide line, asked for on its own because a database that has not run 20261102120000
+  // yet has no cloning_mode column, and naming a missing column fails the whole select. When it is
+  // missing, the older two-position boolean answers — and it can only ever mean its two positions.
+  async function readGlobalClone() {
+    const withMode = await sb.from("app_config").select("cloning_mode, cloning_enabled").eq("id", 1).maybeSingle();
+    if (withMode.error) {
+      hasCloneModeCfg = false;
+      const legacy = await sb.from("app_config").select("cloning_enabled").eq("id", 1).maybeSingle();
+      hasCloningCfg = !legacy.error;
+      if (!legacy.error) CLONING_MODE = legacy.data?.cloning_enabled === false ? "off" : "voice_video";
+      return CLONING_MODE;
+    }
+    hasCloneModeCfg = true;
+    hasCloningCfg = true;
+    if (withMode.data) {
+      CLONING_MODE = withMode.data.cloning_mode
+        ?? (withMode.data.cloning_enabled === false ? "off" : "voice_video");
+    }
+    return CLONING_MODE;
+  }
+  // One account's OWN line, the same probe in the same shape. Null only when the database could
+  // not be asked at all — a row that does not exist is a real answer, and it is "off".
+  async function readAccountClone(userId) {
+    const withMode = await sb.from("subscriptions").select("cloning_mode, video_audio_enabled").eq("user_id", userId).maybeSingle();
+    if (withMode.error) {
+      hasCloneModeSub = false;
+      const legacy = await sb.from("subscriptions").select("video_audio_enabled").eq("user_id", userId).maybeSingle();
+      if (legacy.error) return null;
+      return acctCloneMode(legacy.data);
+    }
+    hasCloneModeSub = true;
+    return acctCloneMode(withMode.data);
+  }
   // One pool: a Video + Audio call pays its minutes out of the video wallet, so that wallet is
   // the only place minutes go in. A bucket the panel offers but no call reads is a trap, so the
   // credit box states the one bucket instead of offering a choice.
@@ -1197,14 +1293,17 @@ export const ADMIN_HTML = `<!doctype html>
   let hasSignupDev = false;
   let hasNetwork = false;
   let hasShelf = false;
-  // The gateway-wide voice-cloning switch, read off app_config. Unknown until a tab that asks
-  // for it has loaded, so it starts null and every reader treats null as "not closed".
-  let CLONING_OPEN = null;
+  // Voice cloning across the whole software, read off app_config. Unknown until a tab that asks
+  // for it has loaded, so it starts null and every reader treats null as "not closed" — the same
+  // generous fallback the older two-position switch used, because a panel that cannot read the
+  // line must not tell him an account is shut when it has no evidence of it.
+  let CLONING_MODE = null;
+  let hasCloneModeCfg = false;   // app_config.cloning_mode exists on this database
+  let hasCloneModeSub = false;   // subscriptions.cloning_mode exists on this database
   let DEV_OF = {};
   let DEV_SEEN = {};
   let REG_BY_DEV = {};
   let CUR = null;
-  let ACCT_AUDIO_KEEP = false;   // this account's stored audio-only switch, carried through a save
 
   function msg(el, text, cls = "err") { $(el).innerHTML = text ? \`<div class="\${cls}">\${esc(text)}</div>\` : ""; }
 
@@ -1388,13 +1487,16 @@ export const ADMIN_HTML = `<!doctype html>
       }
     }
     const subCols = "user_id, plan_id, status, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions";
-    const [subsRes, balRes, paidRes, cloneRes] = await Promise.all([
+    const [subsRes, balRes, paidRes] = await Promise.all([
       (async () => {
-        // engine_override and trial_granted_at only exist once the dual-engine
-        // migration has run, and a select that names a missing column fails the
+        // engine_override, trial_granted_at and cloning_mode only exist once their migration
+        // has run, and a select that names a missing column fails the
         // whole query — so ask with them, remember whether that worked, and fall
         // back to without them rather than showing every account as having no
         // subscription.
+        const withAll = await sb.from("subscriptions").select(subCols + ", engine_override, trial_granted_at, cloning_mode").in("user_id", ids);
+        if (!withAll.error) { hasEngineCols = true; hasCloneModeSub = true; return withAll; }
+        hasCloneModeSub = false;
         const withPin = await sb.from("subscriptions").select(subCols + ", engine_override, trial_granted_at").in("user_id", ids);
         if (!withPin.error) { hasEngineCols = true; return withPin; }
         hasEngineCols = false;
@@ -1406,11 +1508,10 @@ export const ADMIN_HTML = `<!doctype html>
       // row at once instead of asking the database 60 times. Reason is compared in
       // JS because a missing reason is still a real credit; SQL's <> skips NULLs.
       sb.from("credit_ledger").select("user_id, reason").in("user_id", ids).eq("kind", "credit"),
-      // An account's own cloning tick only means something while the gateway-wide switch is on,
-      // so the list asks for it here rather than calling a dead tab "cloning on".
-      sb.from("app_config").select("cloning_enabled").eq("id", 1).maybeSingle(),
+      // An account's own cloning line only means something as far as the gateway-wide line lets it,
+      // so the list asks for both here rather than calling a dead tab "cloning on".
+      readGlobalClone(),
     ]);
-    if (cloneRes && !cloneRes.error) CLONING_OPEN = cloneRes.data?.cloning_enabled !== false;
     const subOf = Object.fromEntries((subsRes.data || []).map((s) => [s.user_id, s]));
     const wallet = {};
     (balRes.data || []).forEach((b) => {
@@ -1538,9 +1639,7 @@ export const ADMIN_HTML = `<!doctype html>
         <td>\${s ? \`<span class="pill \${s.status}">\${s.status}</span>\` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
         <td><span class="pill \${ENGINE_PILL[eng]}">\${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>\${pin}<div class="muted">\${esc(whyOf(p.id, p.created_at))}</div>\${devOf(p.id, p.created_at)}\${netOf(p)}</td>
         <td>\${cell("video", s?.video_enabled)}</td>
-        <td>\${s?.video_audio_enabled === false ? '<span class="pill no">cloning off</span>'
-          : CLONING_OPEN === false ? '<span class="pill no" title="the gateway-wide switch is off, so this tab is dead for every account whatever the tick says">cloning off (global switch)</span>'
-          : '<span class="pill yes">cloning on</span>'}</td>
+        <td>\${cloneCell(s)}</td>
         <td class="muted mono">+\${mins1(credited)} / −\${mins1(spent)}</td>
         <td style="white-space:nowrap"><button data-act="open" data-id="\${p.id}" class="primary">Credit minutes</button>\${ADMIN_OF[p.id] ? "" : \` <button data-act="del-acct" data-id="\${p.id}" class="danger">Delete</button>\`}</td></tr>\`;
     }).join("") || '<tr><td colspan="8" class="muted">No account matches that filter.</td></tr>';
@@ -1654,6 +1753,12 @@ export const ADMIN_HTML = `<!doctype html>
       .select("engine_override, engine_override_by, engine_override_at, trial_granted_at")
       .eq("user_id", userId).maybeSingle();
     hasEngineCols = !pinErr;
+    // This account's OWN cloning line, asked straight off the row. What the snapshot answers with
+    // is the folded position — the gateway-wide line has already had its say — and this box edits
+    // his account, so opening it while the gateway is closed must not write "closed" into a line
+    // he had left open. The gateway line comes along too, so the note under the box can say which
+    // of the two is holding the door.
+    const [ownClone, globalClone] = await Promise.all([readAccountClone(userId), readGlobalClone()]);
     // The computer this account was created on, and whoever drew that machine's one free
     // minute. Asked directly, because the account may have been opened from anywhere.
     // The join date comes along with it: a register minute drawn AFTER this account joined
@@ -1688,7 +1793,7 @@ export const ADMIN_HTML = `<!doctype html>
     CUR = {
       ...snap, user_id: userId, email: EMAIL_OF[userId] || userId, pin: pin || null,
       joined_on: joinedOn, joined_at: joinedAt, came_from: cameFrom, machine: machine,
-      took_here: tookHere, net: net,
+      took_here: tookHere, net: net, clone_own: ownClone, clone_global: globalClone,
     };
     $("acctDetail").classList.remove("hidden");
     renderAccount();
@@ -1752,11 +1857,22 @@ export const ADMIN_HTML = `<!doctype html>
     $("detSummary").innerHTML = \`Plan <b>\${esc(plans[c.plan_id]?.name || c.plan_id || "—")}</b> · status \${status} \${c.status === "active" ? "" : '<span class="muted">(calls are refused unless active)</span>'}\${bought === false ? ' <span class="muted">— both stamped at sign-up, nothing bought</span>' : ""} · open leases <b>\${(c.open_sessions || []).length}</b> of \${c.max_concurrent_sessions ?? 1} allowed · minutes never expire\`;
 
     $("swVideo").checked = c.modalities?.video === true;
-    // The audio-only switch is off this panel, but the column is still on his subscription
-    // row. Whatever it says today is written back unchanged, so saving two switches can never
-    // quietly change a third one.
-    ACCT_AUDIO_KEEP = c.modalities?.audio === true;
-    $("swBoth").checked = c.modalities?.video_audio === true;
+    // His account's OWN line, off the subscription row. The audio-only boolean this box used to
+    // carry back unchanged is no longer carried at all: the door's line stamps it, so a save here
+    // cannot quietly move a switch nobody showed him.
+    const ownCloneMode = c.clone_own ?? (c.modalities?.video_audio === true ? "voice_video" : "off");
+    const globalCloneMode = c.clone_global ?? CLONING_MODE;
+    const effCloneMode = cloneFold(globalCloneMode, ownCloneMode);
+    $("acctClone").value = ownCloneMode;
+    // A database that has not run 20261102120000 has no middle position to write, and offering one
+    // there would either fail the save or turn a "voice only" choice into the wider answer behind
+    // his back. The box says which of those it is rather than guessing.
+    $("acctClone").disabled = !hasCloneModeSub;
+    $("acctCloneNow").innerHTML = !hasCloneModeSub
+      ? "The cloning line has not reached this database yet — run the migration, then reload this page. Until it has, this account can only ever be fully open or fully closed."
+      : \`\${bought === false ? "He is refused cloning at the dial whatever is set here, because a free trial does not clone. " : ""}On his screen right now: <b>\${CLONE_LABEL[effCloneMode]}</b>\${effCloneMode !== ownCloneMode
+          ? \` — this line says \${CLONE_LABEL[ownCloneMode]}, but the gateway-wide line is at \${CLONE_LABEL[globalCloneMode]}, and that only ever closes an account further, never opens it.\`
+          : ""}\`;
     // 1 is what a call start falls back to when an account has no subscription row - the
     // summary line above already says "of 1 allowed", so the box must not claim 2.
     $("detMaxConc").value = c.max_concurrent_sessions ?? 1;
@@ -1798,10 +1914,10 @@ export const ADMIN_HTML = `<!doctype html>
     const shownMods = POCKET_BUCKETS.filter((m) => m === "video" || holdsSomething(m));
     $("bucketTable").querySelector("tbody").innerHTML = shownMods.map((m) => {
       const w = poolRow(m);
-      const tip = m === "video" ? "Both call tabs spend from this wallet." : "The app has no audio-only call, so nobody can spend these.";
+      const tip = m === "video" ? "Both call tabs spend from this wallet." : "A voice-only call is metered at this line's rate but spends the pool, like every other call — minutes are no longer kept in this wallet, so anything standing here is a figure the fold migration has not moved yet.";
       const note = m === "video"
         ? \`· both call tabs spend from here\${hasStray ? \` <span class="pill warn">incl. \${clock(stray.balance)} left in the retired Video + Audio wallet — run migration 20261101120000 to move it into the pool</span>\` : ""}\`
-        : '· no call can spend this';
+        : \`· a rate line, not a place minutes are kept\${holdsSomething(m) ? \` <span class="pill warn">\${clock(w.balance)} still standing here from before the fold — run migration 20261102120000 to move it into the pool</span>\` : ""}\`;
       return \`<tr><td>\${MOD_LABEL[m]} <span class="muted" title="\${tip}">\${note}</span></td><td>\${bucket(w)}</td><td class="mono">\${mins(w.burn_rate ?? 1)}x</td>
         <td>\${w.unlimited ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
         <td class="mono">\${mins1(w.total_credited)}</td><td class="mono">\${mins1(w.total_spent)}</td></tr>\`;
@@ -1869,19 +1985,28 @@ export const ADMIN_HTML = `<!doctype html>
   $("detSaveSwitches").onclick = async () => {
     if (!CUR) return;
     msg("detMsg", "");
-    const allowed = [
-      $("swVideo").checked ? "Video calls" : "no video calls",
-      $("swBoth").checked ? "voice cloning open" : "voice cloning closed — the Video + Audio tab is dead to him, and a call already running closes at its next voice ask",
-    ].join(", and ");
-    const { data: saved, error } = await sb.from("subscriptions").update({
+    const mode = $("acctClone").value;
+    const patch = {
       video_enabled: $("swVideo").checked,
-      audio_enabled: ACCT_AUDIO_KEEP,
-      video_audio_enabled: $("swBoth").checked,
       max_concurrent_sessions: Math.max(1, N($("detMaxConc").value, 1)),
-    }).eq("user_id", CUR.user_id).select("user_id");
+    };
+    // The line is what this door is made of now, and the database's own trigger stamps the older
+    // booleans from it. A database that has not run that migration has no middle position, so the
+    // one boolean it does have is written — closed for a voice-only choice rather than quietly
+    // opened into voice + video, because nothing here may give a man a door the panel cannot price.
+    if (hasCloneModeSub) patch.cloning_mode = mode;
+    else patch.video_audio_enabled = mode === "voice_video";
+    const { data: saved, error } = await sb.from("subscriptions").update(patch)
+      .eq("user_id", CUR.user_id).select("user_id");
     if (error) return msg("detMsg", error.message);
     if (!saved || !saved.length) return msg("detMsg", "That account has no subscription row yet — create one below first, then the switches will stick.");
-    msg("detMsg", "Saved. This account may now use: " + allowed + ".", "ok");
+    msg("detMsg", "Saved. This account may now use: " + [
+      $("swVideo").checked ? "Video calls" : "no video calls",
+      hasCloneModeSub
+        ? \`voice cloning \${CLONE_LABEL[mode]}\`
+        : \`voice cloning \${mode === "voice_video" ? "open (voice + video)" : "closed"}\`
+          + " — this database has no middle position yet, so " + (mode === "voice_only" ? "voice only could only be written as closed" : "it holds the two positions it always had"),
+    ].join(", and ") + ".", "ok");
     await openAccount(CUR.user_id);
   };
 
@@ -3546,7 +3671,7 @@ export const ADMIN_HTML = `<!doctype html>
 
   function renderRates() {
     const eff = effectiveRates();
-    $("currentRates").querySelector("tbody").innerHTML = CALL_MODALITIES.map((m) => {
+    $("currentRates").querySelector("tbody").innerHTML = RATE_MODALITIES.map((m) => {
       const r = eff[m];
       return \`<tr><td>\${MOD_LABEL[m]}</td><td class="mono">\${r ? mins(r.multiplier) + "x" : '<span class="pill n">unset (1x)</span>'}</td>
         <td class="mono">\${mins(r?.multiplier ?? 1)} minutes</td>
@@ -3917,13 +4042,19 @@ export const ADMIN_HTML = `<!doctype html>
     $("cfgMaint").checked = data.maintenance === true;
     $("cfgMaintMsg").value = data.maintenance_message || "";
 
-    // The one global cloning switch: asked for on its own, because a database that has not run
-    // 20261101220000 yet has no such column, and naming a missing column fails the whole select.
-    const probeClone = await sb.from("app_config").select("cloning_enabled").eq("id", 1).maybeSingle();
-    hasCloningCfg = !probeClone.error;
-    $("cfgCloning").disabled = !hasCloningCfg;
-    if (hasCloningCfg) CLONING_OPEN = probeClone.data?.cloning_enabled !== false;
-    $("cfgCloning").checked = CLONING_OPEN !== false;
+    // The gateway-wide cloning line: asked for on its own, because a database that has not run
+    // 20261102120000 yet has no cloning_mode column and a database that has not run 20261101220000
+    // has no cloning column at all. Naming a missing column fails the whole select, so the read
+    // probes and falls back — and the box disables itself rather than offering a choice it cannot
+    // write.
+    const globalMode = await readGlobalClone();
+    $("cfgCloningMode").disabled = !hasCloneModeCfg;
+    $("cfgCloningMode").value = globalMode ?? "voice_video";
+    $("cfgCloningNow").innerHTML = !hasCloneModeCfg
+      ? (hasCloningCfg
+        ? "This database only has the old two-position switch, so this box can close everything or open voice + video — the middle position needs the migration, and saving here leaves a voice-only choice closed."
+        : "The database has no cloning column yet — run the migrations, then reload this page. Nothing here has been changed.")
+      : "";
 
     const probeTrial = await sb.from("app_config").select("trial_enabled").eq("id", 1).maybeSingle();
     hasTrialCfg = !probeTrial.error;
@@ -3954,15 +4085,27 @@ export const ADMIN_HTML = `<!doctype html>
       const ceiling = N($("cfgVideoCeiling").value, 0);
       row.max_concurrent_video_sessions = ceiling > 0 ? Math.floor(ceiling) : null;
     }
-    if (hasCloningCfg) {
-      row.cloning_enabled = $("cfgCloning").checked;
-      CLONING_OPEN = row.cloning_enabled;
+    const globalCloneMode = $("cfgCloningMode").value;
+    if (hasCloneModeCfg) {
+      row.cloning_mode = globalCloneMode;
+      CLONING_MODE = globalCloneMode;
+    } else if (hasCloningCfg) {
+      // Only the two positions this database has ever had. A voice-only choice is written as
+      // closed — the wider answer would be a door he did not ask for, and it cannot be priced.
+      row.cloning_enabled = globalCloneMode === "voice_video";
+      CLONING_MODE = row.cloning_enabled ? "voice_video" : "off";
     }
     const { error } = await sb.from("app_config").update(row).eq("id", 1);
     if (error) return msg("cfgMsg", error.message);
-    msg("cfgMsg", hasCloningCfg && !row.cloning_enabled
-      ? "Gateway config saved — voice cloning is now closed for every account. It lands on the next read each app makes, so a tab that is open on someone's screen goes dead at their next Start."
-      : "Gateway config saved — applies to the next call.", "ok");
+    const landed = !hasCloneModeCfg && hasCloningCfg && globalCloneMode === "voice_only"
+      ? " (this database has no middle position, so it landed as closed)" : "";
+    msg("cfgMsg", "Gateway config saved — voice cloning across the whole software is now "
+      + CLONE_LABEL[hasCloneModeCfg ? globalCloneMode : CLONING_MODE] + " " + landed
+      + (CLONING_MODE === "off"
+        ? ". It lands on the next read each app makes, so a Video + Audio tab that is open on someone's screen — voice-and-picture call or voice-only call — goes dead at their next Start, and a call already running closes at its next voice ask."
+        : CLONING_MODE === "voice_only"
+          ? ". The picture half of the Video + Audio tab is dead for everyone now; a voice-only call is still open to the accounts whose own line allows it."
+          : " — applies to the next call, and each account is back to its own line."), "ok");
   };
 
   async function loadPool() {
@@ -4002,7 +4145,7 @@ export const ADMIN_HTML = `<!doctype html>
     $("poolTable").querySelector("tbody").innerHTML = POCKET_BUCKETS
       .filter((m) => m === "video" || byMod[m].accounts.size > 0)
       .map((m) => \`<tr>
-      <td>\${MOD_LABEL[m]}\${m === "video" ? \` <span class="muted">· both call tabs\${hasStray ? " (incl. the retired Video + Audio figures)" : ""}</span>\` : ' <span class="muted">· no call can spend this</span>'}</td>
+      <td>\${MOD_LABEL[m]}\${m === "video" ? \` <span class="muted">· both call tabs\${hasStray ? " (incl. the retired Video + Audio figures)" : ""}</span>\` : ' <span class="muted">· the voice-only call is metered here but paid from the pool, so anything standing here is a figure the fold has not moved yet</span>'}</td>
       <td class="mono" style="text-align:right">\${clock(byMod[m].outstanding)}\${byMod[m].unlimited ? ' <span class="pill yes">' + byMod[m].unlimited + " unlimited</span>" : ""}</td>
       <td class="mono" style="text-align:right">\${mins1(byMod[m].credited)}</td>
       <td class="mono" style="text-align:right">\${mins1(byMod[m].spent)}</td>

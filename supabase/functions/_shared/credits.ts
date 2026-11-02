@@ -8,20 +8,60 @@ import { adminClient } from "./db.ts";
 
 export type Modality = "video" | "audio" | "video_audio";
 
-/** Desktop tab id -> credit bucket. Unknown tabs bill as the priciest bucket. */
-export function modalityForTab(tab?: string): Modality {
+/**
+ * Desktop tab id -> credit bucket. The cloning side of the Video + Audio tab can run on its own,
+ * with no picture on the cable, and that call is the audio line: same tab, same panel record,
+ * different meter. Unknown tabs bill as the priciest bucket.
+ */
+export function modalityForTab(tab?: string, voiceOnly = false): Modality {
   if (tab === "video-only") return "video";
   if (tab === "audio-only") return "audio";
+  if (tab === "video-audio" && voiceOnly) return "audio";
   return "video_audio";
 }
 
 /**
  * Which wallet a modality actually spends minutes from — the mirror of sl_pay_bucket on the
  * database, so a refusal read here and the charge taken there can never disagree. The modality
- * still decides the rate; only the pool is shared.
+ * still decides the rate; only the pool is shared. Both cloning calls draw the one pool.
  */
 export function payBucket(modality: Modality): Modality {
-  return modality === "video_audio" ? "video" : modality;
+  return modality === "video_audio" || modality === "audio" ? "video" : modality;
+}
+
+/** The three positions of the cloning door. */
+export type CloningMode = "off" | "voice_only" | "voice_video";
+
+/** The account row as this file reads it — plus the cloning line when the database has it. */
+type SubscriptionRow = {
+  status: string;
+  plan_id: string | null;
+  video_enabled: boolean;
+  audio_enabled: boolean;
+  video_audio_enabled: boolean;
+  max_concurrent_sessions: number | null;
+  cloning_mode?: string | null;
+  [key: string]: unknown;
+};
+
+/**
+ * How far an account may clone, read off the two lines the database folds into one answer by
+ * sl_cloning_mode: the whole-software line and the account's own, at their lowest common position.
+ * Kept here because a refusal this early has to name the same door the dial itself is refused at.
+ */
+export function cloningMode(
+  cfg: { cloning_mode?: string | null; cloning_enabled?: boolean | null } | null,
+  sub: { cloning_mode?: string | null; video_audio_enabled?: boolean | null } | null,
+): CloningMode {
+  const rank = (m: unknown, fallback: CloningMode): CloningMode =>
+    m === "off" || m === "voice_only" || m === "voice_video" ? m : fallback;
+  // A boolean-only row can only ever have meant the two positions it was written with.
+  const global = rank(cfg?.cloning_mode, cfg && cfg.cloning_enabled === false ? "off" : "voice_video");
+  if (!sub) return "off";   // an account with no subscription row has been promised nothing
+  const account = rank(sub.cloning_mode, sub.video_audio_enabled === false ? "off" : "voice_video");
+  if (global === "off" || account === "off") return "off";
+  if (global === "voice_only" || account === "voice_only") return "voice_only";
+  return "voice_video";
 }
 
 export type Lease = {
@@ -51,6 +91,8 @@ export type AccountState = {
   planId?: string;
   modality?: Modality;
   enabled?: boolean;
+  /** How far this account may clone, once both lines have had their say. */
+  cloningMode?: CloningMode;
   maxConcurrent?: number;
   balances?: Record<string, number | null>;
   minSupportedVersion?: string;
@@ -72,11 +114,19 @@ export async function readAccount(userId: string, modality: Modality): Promise<A
   const db = adminClient();
 
   const { data: cfgRaw } = await db.from("app_config").select("*").eq("id", 1).maybeSingle();
-  const { data: sub } = await db
+  // The cloning line is asked for by name, and a database that has not run
+  // 20261102120000 yet has no such column — naming a missing column fails the whole read, which
+  // would refuse every call on the software. So the read falls back to the two figures the row has
+  // always had, and sl_cloning_mode on the database makes the same fallback for the same reason.
+  const subCols = "status, plan_id, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions";
+  const withMode = await db
     .from("subscriptions")
-    .select("status, plan_id, video_enabled, audio_enabled, video_audio_enabled, max_concurrent_sessions")
+    .select(`${subCols}, cloning_mode`)
     .eq("user_id", userId)
     .maybeSingle();
+  const sub: SubscriptionRow | null = withMode.error
+    ? (await db.from("subscriptions").select(subCols).eq("user_id", userId).maybeSingle()).data
+    : withMode.data;
   const { data: wallets } = await db
     .from("credit_balances")
     .select("modality, balance, unlimited")
@@ -99,6 +149,7 @@ export async function readAccount(userId: string, modality: Modality): Promise<A
     planId: sub?.plan_id,
     modality,
     enabled: sub ? sub[enabledFlag] === true : false,
+    cloningMode: cloningMode(cfgRaw, sub),
     maxConcurrent: sub?.max_concurrent_sessions ?? 1,
     balances,
     minSupportedVersion: cfgRaw?.min_supported_version ?? "1.0.0",
@@ -110,10 +161,14 @@ export async function readAccount(userId: string, modality: Modality): Promise<A
   if (!sub) return { ...state, ok: false, reason: "no_subscription" };
   if (sub.status !== "active") return { ...state, ok: false, reason: `status_${sub.status}` };
   if (state.maintenance) return { ...state, ok: false, reason: "maintenance" };
-  // The global cloning switch sits beside the per-account tick, not underneath it: one box in the
-  // panel closes the tab for every account, and a dial refused here is refused with the same reason
-  // the app already greys the tab out for.
-  if (modality === "video_audio" && cfgRaw?.cloning_enabled === false) {
+  // ONE DOOR, THREE POSITIONS, for either cloning call. The whole-software line and the account's
+  // own line are folded into one answer, exactly as sl_cloning_mode folds them, so a dial refused
+  // here and the same dial refused inside the money function carry the same sentence.
+  // 'voice_only' opens the voice side and keeps the Video + Audio tab dead.
+  if (modality === "video_audio" && state.cloningMode !== "voice_video") {
+    return { ...state, ok: false, reason: "clone_closed" };
+  }
+  if (modality === "audio" && state.cloningMode === "off") {
     return { ...state, ok: false, reason: "clone_closed" };
   }
   if (!state.enabled) return { ...state, ok: false, reason: "modality_disabled" };

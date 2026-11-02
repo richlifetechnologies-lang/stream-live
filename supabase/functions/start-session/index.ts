@@ -4,7 +4,7 @@
 // for the modalities that need video — mints a short-lived fal.ai JWT from a key in
 // the admin pool. No master key is ever returned to the client.
 //
-// Body: { appId: string, deviceId?: string, tab: string, appVersion?: string }
+// Body: { appId: string, deviceId?: string, tab: string, voiceOnly?: boolean, appVersion?: string }
 // Resp: { sessionId, token|null, expiresInSeconds, leaseExpiresAt, modality,
 //         balance, unlimited, wallet, leaseMinutes }
 // Errors: 401 auth, 402 no balance, 403 entitlement/device, 409 concurrent limit,
@@ -187,11 +187,15 @@ Deno.serve(async (req: Request) => {
 
     const appId = typeof body.appId === "string" ? body.appId.trim() : "";
     const tab = typeof body.tab === "string" ? body.tab : "video-audio";
+    // The cloning side of the Video + Audio tab asked to run by itself: no picture, so no video
+    // key and no video line. It stays on its tab in the records, and the modality is what says
+    // which kind of call it was.
+    const voiceOnly = body.voiceOnly === true;
     const deviceId = typeof body.deviceId === "string" ? body.deviceId.trim() : undefined;
     const appVersion = typeof body.appVersion === "string" ? body.appVersion.trim() : undefined;
     if (!appId) return fail("appId is required");
 
-    const modality = modalityForTab(tab);
+    const modality = modalityForTab(tab, voiceOnly);
     const acct = await readAccount(user.id, modality);
 
     if (appVersion && acct.minSupportedVersion && compareVersions(appVersion, acct.minSupportedVersion) < 0) {
@@ -232,7 +236,8 @@ Deno.serve(async (req: Request) => {
     }
     const lease = started.lease;
 
-    // Audio Call is voice-only: no video key, nothing else to mint.
+    // An audio-modality call has no picture whoever dialled it — the old Audio Call tab or the
+    // voice-only button on the cloning tab — so there is no video key to mint and no video line to open.
     let token: string | null = null;
     let expiresAt: string | null = null;
     const engine = lease.engine;

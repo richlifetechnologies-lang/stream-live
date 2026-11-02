@@ -218,6 +218,15 @@ export function cloneOpen(state: AccountState): boolean {
   return state.modalities.video_audio === true;
 }
 
+/**
+ * True while this account may clone a voice AT ALL, which is the wider door: the
+ * snapshot answers `audio` from "the cloning line is not closed", so it is open for a
+ * voice-only call on a set to 'voice_only' where the picture-and-voice call is shut.
+ */
+export function voiceCloneOpen(state: AccountState): boolean {
+  return state.modalities.audio === true;
+}
+
 // A call is refused when its bucket cannot fund a lease; an unlimited bucket always passes.
 // Video is the one bucket a free trial can leave partly spent, and the gateway lets a
 // trial start on any amount above zero — so the button here must not be stricter than

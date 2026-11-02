@@ -14,7 +14,7 @@
 import { corsHeaders, preflight, json, fail } from "../_shared/cors.ts";
 import { requireUser } from "../_shared/auth.ts";
 import { adminClient } from "../_shared/db.ts";
-import { readAccount, reapSessions } from "../_shared/credits.ts";
+import { cloningMode, readAccount, reapSessions } from "../_shared/credits.ts";
 import { runWithKeys } from "../_shared/keys.ts";
 
 /** Deno's clock vs Postgres' now(): refuse a lease only past a small skew window. */
@@ -90,16 +90,27 @@ Deno.serve(async (req: Request) => {
       if (session.modality !== "audio" && session.modality !== "video_audio") {
         return fail("session does not include voice", 403, { reason: "modality_disabled" });
       }
-      // The administrator's Video + Audio tick closes this door while the call is running, not only
-      // at the next Start. A lease opened a minute ago is no reason to keep spending a voice key on
-      // an account he has just shut. The global switch shuts the same door for every account at once.
-      if (session.modality === "video_audio") {
+      // The cloning door closes THIS while the call is running, not only at the next Start. A lease
+      // opened a minute ago is no reason to keep spending a voice key on an account the
+      // administrator has just shut, and one line now answers for both cloning calls: a voice-only
+      // dial is refused once the door reaches 'off', and the Video + Audio dial refused for
+      // anything short of 'voice_video' - which is exactly the position he moves it to in order to
+      // close the tab while leaving the voice side open.
+      //
+      // Read as two rows and folded by the same helper the dial uses, so a running call and a new
+      // call can never be told different stories. A row that cannot be read is read as open, which
+      // is what this block did before: a database mid-migration must not be the reason a live call
+      // loses its voice.
+      {
         const [perAccount, globally] = await Promise.all([
-          db.from("subscriptions").select("video_audio_enabled").eq("user_id", user.id).maybeSingle(),
-          db.from("app_config").select("cloning_enabled").eq("id", 1).maybeSingle(),
+          db.from("subscriptions").select("video_audio_enabled, cloning_mode").eq("user_id", user.id).maybeSingle(),
+          db.from("app_config").select("cloning_enabled, cloning_mode").eq("id", 1).maybeSingle(),
         ]);
-        const sub = perAccount.data;
-        if (globally.data?.cloning_enabled === false || (sub && sub.video_audio_enabled !== true)) {
+        const cfg = globally.error ? null : globally.data;
+        const acct = perAccount.error ? null : perAccount.data;
+        const mode = cloningMode(cfg ?? { cloning_enabled: true }, acct ?? { video_audio_enabled: true });
+        const closed = session.modality === "video_audio" ? mode !== "voice_video" : mode === "off";
+        if (closed) {
           return fail("voice cloning is closed on your account", 403, { reason: "clone_closed" });
         }
       }
@@ -114,10 +125,12 @@ Deno.serve(async (req: Request) => {
       // Voice library: setup, not a call, so it must not require a funded bucket —
       // a user has to be able to prepare a voice before the first minute is spent.
       // What it does require is an account the administrator has let clone voices at
-      // all. It asks the cloning modality only: the audio-only switch belongs to a call
-      // type the app no longer has, and leaving it here would keep a locked account's
-      // library door open through a side nobody uses.
-      const combined = await readAccount(user.id, "video_audio");
+      // all, which is the VOICE door and not the tab door: an account set to 'voice_only'
+      // has no Video + Audio call to make, but the voice he uploads here is precisely what
+      // his voice-only dial speaks with. Asking the tab would lock him out of the one side
+      // his account was opened for. The trial and paid rules belong to the dial, where the
+      // minutes are; preparing a voice spends none.
+      const combined = await readAccount(user.id, "audio");
       if (!combined.ok) {
         return fail(String(combined.message ?? combined.reason ?? "denied"), 403, {
           reason: combined.reason === "modality_disabled" ? "clone_closed" : combined.reason,

@@ -28,8 +28,12 @@ export function useTicker(periodMs = 1000): number {
  * The foot bar beside Start call cannot spare a card's height, so the same
  * clock comes in a pill: the number, and the drain bar under it once a call is
  * running.
+ *
+ * `label` replaces the call type's own name where the metered bucket and the thing on
+ * screen have different names — the voice-only call is metered as audio, and the app has
+ * no Audio tab for a customer to go looking for.
  */
-export function MinuteMeter({ modality, compact = false, note }: { modality: Modality; compact?: boolean; note?: string }) {
+export function MinuteMeter({ modality, compact = false, note, label }: { modality: Modality; compact?: boolean; note?: string; label?: string }) {
   const account = useAccount();
   const lease = useLease();
   const now = useTicker();
@@ -59,7 +63,7 @@ export function MinuteMeter({ modality, compact = false, note }: { modality: Mod
       <div data-tour="meter" style={{ flexShrink: 0, padding: "7px 14px", borderRadius: 12, background: "hsl(222 44% 8%)", border: `1px solid ${tone}44`, minWidth: 118 }}>
         <p style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 55%)", display: "flex", alignItems: "center", gap: 5 }}>
           <Hourglass style={{ width: 10, height: 10, color: tone }} />
-          {t(MOD_LABELS[modality])} {running ? (drain.waiting ? t("starting up") : t("in use")) : t("available")}
+          {label ?? t(MOD_LABELS[modality])} {running ? (drain.waiting ? t("starting up") : t("in use")) : t("available")}
         </p>
         <p style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 19, lineHeight: 1.15, color: tone, fontVariantNumeric: "tabular-nums" }}>
           {unlimited ? t("UNLIMITED") : countdown(remaining)}
