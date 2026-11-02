@@ -13,7 +13,7 @@ import { Stage, PageHead, Pill, PillRow } from "../components/d2";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
-import { START_TRIES, classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
+import { BLIND_RETRY_HOLD_MS, PICTURE_GIVE_UP_MS, START_TRIES, classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
@@ -22,7 +22,7 @@ import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
-  Volume2, Upload, Trash2, Video, Headphones, VideoIcon, Smartphone, CameraOff, Sparkles, Lock,
+  Volume2, Upload, Trash2, Video, Headphones, VideoIcon, Smartphone, CameraOff, Sparkles, Lock, Clock,
 } from "lucide-react";
 import { GuidedTour, onTourRequested, tourSeen, tourStops } from "../components/guided-tour";
 import { encode, decode } from "@msgpack/msgpack";
@@ -416,11 +416,12 @@ const CLONE_SEND_MS       = 6000;
 
 // A cloning call is not on air until the cloned voice has answered once, because a call
 // whose voice never arrived is not the call the customer bought. The hold is bounded so a
-// man who simply has not spoken yet still pays like anyone else, and it is cut short near
-// the minute mark so the metering stamp always lands well before the gateway's own
-// picture-less deadline.
-const CLONE_FIRST_AIR_MS   = 30_000;
-const CLONE_AIR_HARD_MS    = 60_000;
+// man who simply has not spoken yet still pays like anyone else.
+const CLONE_FIRST_AIR_MS = 30_000;
+// The hard end of that hold is the no-picture cut minus the round trip it takes to say so:
+// the gateway closes a call whose stamp never arrived, and it reads the stamp from the server
+// side, so a working call must never be the one that is still waiting on its voice.
+const CLONE_AIR_HARD_MS  = PICTURE_GIVE_UP_MS - 5_000;
 
 /**
  * The microphone, asked for and proven before anything is booked.
@@ -1000,6 +1001,11 @@ export default function StreamPage() {
   // Seconds left on a wait the gateway announced for this machine. Null when nobody has
   // asked us to hold, so the overlay keeps its old wording for a plain retry.
   const [pacingSeconds, setPacingSeconds] = useState<number | null>(null);
+  // Seconds left before this machine is allowed to press Start again, after a call that never
+  // showed a picture. Null while nothing is being held. The button wears the number, so the
+  // wait the customer was told about is the wait he can see counting down - and the app never
+  // re-dials on his behalf while it runs.
+  const [holdSeconds, setHoldSeconds] = useState<number | null>(null);
   const [elapsed, setElapsed]         = useState(0);
   // Frames-per-second readout, shown below the video panel. Never on the panel:
   // that frame is what OBS and the calling apps capture. Updated straight into
@@ -1178,6 +1184,18 @@ export default function StreamPage() {
   const cloneThisCallRef = useRef(false);
   // The meter held while a cloning call waits for its first cloned answer.
   const airHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // The instant the AI picture first painted on this call. Not the same thing as the money
+  // stamp: a cloning call deliberately holds that stamp until the cloned voice answers, and a
+  // call whose picture arrived at 20 seconds is a working call even while it waits. This is
+  // the only honest answer to "did he see anything".
+  const firstFrameRef = useRef<number | null>(null);
+  // The wait announced for this machine, as an instant rather than a number, so a re-render
+  // mid-count never re-arms it and a press that arrives during it can be refused on the spot.
+  const holdUntilRef = useRef<number | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // The sentence that belongs to the wait being counted, for the one path that can still ask
+  // for a call by itself: the OBS cable reconnect.
+  const holdMsgRef = useRef<string | null>(null);
 
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
   const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
@@ -1742,6 +1760,44 @@ export default function StreamPage() {
     airHoldRef.current = setTimeout(() => { airHoldRef.current = null; markMedia(); }, hold);
   }, [account.live, releaseAirHold]);
 
+  // ─── The wait this machine owes before its next call ─────────────────────────
+  /**
+   * Hold Start for `ms` and count the seconds on the button.
+   *
+   * A call that showed no picture has already cost the seller its dial, and the customer got
+   * nothing for it, so the two things that matter here are that he is told a wait that is
+   * true and that nothing re-dials during it. The number is the server's own machine hold, so
+   * pressing Start the second this runs out is never refused - which is the difference
+   * between a wait and a loop.
+   *
+   * `why` is the sentence that goes with that particular wait. The button cannot explain
+   * itself, and something does have to be said when the OBS cable asks for a call of its own
+   * while the count is still running.
+   */
+  const armHold = useCallback((ms: number, why: string) => {
+    const until = Date.now() + ms;
+    if (holdUntilRef.current === null || until > holdUntilRef.current) {
+      holdUntilRef.current = until;
+      holdMsgRef.current = why;
+    }
+    if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+    const tick = () => {
+      const left = (holdUntilRef.current ?? 0) - Date.now();
+      if (left <= 0) {
+        if (holdTimerRef.current) clearInterval(holdTimerRef.current);
+        holdTimerRef.current = null;
+        holdUntilRef.current = null;
+        setHoldSeconds(null);
+        return;
+      }
+      setHoldSeconds(Math.ceil(left / 1000));
+    };
+    setHoldSeconds(Math.ceil(((holdUntilRef.current ?? until) - Date.now()) / 1000));
+    holdTimerRef.current = setInterval(tick, 1000);
+  }, []);
+
+  useEffect(() => () => { if (holdTimerRef.current) clearInterval(holdTimerRef.current); }, []);
+
   // ─── Teardown ──────────────────────────────────────────────────────────────
   const teardownStream = useCallback(async () => {
     sessionGenRef.current++;
@@ -1753,6 +1809,7 @@ export default function StreamPage() {
       endLease();
       releaseAirHold();
       cloneThisCallRef.current = false;
+      firstFrameRef.current = null;
       videoSessionRef.current?.close(); videoSessionRef.current = null;
       clonerRef.current?.stop(); clonerRef.current = null;
       if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
@@ -1836,6 +1893,31 @@ export default function StreamPage() {
     }, Math.max(0, stopAt - Date.now()));
     return () => clearTimeout(id);
   }, [isStreaming, account, teardownStream, toast, setLocation]);
+
+  // ─── Give up on a call that never puts a picture on screen ──────────────────
+  // The gateway bills nothing before the first frame, so every second of a blank call is the
+  // seller's cost and the customer's dead time. Left alone it sits there looking broken until
+  // he presses Stop himself - which is exactly what the three blank calls of 2026-11-01 were,
+  // at 90, 90 and 60 seconds of engine. Closing it here puts the picture down a few seconds
+  // before the gateway's own 45-second check-in would, and says what happened while he is
+  // still looking at the black box rather than an hour later in a support message.
+  useEffect(() => {
+    const lease = account.live;
+    const sid = sessionIdRef.current;
+    if (!isStreaming || !lease || !sid || lease.modality === "audio") return;
+    if (firstFrameRef.current !== null) return;
+    const id = setTimeout(() => {
+      // A frame that arrived in the meantime, or a call that is no longer the one being
+      // watched, both mean there is nothing to give up on.
+      if (firstFrameRef.current !== null || sessionIdRef.current !== sid) return;
+      reportCallFailure(sid, "engine",
+        `no picture ${Math.round(PICTURE_GIVE_UP_MS / 1000)} s after the call opened; this app ended it`);
+      void teardownStream();
+      armHold(BLIND_RETRY_HOLD_MS, endReasonMessage("picture_hold"));
+      toast({ title: t("Call ended"), description: endReasonMessage("picture_hold"), variant: "destructive" });
+    }, Math.max(0, lease.startedAt + PICTURE_GIVE_UP_MS - Date.now()));
+    return () => clearTimeout(id);
+  }, [isStreaming, account, teardownStream, armHold, toast]);
 
   // ─── Start stream ──────────────────────────────────────────────────────────
   /**
@@ -2011,7 +2093,12 @@ export default function StreamPage() {
         if (state.ended) {
           void teardownStream();
           const oom = state.reason === "out_of_minutes";
-          toast({ title: oom ? t("Out of minutes") : t("Call ended"), description: endReasonMessage(state.reason), variant: "destructive", withContact: true });
+          // The gateway cut a blank call at its own deadline. Same hold as the app's give-up,
+          // so whichever of the two gets there first leaves him with one number to wait for.
+          if (state.reason === "no_picture") armHold(BLIND_RETRY_HOLD_MS, endReasonMessage("picture_hold"));
+          toast({ title: oom ? t("Out of minutes") : t("Call ended"),
+                  description: state.reason === "no_picture" ? endReasonMessage("picture_hold") : endReasonMessage(state.reason),
+                  variant: "destructive", withContact: true });
           if (oom) setLocation("/minutes");
         }
       }, 45_000);
@@ -2045,7 +2132,7 @@ export default function StreamPage() {
       // nothing, and Windows shows a recording light while it is open.
       if (!micHandedOff && mic) mic.getTracks().forEach(t => t.stop());
     }
-  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold]);
+  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold]);
 
   /**
    * Sleep, counting the seconds on screen. A wait the server announced for this exact
@@ -2072,9 +2159,20 @@ export default function StreamPage() {
    * Press of the Start button. Asks for a call, and when the video line accepts it and
    * then dies — which is what happens to a call started right after another one closed —
    * waits and asks again before anyone is told anything.
+   *
+   * The ladder stops at the seconds scale. A wait the server measured on this machine runs to
+   * minutes and is spent with the button counting it down, not with the app dialing behind
+   * the customer's back: he was just told to wait, and a call that opens itself five seconds
+   * later contradicts the only sentence this screen has.
    */
   const handleStartStream = useCallback(async () => {
     if (isStartingRef.current || closingRef.current || isStreaming) return;
+    // This machine is holding its wait. The button is disabled and shows the count, so the
+    // only press that reaches here is the OBS cable asking for a call on its own.
+    if (holdUntilRef.current !== null) {
+      toast({ title: t("Call ended"), description: holdMsgRef.current ?? endReasonMessage("lines_busy"), variant: "destructive" });
+      return;
+    }
     // The card's listening check holds the microphone for a few seconds; a call must never
     // start while it has the device.
     micCheckRef.current?.stop();
@@ -2102,7 +2200,6 @@ export default function StreamPage() {
     startCancelRef.current = false;
     try {
       let last: StartFailure | null = null;
-      let waitsUsed = 0;
       let tries = START_TRIES;
       for (let i = 0; i < tries; i++) {
         const failure = await attemptStart(activeTab, needsVoice);
@@ -2112,9 +2209,8 @@ export default function StreamPage() {
         tries = startTriesFor(failure);
         // Write it down while it is still true what the engine said.
         if (failure.sessionId) reportCallFailure(failure.sessionId, failure.stage, failure.detail);
-        const waitMs = startRetryWaitMs(failure, i, waitsUsed, tries);
+        const waitMs = startRetryWaitMs(failure, i, tries);
         if (waitMs === null) break;
-        if (failure.waitMs !== null) waitsUsed++;
         // The failed attempt ran a teardown, which released the page's "starting" flag;
         // a wait is not an idle page, or a second press would open two calls.
         isStartingRef.current = true;
@@ -2126,6 +2222,8 @@ export default function StreamPage() {
       }
       const f = last;
       if (!f) return;
+      // A wait the server measured on this machine: its own number, held on the button.
+      if (f.waitMs !== null) armHold(f.waitMs, startFailureMessage(f));
       if (f.reason === "out_of_minutes") {
         toast({ title: t("Out of minutes"), description: endReasonMessage(f.reason), variant: "destructive" });
         setLocation("/minutes");
@@ -2141,7 +2239,7 @@ export default function StreamPage() {
   }, [isStreaming, credsMissing, cameraReady, activeTab, cloneTab, cloneLocked, cloneNeedsPaid,
       selectedStyle, customPrompt, refImageB64,
       selectedMicId, vcEnabled, vcVoiceId, attemptStart, teardownStream, toast, setLocation, account,
-      countedWait]);
+      countedWait, armHold]);
 
   const handleStop = useCallback(() => teardownStream(), [teardownStream]);
 
@@ -2299,7 +2397,7 @@ export default function StreamPage() {
             one element ever decodes the stream. */}
         <video
           ref={el => { remoteVideoRef.current = el; if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) el.srcObject = remoteStreamRef.current; }}
-          onPlaying={markAirWhenReady}
+          onPlaying={() => { if (firstFrameRef.current === null) firstFrameRef.current = Date.now(); markAirWhenReady(); }}
           autoPlay playsInline muted
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }} />
 
@@ -2453,7 +2551,7 @@ export default function StreamPage() {
   // Design 2's single big control: it lives in the foot bar beside the gear chips, so the
   // one thing a customer presses is next to the things he checks before pressing it.
   const canStart = !credsMissing && cameraReady && !cloneLocked && !cloneNeedsPaid;
-  const armed = canStart && !isStarting && !isClosing;
+  const armed = canStart && !isStarting && !isClosing && holdSeconds === null;
   const StreamBtn = () => (
     <button data-tour="start"
       onClick={isStreaming ? handleStop : credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStartStream}
@@ -2471,6 +2569,7 @@ export default function StreamPage() {
       onMouseEnter={e => { if (isStreaming) (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.5)"; else if (armed) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
       onMouseLeave={e => { if (isStreaming) (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.3)"; (e.currentTarget as HTMLElement).style.filter = "none"; }}>
       {isStreaming ? <><Square style={{ width: 17, height: 17 }} /> {t("Stop")}</>
+        : holdSeconds !== null ? <><Clock style={{ width: 17, height: 17 }} /> {t("Wait")} {formatTime(holdSeconds)}</>
         : isStarting ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Starting…")}</>
         : isClosing ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Ending call…")}</>
         : credsMissing ? <><Settings style={{ width: 17, height: 17 }} /> {t("Request credits")}</>

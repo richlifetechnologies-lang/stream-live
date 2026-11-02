@@ -42,6 +42,12 @@ const REASON_COPY: Record<string, string> = {
   // The gateway only bills from the moment a picture arrives, so a call that never reported
   // one is closed rather than renewed for ever. Nothing was ever owed on it.
   no_picture: "Your call never showed a picture, so we ended it and gave back everything it had set aside. Nothing was used. Try again — if it keeps happening, tell your administrator, who can see exactly what the video service answered.",
+  // The app closes a call that is still blank forty seconds in, rather than leaving the
+  // customer sitting there until he presses Stop. He is not charged a second of it, so the
+  // only thing left to tell him is the wait - and the wait has to be true: it is the same
+  // number the server holds this machine for, and the button counts it down in front of him
+  // instead of dialing again on its own.
+  picture_hold: "No picture arrived, so the app ended your call instead of letting it run. Nothing was used - your minutes are exactly where they were. This computer has to wait about four minutes for the video line to release before its next call, and the Start button is counting that time down. Press it again when it reaches zero; starting sooner only gets refused.",
   no_lease: "Your call was ended because its booking lapsed. Try starting again.",
   // The video software checks the call pass against the clock on the machine it runs on. A
   // computer set hours away from real time therefore reads a minutes-old pass as already

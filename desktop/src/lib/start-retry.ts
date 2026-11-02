@@ -35,14 +35,31 @@ export const START_RETRY_WAITS_MS = [10_000, 30_000];
 export const TRIAL_START_TRIES = 1;
 
 /**
- * When the server announces a wait, the press asks exactly once more, after that wait.
- * Repeating a paced refusal would be the app arguing with a number that was measured on
- * the machine, and each ask reopens a lease.
+ * How long this app is willing to sit on a call that has never put a picture on screen.
+ *
+ * Nothing is billed for those seconds - the gateway meters from the first frame - so they are
+ * the seller's cost alone, spent on a delivery that is not coming. The gateway closes the same
+ * call at its first check-in, which the page runs every 45 seconds; giving up here rather than
+ * there is what turns ~45 seconds of engine into ~40, and it puts the honest sentence in front
+ * of the customer while he is still looking at the black box instead of leaving him to press
+ * Stop at a minute and a half, which is what the three blank calls of 2026-11-01 were.
  */
-export const PACED_RE_ASKS = 1;
-/** A announced wait shorter than this is not worth a pause; longer than that is not his day. */
+export const PICTURE_GIVE_UP_MS = 40_000;
+
+/**
+ * A call that showed no picture ends with this machine held off the next one, in seconds.
+ *
+ * The number is the longest hold the server's own machine gate (sl_start_session) ever
+ * announces, so pressing Start when this runs out is never refused: the wait the customer
+ * sees is the whole wait, not the first half of it. Holding is the point - a machine that
+ * re-dials the instant a call dies pays the dial cost again for a picture that is not
+ * arriving, and the dial is the only money this product loses on a blank screen.
+ */
+export const BLIND_RETRY_HOLD_SECONDS = 240;
+export const BLIND_RETRY_HOLD_MS = BLIND_RETRY_HOLD_SECONDS * 1000;
+/** A wait the server announced, clamped: one second is not a pause, an hour is not his day. */
 export const PACED_WAIT_MIN_MS = 5_000;
-export const PACED_WAIT_MAX_MS = 240_000;
+export const PACED_WAIT_MAX_MS = BLIND_RETRY_HOLD_MS;
 
 /** Why one ask failed, and whether asking again is the right answer to it. */
 export type StartFailure = {
@@ -70,9 +87,11 @@ export type StartFailure = {
  *
  * pReason is a gateway reason code when the account itself was refused — no minutes, no
  * plan, wrong device, an old build. Those answers do not change by repeating, so they end
- * the press at once. The exception is a refusal that arrives with a wait attached: the
+ * the press at once. A refusal that arrives with a wait attached is different in kind: the
  * server is not refusing the account, it is releasing the video line this machine used a
- * few seconds ago, and asking again after its own announced pause is the answer it gave.
+ * few seconds ago. The press still ends, because the pause is minutes long and it is the
+ * machine's owner who should decide to spend it - but the number comes back in `waitMs` so
+ * the page can hold its button for exactly that long.
  *
  * Everything else is the video line taking the call and then not producing a picture,
  * which is exactly the failure a second ask cures.
@@ -134,17 +153,17 @@ export function startTriesFor(f: StartFailure): number {
  *
  * A call that never showed a frame is not billed, so a repeat costs the account nothing
  * but a few seconds of waiting — which is still cheaper than the "cannot start" message.
- * When the server announced a wait, its number is used, and `waitsUsed` says how many of
- * them this press has already obeyed.
  *
- * The announced number is the whole point of the wait, so it is taken wherever in the
- * press it turns up: a machine that failed its first ask for a reason that had nothing to
- * do with timing can still be told "come back in two minutes" on its second, and throwing
- * that away would leave the customer with a flat failure and a wait he never saw.
+ * A wait the server announced for this machine is the one answer this press does not make
+ * itself. The number runs to minutes, and dialing again by himself while the video line is
+ * still being released is exactly the restart loop the gate exists to stop; worse, an app
+ * that re-dials on its own contradicts the sentence it just showed the customer. So the
+ * seconds travel back to the page on the failure's own `waitMs` field, and he presses again
+ * when the count reaches zero.
  */
-export function startRetryWaitMs(f: StartFailure, tryIndex: number, waitsUsed = 0, tries = START_TRIES): number | null {
+export function startRetryWaitMs(f: StartFailure, tryIndex: number, tries = START_TRIES): number | null {
   if (!f.retryable) return null;
-  if (f.waitMs !== null) return waitsUsed >= PACED_RE_ASKS ? null : f.waitMs;
+  if (f.waitMs !== null) return null;
   if (tryIndex + 1 >= tries) return null;
   return START_RETRY_WAITS_MS[tryIndex] ?? null;
 }

@@ -6,7 +6,8 @@
 // Run with:  npx esbuild --bundle --platform=node --format=cjs  …  | node
 // Nothing here touches the gateway, the camera or a minute of anyone's balance.
 import {
-  PACED_RE_ASKS, PACED_WAIT_MAX_MS, PACED_WAIT_MIN_MS,
+  BLIND_RETRY_HOLD_MS, BLIND_RETRY_HOLD_SECONDS, PACED_WAIT_MAX_MS, PACED_WAIT_MIN_MS,
+  PICTURE_GIVE_UP_MS,
   START_RETRY_WAITS_MS, START_TRIES,
   classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs,
 } from "../src/lib/start-retry";
@@ -70,35 +71,43 @@ eq("and the customer is told which part failed",
    /microphone/.test(startFailureMessage(preflightFailure("mic_not_ready"))), true);
 
 // ── The paced refusal: the gateway measured this machine and announced a wait ──
-// This is what sl_start_session now answers a machine that pressed Start seconds after
-// its last call, instead of handing out a pass that dies in six seconds. The app's job is
-// to obey that number once, not to argue with it.
+// This is what sl_start_session answers a machine that pressed Start seconds after its last
+// call, instead of handing out a pass that dies in six seconds. The wait is minutes long, and
+// the customer has just been told to wait, so the app obeys the number by holding its own
+// button - not by dialing again behind him.
 const paced = classifyStartFailure("lines_busy", "gateway refused (lines_busy)", "sess-4", 47);
-eq("an announced wait is worth asking again", paced.retryable, true);
-eq("the wait is the server's own number", startRetryWaitMs(paced, 0), 47_000);
-eq("and it is asked exactly once more", startRetryWaitMs(paced, 1, 1), null);
+eq("the server's number is carried on the refusal", paced.waitMs, 47_000);
 eq("the paced refusal still carries its session", paced.sessionId, "sess-4");
-eq("the paced press is one re-ask long", PACED_RE_ASKS, 1);
+ok("asking again later is still the right answer", paced.retryable);
+eq("but this press does not make that ask", startRetryWaitMs(paced, 0), null);
+eq("nor does any later ask in it", startRetryWaitMs(paced, 1), null);
 
-// The number is what the customer is waiting for, so it is taken wherever in the press it
-// turns up. An earlier ask that died for its own reasons does not spend the paced one.
-eq("a wait arriving on the second ask is still obeyed", startRetryWaitMs(paced, 1), 47_000);
-eq("and on the third", startRetryWaitMs(paced, 2), 47_000);
-eq("but only ever once per press", startRetryWaitMs(paced, 0, PACED_RE_ASKS), null);
+// ── The wait a blank call ends with ──────────────────────────────────────────
+// The server's machine gate holds an address for 120 s, and for 240 s once three of its
+// passes came out blank. The app's own hold is the longer of the two, so pressing Start when
+// his countdown reaches zero is never refused: the wait he was shown is the whole wait.
+eq("a blind call holds the machine for the server's longest hold", BLIND_RETRY_HOLD_MS, 240_000);
+eq("which is the four minutes the sentence promises", BLIND_RETRY_HOLD_SECONDS, 240);
+eq("and is the same ceiling an announced wait is capped at", PACED_WAIT_MAX_MS, BLIND_RETRY_HOLD_MS);
+// The give-up has to land before the check-in that would close the call itself, or the
+// customer watches the gateway do it and the engine has been running five seconds longer.
+ok("the app gives up inside its own heartbeat interval", PICTURE_GIVE_UP_MS + 5_000 <= 45_000);
+ok("and never so early that a slow first frame is called a failure", PICTURE_GIVE_UP_MS >= 30_000);
 
 // Clamped at both ends: a one-second pause is not worth a screen, and an hour is not his day.
-eq("a wait too short is raised", startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, 1), 0), PACED_WAIT_MIN_MS);
-eq("a wait too long is capped", startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, 3600), 0), PACED_WAIT_MAX_MS);
-eq("a fractional wait is counted in whole seconds", startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, 12.6), 0), 13_000);
+eq("a wait too short is raised", classifyStartFailure("lines_busy", "x", null, 1).waitMs, PACED_WAIT_MIN_MS);
+eq("a wait too long is capped", classifyStartFailure("lines_busy", "x", null, 3600).waitMs, PACED_WAIT_MAX_MS);
+eq("a fractional wait is counted in whole seconds", classifyStartFailure("lines_busy", "x", null, 12.6).waitMs, 13_000);
 
-// Nobody announced anything, so the old rules still hold.
+// Nobody announced anything, so nothing is held and the short ladder above still stands.
 for (const none of [null, 0, -5, NaN]) {
-  eq(`a refusal announcing ${String(none)} is not repeated`,
-     startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, none), 0), null);
+  eq(`a refusal announcing ${String(none)} holds nothing`,
+     classifyStartFailure("lines_busy", "x", null, none).waitMs, null);
 }
 // Only the gateway can pace a call. The video line dying by itself keeps the table above.
-eq("an engine death ignores an announced wait",
-   startRetryWaitMs(classifyStartFailure(null, "connection closed (1006)", "sess-5", 90), 0), START_RETRY_WAITS_MS[0]);
+const engineWithNumber = classifyStartFailure(null, "connection closed (1006)", "sess-5", 90);
+eq("an engine death ignores an announced wait", engineWithNumber.waitMs, null);
+eq("and keeps the short ladder", startRetryWaitMs(engineWithNumber, 0), START_RETRY_WAITS_MS[0]);
 
 // What he reads when even the paced ask fails: the server's seconds never become his words.
 const pacedWords = startFailureMessage(paced);
