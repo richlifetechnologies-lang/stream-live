@@ -52,6 +52,26 @@ const TABS: { id: TabId; label: string; sub: string; Icon: typeof Video; color: 
   },
 ];
 
+// ─── Which tab the page opens on ───────────────────────────────────────────────
+// A tab the customer chose himself is remembered on this machine and opened next time.
+// Until he chooses, the natural-voice tab is the opening tab: the cloning tab is shut to an
+// account the seller has not opened it for, and one pool of minutes means a balance can no
+// longer tell the two tabs apart, so the money cannot be the clue any more.
+const TAB_STORAGE = "ss_open_tab";
+function savedTab(): TabId | null {
+  try {
+    const v = localStorage.getItem(TAB_STORAGE);
+    return v === "video-audio" || v === "video-only" ? v : null;
+  } catch { return null; }
+}
+
+/** Remember a tab he chose himself. A shut door is never remembered: keeping the cloning tab
+ *  for an account that cannot use it would open the app on it every time this machine starts. */
+function rememberTabPick(tab: TabId, mayClone: boolean) {
+  if (tab === "video-audio" && !mayClone) return;
+  try { localStorage.setItem(TAB_STORAGE, tab); } catch { /* remembering is a convenience */ }
+}
+
 // ─── Per-tab isolated state ────────────────────────────────────────────────────
 // Each tab (Video + Audio / Video Call) is an independent workspace:
 // its own selected camera & mic, style, prompt, reference image and voice-clone
@@ -949,7 +969,7 @@ export default function StreamPage() {
   const account = useAccount();
 
   // ── Tab state ──────────────────────────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<TabId>("video-audio");
+  const [activeTab, setActiveTab] = useState<TabId>(() => savedTab() ?? "video-only");
 
   // ── Portrait / Landscape mode (persisted) ──────────────────────────────────
   const [portraitMode, setPortraitMode] = useState<boolean>(() => {
@@ -1168,6 +1188,7 @@ export default function StreamPage() {
   // voice — every answer from the cloning service costs the seller real money — so a trial
   // account reads the tab but cannot open it.
   const cloneTab = activeTab === "video-audio";
+  const mayClone = account.signedIn && account.paid && cloneOpen(account);
   const cloneLocked = cloneTab && !cloneOpen(account);
   const cloneNeedsPaid = cloneTab && account.signedIn && !account.paid;
   // The tab stays readable and every control in it is shown — greyed, and answering to
@@ -1203,24 +1224,29 @@ export default function StreamPage() {
   const videoWallet = bucketFor(account, "video");
   const videoLeft = !videoWallet || videoWallet.unlimited ? null : videoWallet.balance;
 
-  // A new account holds one thing: the free video minute. Dropping it on the
-  // video+audio tab opens the app on a bucket the customer has never had and cannot
-  // fill from a trial, and the copy sitting on that tab then tells them they have no
-  // minutes — so the tab follows the money until they pick one themselves. It re-checks
-  // on every balance read rather than once, because a trial that lands a beat after
-  // sign-in must still route them to where it actually is.
+  // A new account holds one thing: the free video minute. Dropping it on the video+audio tab
+  // opens the app on a call it can never make — a free trial buys a picture, never a cloned
+  // voice — and since the one pool its video balance reads as plenty on that tab too, so the
+  // balance alone can no longer say which of the two video tabs this account belongs on. What
+  // says it is whether cloning is open to him at all. It re-checks on every balance read rather
+  // than once, because a trial that lands a beat after sign-in must still route him, and it
+  // stands down the moment he picks a tab himself.
   const tabChosen = useRef(false);
   useEffect(() => {
     if (tabChosen.current || account.loading || !account.signedIn || account.wallets.length === 0) return;
     if (account.live) return;
-    // The walk-through moves between the three tabs itself; a router that follows the
-    // money would pull the page back under the stop being explained.
+    // The walk-through moves between the two tabs itself; a router that follows the account
+    // would pull the page back under the stop being explained.
     if (tourOpen) return;
+    if (activeTab === "video-audio" && !mayClone) { setActiveTab("video-only"); return; }
+    // An account with cloning opened goes back to the tab he is paying for, but only while he
+    // has never chosen one — a choice of his own is what savedTab remembers.
+    if (activeTab === "video-only" && mayClone && savedTab() === null) { setActiveTab("video-audio"); return; }
     const here = modalityForTab(activeTab);
     if (hasMinutes(account, here)) return;
     const elsewhere = TABS.filter(tab => tab.id !== activeTab && hasMinutes(account, modalityForTab(tab.id)));
     if (elsewhere.length === 1) setActiveTab(elsewhere[0].id);
-  }, [account, activeTab, tourOpen]);
+  }, [account, activeTab, tourOpen, mayClone]);
 
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
@@ -3044,7 +3070,8 @@ export default function StreamPage() {
               <PillRow>
                 {TABS.map(tab => (
                   <Pill key={tab.id} active={activeTab === tab.id} label={tab.label} sub={tab.sub}
-                    Icon={tab.Icon} color={tab.color} onClick={() => switchTab(tab.id)} />
+                    Icon={tab.Icon} color={tab.color}
+                    onClick={() => { rememberTabPick(tab.id, mayClone); switchTab(tab.id); }} />
                 ))}
               </PillRow>
             }
