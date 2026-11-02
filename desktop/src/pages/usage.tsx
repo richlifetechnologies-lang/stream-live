@@ -182,10 +182,10 @@ export default function UsagePage() {
 
             <Panel icon={ArrowLeftRight} title={t("CREDIT LEDGER")} count={ledger.length} onRefresh={() => void load()}>
               {ledger.length === 0 && !loading ? (
-                <Empty text={t("No credit movements yet. Your administrator tops up buckets manually.")} />
+                <Empty text={t("No credit movements yet. Your administrator adds minutes manually.")} />
               ) : (
                 <div>
-                  {header(["Date / Time", "Bucket", "Type", "Change", "Balance After", "Reason"], "1.3fr 0.9fr 0.9fr 0.8fr 0.9fr 1.2fr")}
+                  {header(["Date / Time", "Call type", "Type", "Change", "Balance After", "Reason"], "1.3fr 0.9fr 0.9fr 0.8fr 0.9fr 1.2fr")}
                   <div style={{ maxHeight: 360, overflowY: "auto" }}>
                     {ledger.map((l, i) => {
                       const delta = Number(l.delta);
@@ -211,7 +211,7 @@ export default function UsagePage() {
             </Panel>
 
             <p style={{ marginTop: 12, fontSize: 11, color: "hsl(222 25% 35%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "right" }}>
-              {t("Every figure here is minutes in one of your buckets — the same unit your administrator tops up in. Buckets never expire.")}
+              {t("Every figure here is minutes in your account — the same unit your administrator tops up in. Your minutes never expire.")}
             </p>
           </>
         )}

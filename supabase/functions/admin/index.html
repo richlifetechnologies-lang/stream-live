@@ -157,7 +157,7 @@
           <div style="flex:1 1 320px"><label>Credit an account</label><input id="quickEmail" placeholder="the email the user signed up with" /></div>
           <div style="flex:0 0 auto"><button id="quickOpen" class="primary">Open to credit</button></div>
         </div>
-        <p class="muted" style="margin:10px 0 0">Pick the bucket you are topping up — <b>Video Call</b> or <b>Video + Audio</b> — then say what the account may use. Balances are separate and never expire.</p>
+        <p class="muted" style="margin:10px 0 0">Minutes sit in <b>one pool</b> that both call tabs spend from, and never expire. A Video + Audio call drains that pool faster, because a cloned voice is metered at its own rate. Say who you are topping up and how much.</p>
         <div id="quickMsg"></div>
       </div>
 
@@ -180,9 +180,9 @@
               <label>What this account may use</label>
               <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
                 <label class="feat" style="margin:0 0 8px"><input type="checkbox" id="swVideo" /> Video Call</label>
-                <label class="feat" style="margin:0"><input type="checkbox" id="swBoth" /> Video + Audio</label>
+                <label class="feat" style="margin:0"><input type="checkbox" id="swBoth" /> Voice cloning (the Video + Audio tab)</label>
               </div>
-              <div class="muted" style="margin-top:6px">Unticked buckets are refused at call start, even if that bucket holds minutes. The app has no audio-only call any more, so that switch is gone here; if this account's record still has one, saving leaves it exactly as it is.</div>
+              <div class="muted" style="margin-top:6px">A call type he has not ticked is refused the moment he presses Start, even while his pool holds minutes. <b>Voice cloning</b> is the door to the Video + Audio tab: off, that tab goes dead on his screen — he still sees it, every control in it greys, the Start button refuses him, a call already running is closed at its next voice ask, and his saved voices are out of reach until you switch it back on. It costs him no minutes and takes nothing off his video pool. The app has no audio-only call any more, so that switch is gone here; if this account's record still has one, saving leaves it exactly as it is.</div>
             </div>
             <div>
               <label>Max concurrent sessions (devices calling at once)</label>
@@ -204,7 +204,7 @@
 
           <div style="overflow:auto;margin-top:16px">
             <table id="bucketTable">
-              <thead><tr><th>Bucket</th><th>Balance</th><th>Burn rate</th><th>Unlimited</th><th>Credited</th><th>Spent</th></tr></thead>
+              <thead><tr><th>Wallet</th><th>Balance</th><th>Burn rate</th><th>Unlimited</th><th>Credited</th><th>Spent</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -219,15 +219,15 @@
         </div>
 
         <div class="card">
-          <h2 style="font-size:14px;margin:0 0 4px">Credit minutes into a bucket</h2>
-          <p class="muted" style="margin:0 0 12px">The user paid you outside the software; you credit the bucket. Type the amount the way the meter shows it (1:44) or as plain minutes (60) — the line under the box repeats it in both units and previews the balance the click leaves. Deducting is a negative grant (corrections, refunds reversed); <b>Empty this bucket to 0:00</b> takes the exact stored amount so nothing is left over. Both write an append-only ledger row and go through <code>admin-api</code>. A reason is required.</p>
+          <h2 style="font-size:14px;margin:0 0 4px">Credit minutes into his pool</h2>
+          <p class="muted" style="margin:0 0 12px">The user paid you outside the software; you credit his pool. There is one pool and both call tabs spend from it, so a grant here never has to be aimed at a tab. Type the amount the way the meter shows it (1:44) or as plain minutes (60) — the line under the box repeats it in both units and previews the balance the click leaves. Deducting is a negative grant (corrections, refunds reversed); <b>Empty this wallet to 0:00</b> takes the exact stored amount so nothing is left over. Both write an append-only ledger row and go through <code>admin-api</code>. A reason is required.</p>
           <div class="row" style="margin-bottom:14px;align-items:center">
             <div style="flex:1 1 260px"><label style="margin-top:0">Or credit a whole package in one go</label><select id="gPackage"></select></div>
             <div style="flex:0 0 auto"><button id="packageBtn" style="margin-top:20px">Credit this package</button></div>
             <div class="muted" id="gPackageHint" style="flex:1 1 200px;margin-top:20px"></div>
           </div>
           <div class="row">
-            <div><label>Credit which bucket</label><select id="gModality"></select></div>
+            <div><label>Credited to</label><select id="gModality"></select></div>
             <div><label>Time to add — type 1:44 (1 min 44 sec) or 60 (60 min)</label><input id="gMinutes" type="text" inputmode="numeric" autocomplete="off" placeholder="1:44" style="width:110px" /></div>
             <div style="flex:2 1 260px"><label>Reason (required — audit trail)</label><input id="gReason" placeholder="e.g. Interac e-transfer ref 8842" /></div>
           </div>
@@ -237,7 +237,7 @@
             <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gClearUnlimited" /> Clear unlimited</label></div>
             <div style="flex:0 0 auto"><button id="grantBtn" class="primary">Credit minutes</button></div>
             <div style="flex:0 0 auto"><button id="deductBtn" class="danger">Deduct</button></div>
-            <div style="flex:0 0 auto"><button id="zeroBtn" class="danger">Empty this bucket to 0:00</button></div>
+            <div style="flex:0 0 auto"><button id="zeroBtn" class="danger">Empty this wallet to 0:00</button></div>
           </div>
           <div id="grantMsg"></div>
         </div>
@@ -258,7 +258,7 @@
           <h2 style="font-size:14px;margin:0 0 12px">Recent ledger rows</h2>
           <div style="overflow:auto">
             <table id="ledgerTable">
-              <thead><tr><th>When</th><th>Bucket</th><th>Kind</th><th style="text-align:right">Delta</th><th style="text-align:right">After</th><th>Reason</th></tr></thead>
+              <thead><tr><th>When</th><th>Wallet</th><th>Kind</th><th style="text-align:right">Delta</th><th style="text-align:right">After</th><th>Reason</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -273,10 +273,10 @@
           <button id="acctSearchBtn">Search</button>
           <button id="acctRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:8px 0 12px">Minutes sit in two separate buckets — <b>Video Call</b> and <b>Video + Audio</b> — and never expire. An account can be full in one bucket and empty in another. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
+        <p class="muted" style="margin:8px 0 12px">Minutes sit in <b>one pool</b> and never expire: both call tabs spend from it, a Video + Audio call at its own faster rate because a cloned voice costs more to run. <b>Video</b> is what is left in that pool; <b>cloning</b> is the door to the Video + Audio tab, and off it that tab goes dead on his screen — see the tick inside the account. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
         <div style="overflow:auto">
           <table id="acctTable">
-            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video service</th><th>Video</th><th>Video + Audio</th><th>Lifetime</th><th></th></tr></thead>
+            <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video service</th><th>Video pool</th><th>Voice cloning</th><th>Lifetime</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -310,7 +310,7 @@
 
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px">Free-trial register — one trial per machine</h2>
-        <p class="muted" style="margin:0 0 12px">The free minute is granted at sign-up to the machine named in that sign-up, and a machine already listed here is refused a second one — that is the whole defence against opening new accounts on the same computer to collect the trial again. So when someone signs up on a machine in this list and arrives with nothing in their video bucket, the answer is on this row, not in a bug.</p>
+        <p class="muted" style="margin:0 0 12px">The free minute is granted at sign-up to the machine named in that sign-up, and a machine already listed here is refused a second one — that is the whole defence against opening new accounts on the same computer to collect the trial again. So when someone signs up on a machine in this list and arrives with nothing in his pool, the answer is on this row, not in a bug.</p>
         <div class="row" style="margin-bottom:10px">
           <div style="flex:1 1 340px"><label style="margin-top:0">Filter by machine id or email</label><input id="regSearch" placeholder="part of a machine id, or an address" /></div>
         </div>
@@ -332,10 +332,10 @@
           <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="onlyPending" checked /> Pending only</label></div>
           <button id="reqRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:6px 0 12px">Users file these after paying you out-of-band. Approving credits the bucket for the amount you set here — it can differ from what was requested. Rejecting keeps the note so the user sees why.</p>
+        <p class="muted" style="margin:6px 0 12px">Users file these after paying you out-of-band. Approving credits his pool for the amount you set here — it can differ from what was requested. Rejecting keeps the note so the user sees why.</p>
         <div style="overflow:auto">
           <table id="reqTable">
-            <thead><tr><th>When</th><th>User</th><th>Bucket</th><th style="text-align:right">Requested</th><th style="text-align:right">Grant</th><th>Payment</th><th>Note</th><th>Status</th><th></th></tr></thead>
+            <thead><tr><th>When</th><th>User</th><th>Asked for</th><th style="text-align:right">Requested</th><th style="text-align:right">Grant</th><th>Payment</th><th>Note</th><th>Status</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -657,7 +657,7 @@
           <div>
             <label>Trial minutes granted at sign-up</label>
             <input id="engTrialMinutes" type="number" min="0" step="0.5" />
-            <div class="muted" style="margin-top:6px">Video bucket only. A new account gets this the moment it is created, so the Minutes page already reads the trial before they press Start. Existing accounts are not topped up.</div>
+            <div class="muted" style="margin-top:6px">Into the one video pool, which both call tabs spend. A new account gets this the moment it is created, so the Minutes page already reads the trial before they press Start. Existing accounts are not topped up.</div>
           </div>
           <div>
             <label>Trial calls allowed at once, across all accounts</label>
@@ -703,10 +703,10 @@
 
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px"><span class="pill past_due">Trial pool</span> <span id="esTrialCount">0</span> accounts · served by DeCart</h2>
-        <p class="muted" style="margin:0 0 12px">These cost you nothing on fal.ai. Their free minute is already in the video bucket; when it is gone they stay here until somebody credits them.</p>
+        <p class="muted" style="margin:0 0 12px">These cost you nothing on fal.ai. Their free minute is already in his pool; when it is gone they stay here until somebody credits them.</p>
         <div style="overflow:auto">
           <table id="esTrialTable">
-            <thead><tr><th>Account</th><th>Joined</th><th>Plan</th><th>Status</th><th>Video minutes left</th><th>Minutes spent</th><th>Served by</th><th>Why it is here</th><th></th></tr></thead>
+            <thead><tr><th>Account</th><th>Joined</th><th>Plan</th><th>Status</th><th>Minutes left in the pool</th><th>Minutes spent</th><th>Served by</th><th>Why it is here</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -714,10 +714,10 @@
 
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px"><span class="pill yes">Paid service</span> <span id="esPaidCount">0</span> accounts · served by fal.ai</h2>
-        <p class="muted" style="margin:0 0 12px">Every call these accounts make bills your fal.ai workspace. Voice-only and combined calls are always served here, whatever bucket they came from.</p>
+        <p class="muted" style="margin:0 0 12px">Every call these accounts make bills your fal.ai workspace. Voice-only and combined calls are always served here, whichever call tab the minutes came from.</p>
         <div style="overflow:auto">
           <table id="esPaidTable">
-            <thead><tr><th>Account</th><th>Joined</th><th>Plan</th><th>Status</th><th>Video minutes left</th><th>Minutes spent</th><th>Served by</th><th>Why it is here</th><th></th></tr></thead>
+            <thead><tr><th>Account</th><th>Joined</th><th>Plan</th><th>Status</th><th>Minutes left in the pool</th><th>Minutes spent</th><th>Served by</th><th>Why it is here</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -728,10 +728,10 @@
     <section id="tab-burn" class="hidden">
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px">Currently effective multiplier</h2>
-        <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of that bucket, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x.</p>
+        <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of his pool, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x. Both rates are read against the same pool — the call type decides how fast it drains, not which wallet it comes from.</p>
         <div style="overflow:auto">
           <table id="currentRates">
-            <thead><tr><th>Bucket</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>Effective from (UTC)</th><th>Note</th></tr></thead>
+            <thead><tr><th>Call type</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>Effective from (UTC)</th><th>Note</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -741,7 +741,7 @@
         <h2 style="font-size:14px;margin:0 0 4px">Post a new rate</h2>
         <p class="muted" style="margin:0 0 12px">Rates are versioned history: never edit a rate that already ran, post a new row. A lease in flight keeps the multiplier it started with.</p>
         <div class="row">
-          <div><label>Bucket</label><select id="brModality"><option value="video">Video Call</option><option value="video_audio">Video + Audio</option></select></div>
+          <div><label>Call type</label><select id="brModality"><option value="video">Video Call</option><option value="video_audio">Video + Audio</option></select></div>
           <div><label>Multiplier</label><input id="brMult" type="number" min="0.05" step="0.05" value="1" /></div>
           <div><label>Effective from (UTC)</label><input id="brFrom" type="datetime-local" /></div>
           <div style="flex:2 1 240px"><label>Note</label><input id="brNote" placeholder="e.g. ElevenLabs price rise" /></div>
@@ -757,7 +757,7 @@
         </div>
         <div style="overflow:auto;margin-top:12px">
           <table id="ratesTable">
-            <thead><tr><th>Bucket</th><th>Multiplier</th><th>Effective from (UTC)</th><th>Retired</th><th>Note</th><th></th></tr></thead>
+            <thead><tr><th>Call type</th><th>Multiplier</th><th>Effective from (UTC)</th><th>Retired</th><th>Note</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -775,7 +775,7 @@
         <p class="muted" style="margin:6px 0 12px">A call pre-debits one chunk of wallet minutes and has to heartbeat before its lease expires. Force-ending one settles what was actually used and refunds the rest, so nothing is double-billed. This is how you stop a runaway meter.</p>
         <div style="overflow:auto">
           <table id="sessTable">
-            <thead><tr><th>User</th><th>Video service</th><th>Tab</th><th>Bucket</th><th>Device</th><th>Started</th><th>Lease window</th><th style="text-align:right">Real min</th><th style="text-align:right">Billed min</th><th style="text-align:right">Prepaid</th><th></th></tr></thead>
+            <thead><tr><th>User</th><th>Video service</th><th>Tab</th><th>Call type</th><th>Device</th><th>Started</th><th>Lease window</th><th style="text-align:right">Real min</th><th style="text-align:right">Billed min</th><th style="text-align:right">Prepaid</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -800,7 +800,7 @@
         <div class="grid4" id="histStats"></div>
         <div style="overflow:auto;margin-top:12px">
           <table id="histTable">
-            <thead><tr><th>User</th><th>Video service</th><th>Bucket</th><th>Device</th><th>Started</th><th>Ended</th><th>On air</th><th style="text-align:right">Billed</th><th style="text-align:right">Held</th><th></th></tr></thead>
+            <thead><tr><th>User</th><th>Video service</th><th>Call type</th><th>Device</th><th>Started</th><th>Ended</th><th>On air</th><th style="text-align:right">Billed</th><th style="text-align:right">Held</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -820,13 +820,13 @@
         </div>
         <p class="muted" style="margin:6px 0 12px">
           <b>Real time</b> is how long the account actually streamed, measured from the first video frame.
-          <b>Minutes used</b> is what came out of the bucket. The gap between them is the burn rate, and it is
+          <b>Minutes used</b> is what came out of his pool. The gap between them is the burn rate, and it is
           deliberately invisible to the customer — this tab is the only place the two are shown side by side.
         </p>
         <div class="grid4" id="airStats"></div>
         <div style="overflow:auto;margin-top:12px">
           <table id="airTable">
-            <thead><tr><th>User</th><th>Bucket</th><th style="text-align:right">Calls</th><th style="text-align:right">Real time</th><th style="text-align:right">Minutes used</th><th style="text-align:right">Rate</th><th>Last streamed</th></tr></thead>
+            <thead><tr><th>User</th><th>Call type</th><th style="text-align:right">Calls</th><th style="text-align:right">Real time</th><th style="text-align:right">Minutes used</th><th style="text-align:right">Rate</th><th>Last streamed</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -885,11 +885,11 @@
           <h2 style="font-size:14px;margin:0">Pool usage</h2>
           <button id="poolRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:6px 0 12px">Lifetime minutes across every bucket — granted versus actually burned.</p>
+        <p class="muted" style="margin:6px 0 12px">Lifetime minutes across every wallet — granted versus actually burned.</p>
         <div class="grid4" id="poolCards"></div>
         <div style="overflow:auto;margin-top:14px">
           <table id="poolTable">
-            <thead><tr><th>Bucket</th><th style="text-align:right">Outstanding</th><th style="text-align:right">Credited</th><th style="text-align:right">Spent</th><th>Accounts</th></tr></thead>
+            <thead><tr><th>Wallet</th><th style="text-align:right">Outstanding</th><th style="text-align:right">Credited</th><th style="text-align:right">Spent</th><th>Accounts</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -1073,6 +1073,13 @@
   // vocabulary for READING: wallets, ledger rows, rates and packages that were priced before
   // the audio tab went keep their stored numbers, and nothing here writes a silent zero.
   const CALL_MODALITIES = ["video", "video_audio"];
+  // One pool: a Video + Audio call pays its minutes out of the video wallet, so that wallet is
+  // the only place minutes go in. A bucket the panel offers but no call reads is a trap, so the
+  // credit box states the one bucket instead of offering a choice.
+  // The wallets listed against an account: the pool, plus a legacy audio-only row only while
+  // some account still holds something in it. The old Video + Audio wallet is no longer a
+  // bucket — its money was carried to the pool by migration 20261101120000.
+  const POCKET_BUCKETS = ["video", "audio"];
 
   // Where his own connection came from, printed beside his address. A flag glyph where the
   // browser draws one — and always the code and the country name too, because a Windows
@@ -1467,7 +1474,7 @@
         pinned: s?.engine_override ?? null,
         plan: s ? (plans[s.plan_id]?.name || s.plan_id) : "",
         status: s?.status || "none",
-        videoLeft: w.video?.unlimited ? null : N(w.video?.balance),
+        videoLeft: (w.video?.unlimited || w.video_audio?.unlimited) ? null : N(w.video?.balance) + N(w.video_audio?.balance),
         spent: MODALITIES.reduce((a, m) => a + N(w[m]?.total_spent), 0),
         credited: MODALITIES.reduce((a, m) => a + N(w[m]?.total_credited), 0),
       };
@@ -1485,8 +1492,14 @@
     $("acctTable").querySelector("tbody").innerHTML = shown.map((p) => {
       const s = subOf[p.id];
       const w = wallet[p.id] || {};
+      // The pool column shows any minutes still parked in the retired Video + Audio wallet
+      // too, so it cannot read short on a database the fold migration has not reached.
+      const stray = w.video_audio;
+      const poolWallet = (!!stray && (!!stray.unlimited || N(stray.balance) > 0))
+        ? { ...(w.video || {}), unlimited: !!(w.video?.unlimited || stray.unlimited), balance: N(w.video?.balance) + N(stray.balance) }
+        : w.video;
       const cell = (m, on) => {
-        const b = w[m];
+        const b = m === "video" ? poolWallet : w[m];
         const amount = b ? bucket(b) : '<span class="mono muted">0</span>';
         return on === false ? amount + ' <span class="pill no">off</span>' : amount;
       };
@@ -1512,7 +1525,7 @@
         <td>${s ? `<span class="pill ${s.status}">${s.status}</span>` + (bought ? "" : '<div class="muted">every new account gets this</div>') : "—"}</td>
         <td><span class="pill ${ENGINE_PILL[eng]}">${eng === "fal" && !bought ? "Paid service (nothing bought)" : ENGINE_LABEL[eng]}</span>${pin}<div class="muted">${esc(whyOf(p.id, p.created_at))}</div>${devOf(p.id, p.created_at)}${netOf(p)}</td>
         <td>${cell("video", s?.video_enabled)}</td>
-        <td>${cell("video_audio", s?.video_audio_enabled)}</td>
+        <td>${s?.video_audio_enabled === false ? '<span class="pill no">cloning off</span>' : '<span class="pill yes">cloning on</span>'}</td>
         <td class="muted mono">+${mins1(credited)} / −${mins1(spent)}</td>
         <td style="white-space:nowrap"><button data-act="open" data-id="${p.id}" class="primary">Credit minutes</button>${ADMIN_OF[p.id] ? "" : ` <button data-act="del-acct" data-id="${p.id}" class="danger">Delete</button>`}</td></tr>`;
     }).join("") || '<tr><td colspan="8" class="muted">No account matches that filter.</td></tr>';
@@ -1749,18 +1762,40 @@
       const w = byMod[m] || {};
       return !!w.unlimited || N(w.balance) > 0 || N(w.total_credited) > 0 || N(w.total_spent) > 0;
     };
-    const shownMods = MODALITIES.filter((m) => CALL_MODALITIES.includes(m) || holdsSomething(m));
-    $("bucketTable").querySelector("tbody").innerHTML = shownMods.map((m) => {
+    // The pool is the video wallet, and the retired Video + Audio wallet has no row of its own
+    // here any more. But this panel can reach a database before migration 20261101120000 has
+    // run on it, and until it does somebody's minutes can still be sitting in that old wallet.
+    // So its remaining figure is added to the pool line and named — the panel hides nobody's
+    // money, and still offers no credit target that no call reads.
+    const stray = byMod.video_audio;
+    const hasStray = !!stray && (!!stray.unlimited || N(stray.balance) > 0);
+    const poolRow = (m) => {
       const w = byMod[m] || { balance: 0, unlimited: false, total_credited: 0, total_spent: 0 };
-      return `<tr><td>${MOD_LABEL[m]}${CALL_MODALITIES.includes(m) ? "" : ' <span class="muted" title="The app has no audio-only call, so nobody can spend these.">· no call can spend this</span>'}</td><td>${bucket(w)}</td><td class="mono">${mins(w.burn_rate ?? 1)}x</td>
+      if (m !== "video" || !hasStray) return w;
+      return {
+        ...w,
+        unlimited: !!(w.unlimited || stray.unlimited),
+        balance: N(w.balance) + N(stray.balance),
+        total_credited: N(w.total_credited) + N(stray.total_credited),
+        total_spent: N(w.total_spent) + N(stray.total_spent),
+      };
+    };
+    const shownMods = POCKET_BUCKETS.filter((m) => m === "video" || holdsSomething(m));
+    $("bucketTable").querySelector("tbody").innerHTML = shownMods.map((m) => {
+      const w = poolRow(m);
+      const tip = m === "video" ? "Both call tabs spend from this wallet." : "The app has no audio-only call, so nobody can spend these.";
+      const note = m === "video"
+        ? `· both call tabs spend from here${hasStray ? ` <span class="pill warn">incl. ${clock(stray.balance)} left in the retired Video + Audio wallet — run migration 20261101120000 to move it into the pool</span>` : ""}`
+        : '· no call can spend this';
+      return `<tr><td>${MOD_LABEL[m]} <span class="muted" title="${tip}">${note}</span></td><td>${bucket(w)}</td><td class="mono">${mins(w.burn_rate ?? 1)}x</td>
         <td>${w.unlimited ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
         <td class="mono">${mins1(w.total_credited)}</td><td class="mono">${mins1(w.total_spent)}</td></tr>`;
     }).join("");
 
-    // Both boxes open empty now. Each used to sit on whatever its list happened to start
-    // with, so one blind click sent minutes to the first bucket or the first package.
-    $("gModality").innerHTML = '<option value="">pick a bucket</option>'
-      + CALL_MODALITIES.map((m) => `<option value="${m}">${MOD_LABEL[m]}</option>`).join("");
+    // One pool leaves exactly one bucket to credit, so the box states it instead of asking:
+    // a dropdown with one answer and an empty first entry is a click that buys nothing.
+    $("gModality").innerHTML = '<option value="video">Video Call pool (both call tabs)</option>';
+    $("gModality").value = "video";
     $("gPackage").innerHTML = '<option value="">pick a package</option>'
       + PLAN_ROWS.filter((p) => p.active).map((p) => {
       const parts = CALL_MODALITIES.filter((m) => N(p[`${m}_minutes`]) > 0).map((m) => `${mins(N(p[`${m}_minutes`]))} ${MOD_LABEL[m]}`).join(" · ");
@@ -1820,9 +1855,9 @@
     if (!CUR) return;
     msg("detMsg", "");
     const allowed = [
-      $("swVideo").checked && "Video Call",
-      $("swBoth").checked && "Video + Audio",
-    ].filter(Boolean);
+      $("swVideo").checked ? "Video calls" : "no video calls",
+      $("swBoth").checked ? "voice cloning open" : "voice cloning closed — the Video + Audio tab is dead to him, and a call already running closes at its next voice ask",
+    ].join(", and ");
     const { data: saved, error } = await sb.from("subscriptions").update({
       video_enabled: $("swVideo").checked,
       audio_enabled: ACCT_AUDIO_KEEP,
@@ -1831,7 +1866,7 @@
     }).eq("user_id", CUR.user_id).select("user_id");
     if (error) return msg("detMsg", error.message);
     if (!saved || !saved.length) return msg("detMsg", "That account has no subscription row yet — create one below first, then the switches will stick.");
-    msg("detMsg", "Saved. This account may now use: " + (allowed.length ? allowed.join(", ") : "nothing — every bucket is switched off."), "ok");
+    msg("detMsg", "Saved. This account may now use: " + allowed + ".", "ok");
     await openAccount(CUR.user_id);
   };
 
@@ -1890,7 +1925,7 @@
     if ($("gUnlimited").checked) unlimited = true;
     if ($("gClearUnlimited").checked) unlimited = false;
     const modality = $("gModality").value;
-    if (!modality) throw new Error("Pick which bucket this is for. Nothing is chosen yet, so nothing was moved.");
+    if (!modality) throw new Error("Pick which wallet this is for. Nothing is chosen yet, so nothing was moved.");
     return { action: "grant", userId: CUR.user_id, modality, minutes, reason, unlimited };
   }
 
@@ -1921,7 +1956,7 @@
       // The first real minute is the one-way door: from now on this account's
       // video is served by the paid service, so say it while it is happening.
       const flip = !wasPaid && N(payload.minutes) > 0 ? " It is now on the paid video service for good." : "";
-      msg("grantMsg", `Granted. ${res.unlimited ? "Bucket is unlimited." : "New balance " + clock(res.balance) + " on the meter."}${flip}`, "ok");
+      msg("grantMsg", `Granted. ${res.unlimited ? "Wallet is unlimited." : "New balance " + clock(res.balance) + " on the meter."}${flip}`, "ok");
       delete PAID_OF[CUR.user_id];
       await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions(), loadAirtime()]);
     } catch (err) { msg("grantMsg", err.message); }
@@ -1933,7 +1968,7 @@
     try { payload = grantPayload(-1); } catch (err) { return msg("grantMsg", err.message); }
     const w = bucketOf(payload.modality);
     const bal = N(w?.balance);
-    const meter = w?.unlimited ? "this bucket is unlimited" : `meter ${clock(bal)} → ${clock(Math.max(0, bal - Math.abs(payload.minutes)))}`;
+    const meter = w?.unlimited ? "this wallet is unlimited" : `meter ${clock(bal)} → ${clock(Math.max(0, bal - Math.abs(payload.minutes)))}`;
     const why = `${MOD_LABEL[payload.modality]} −${mins2(Math.abs(payload.minutes))} min (= ${clock(Math.abs(payload.minutes))}) · ${meter} · ${payload.reason}`;
     if (!confirm("Deduct from " + CUR.email + "?\n\n" + why + "\n\nThis cannot be undone from the panel — a correction is a new ledger row.")) return;
     try {
@@ -1948,13 +1983,13 @@
   $("zeroBtn").onclick = async () => {
     if (!CUR) return msg("grantMsg", "Open an account first.");
     const m = $("gModality").value;
-    if (!m) return msg("grantMsg", "Pick which bucket to empty. Nothing is chosen yet, so nothing was emptied.");
+    if (!m) return msg("grantMsg", "Pick which wallet to empty. Nothing is chosen yet, so nothing was emptied.");
     const w = bucketOf(m);
     if (w?.unlimited) return msg("grantMsg", MOD_LABEL[m] + " is unlimited on this account — clear unlimited first, then empty it.");
     const bal = N(w?.balance);
     if (bal <= 0) return msg("grantMsg", MOD_LABEL[m] + " is already at 0:00 on this account.", "ok");
-    const reason = ($("gReason").value.trim() || "bucket emptied by hand");
-    if (!confirm(`Empty the ${MOD_LABEL[m]} bucket on ${CUR.email}?\n\nThe meter reads ${clock(bal)}; all ${mins2(bal)} min come off and it lands on exactly 0:00.\n\nReason: ${reason}`)) return;
+    const reason = ($("gReason").value.trim() || "wallet emptied by hand");
+    if (!confirm(`Empty the ${MOD_LABEL[m]} wallet on ${CUR.email}?\n\nThe meter reads ${clock(bal)}; all ${mins2(bal)} min come off and it lands on exactly 0:00.\n\nReason: ${reason}`)) return;
     try {
       const res = await api({ action: "grant", userId: CUR.user_id, modality: m, minutes: -bal, reason, unlimited: null });
       msg("grantMsg", `Emptied. New balance ${clock(res.balance)} on the meter.`, "ok");
@@ -1975,7 +2010,10 @@
     if (!p) return ($("gPackageHint").textContent = "");
     const amounts = planMinutes(p);
     const parts = CALL_MODALITIES.filter((m) => amounts[m] > 0).map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`);
-    $("gPackageHint").textContent = parts.length ? parts.join(" · ") : "no minutes attached — set them on the Plans tab";
+    const pool = amounts.video + (amounts.video_audio || 0);
+    $("gPackageHint").textContent = parts.length
+      ? `${parts.join(" · ")} — ${mins(pool)} min into the one pool both tabs spend`
+      : "no minutes attached — set them on the Plans tab";
   }
 
   $("gPackage").onchange = showPackageHint;
@@ -1985,23 +2023,25 @@
     const p = PLAN_ROWS.find((x) => x.id === $("gPackage").value);
     if (!p) return msg("grantMsg", "Pick which package to credit. Nothing is chosen yet, so nothing was credited.");
     const amounts = planMinutes(p);
-    const mods = CALL_MODALITIES.filter((m) => amounts[m] > 0);
-    if (!mods.length) return msg("grantMsg", `“${p.name}” has no minutes a call can use. Set them on the Plans tab.`);
+    // One pool: the package's two figures are the same spendable money, so selling it credits
+    // one bucket with both added together and the reason names both halves.
+    const pool = amounts.video + (amounts.video_audio || 0);
+    if (pool <= 0) return msg("grantMsg", `“${p.name}” has no minutes a call can use. Set them on the Plans tab.`);
     const reason = $("gReason").value.trim() || `Package ${p.name} purchased`;
     // A package priced before the audio-only tab went may still carry that bucket. Selling it
     // must not hand a buyer minutes he cannot spend, so they are left out — and said out loud.
     const dead = amounts.audio > 0
       ? `\n\nNote: this package also carries ${mins(amounts.audio)} Audio Call minutes. There is no audio-only call in the app, so those are NOT credited.`
       : "";
-    if (!confirm(`Credit ${CUR.email}\n\n${mods.map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`).join("\n")}\n\nReason: ${reason}\n\nThis writes one ledger row per bucket.${dead}`)) return;
+    const split = CALL_MODALITIES.filter((m) => amounts[m] > 0)
+      .map((m) => `${mins(amounts[m])} ${MOD_LABEL[m]}`).join(" + ");
+    if (!confirm(`Credit ${CUR.email}\n\n${mins(pool)} min into the Video Call pool (both call tabs spend from it)\nfrom ${split}\n\nReason: ${reason}\n\nThis writes one ledger row.${dead}`)) return;
     $("packageBtn").disabled = true;
     const wasPaid = await paidOf(CUR.user_id);
     const done = [];
     try {
-      for (const m of mods) {
-        const res = await api({ action: "grant", userId: CUR.user_id, modality: m, minutes: amounts[m], reason });
-        done.push(`${MOD_LABEL[m]} → ${clock(res.balance)}`);
-      }
+      const res = await api({ action: "grant", userId: CUR.user_id, modality: "video", minutes: pool, reason });
+      done.push(`${MOD_LABEL.video} → ${clock(res.balance)}`);
       msg("grantMsg", `Credited “${p.name}”: ${done.join(", ")}.${wasPaid ? "" : " This account is now on the paid video service for good."}`, "ok");
       delete PAID_OF[CUR.user_id];
       await Promise.all([openAccount(CUR.user_id), loadAccounts(), loadSessions(), loadAirtime()]);
@@ -3633,7 +3673,7 @@
   };
 
   async function endSession(sessionId) {
-    if (!confirm("Force-end this session now? The prepaid chunk is settled and refunded to the bucket.")) return;
+    if (!confirm("Force-end this session now? The prepaid chunk is settled and refunded to his pool.")) return;
     try {
       const res = await api({ action: "end_session", sessionId });
       msg("sessMsg", `Session ended${res.billed != null ? ", total billed " + mins2(res.billed) + " min" : ""}${res.balance != null ? " · balance " + clock(res.balance) : ""}.`, "ok");
@@ -3678,7 +3718,7 @@
     const totalCalls = AIR_ROWS.reduce((a, r) => a + r.calls, 0);
     $("airStats").innerHTML = [
       [clock(totalReal), "total time on air"],
-      [mins1(totalUsed) + " min", "minutes used from buckets"],
+      [mins1(totalUsed) + " min", "minutes used from their pools"],
       [new Set(AIR_ROWS.map((r) => r.user_id)).size, "accounts streamed"],
       [totalCalls, "calls metered"],
     ].map(([v, l]) => `<div class="stat"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
@@ -3717,7 +3757,7 @@
     if (b.dataset.act === "del-acct") {
       const row = ACCT_ROWS.find((p) => p.id === id);
       const email = String(row?.email || id);
-      const typed = prompt(`Deleting ${email} is permanent — the sign-in, its devices, every minute in its buckets and its whole history go with it. Type the email address to confirm.`);
+      const typed = prompt(`Deleting ${email} is permanent — the sign-in, its devices, every minute in its wallets and its whole history go with it. Type the email address to confirm.`);
       if (typed === null) return;
       if (typed.trim().toLowerCase() !== email.toLowerCase()) {
         return msg("acctMsg", "Nothing was deleted: the address you typed is not this account's.");
@@ -3912,15 +3952,27 @@
     $("poolCards").innerHTML = `
       <div class="stat"><div class="l">Minutes credited</div><div class="v" style="color:#4ade80">${mins1(sum.credited)}</div><div class="l">lifetime grants</div></div>
       <div class="stat"><div class="l">Minutes spent</div><div class="v" style="color:#c4b5fd">${mins1(sum.spent)}</div><div class="l">settled by the lease meter</div></div>
-      <div class="stat"><div class="l">Still in wallets</div><div class="v">${clock(sum.outstanding)}</div><div class="l">${sum.accounts.size} account(s), ${sum.unlimited} bucket(s) unlimited</div></div>
+      <div class="stat"><div class="l">Still in wallets</div><div class="v">${clock(sum.outstanding)}</div><div class="l">${sum.accounts.size} account(s), ${sum.unlimited} wallet(s) unlimited</div></div>
       <div class="stat"><div class="l">Burn ratio</div><div class="v">${sum.credited > 0 ? Math.round((sum.spent / sum.credited) * 100) + "%" : "—"}</div><div class="l">of granted minutes used</div></div>`;
-    // Same rule as the account screen: the audio-only bucket appears here only while some
-    // account still holds something in it, so a figure that used to be reported never simply
-    // disappears from the totals he reads.
-    $("poolTable").querySelector("tbody").innerHTML = MODALITIES
-      .filter((m) => CALL_MODALITIES.includes(m) || byMod[m].accounts.size > 0)
+    // Same rule as the account screen: the pool is always listed, the audio-only row only
+    // while some account still holds something in it, so a figure that used to be reported
+    // never simply disappears from the totals he reads.
+    // The retired Video + Audio wallet is not a row of its own any more. Whatever still sits
+    // there joins the pool line rather than vanishing from it, because on a database the fold
+    // migration has not reached yet that money is real and somebody's total would read short.
+    const stray = byMod.video_audio;
+    const hasStray = !!(stray && (stray.credited || stray.spent || stray.outstanding || stray.unlimited));
+    if (hasStray) {
+      byMod.video.credited += stray.credited;
+      byMod.video.spent += stray.spent;
+      byMod.video.outstanding += stray.outstanding;
+      byMod.video.unlimited += stray.unlimited;
+      stray.accounts.forEach((id) => byMod.video.accounts.add(id));
+    }
+    $("poolTable").querySelector("tbody").innerHTML = POCKET_BUCKETS
+      .filter((m) => m === "video" || byMod[m].accounts.size > 0)
       .map((m) => `<tr>
-      <td>${MOD_LABEL[m]}${CALL_MODALITIES.includes(m) ? "" : ' <span class="muted">· no call can spend this</span>'}</td>
+      <td>${MOD_LABEL[m]}${m === "video" ? ` <span class="muted">· both call tabs${hasStray ? " (incl. the retired Video + Audio figures)" : ""}</span>` : ' <span class="muted">· no call can spend this</span>'}</td>
       <td class="mono" style="text-align:right">${clock(byMod[m].outstanding)}${byMod[m].unlimited ? ' <span class="pill yes">' + byMod[m].unlimited + " unlimited</span>" : ""}</td>
       <td class="mono" style="text-align:right">${mins1(byMod[m].credited)}</td>
       <td class="mono" style="text-align:right">${mins1(byMod[m].spent)}</td>
@@ -4114,7 +4166,7 @@
       <textarea data-f="includes" placeholder="300 Video Call minutes&#10;Two devices at a time">${esc(v.includes)}</textarea>
       <label>What it unlocks</label>
       <div>${FEATURES.map((f) => `<label class="feat" style="margin:0 14px 6px 0"><input type="checkbox" data-f="feat_${f}" ${v.feats.includes(f) ? "checked" : ""} /> ${FEATURE_LABEL[f]}</label>`).join("")}</div>
-      <p class="phint">Those two boxes decide which call tabs a buyer holding this package may use — the app has a Video + Audio call and a Video-only call, and nothing else. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” fills both buckets in one click.</p>`;
+      <p class="phint">Those two boxes decide which call tabs a buyer holding this package may use — the app has a Video + Audio call and a Video-only call, and nothing else. The two numbers are how the package is priced and stay exactly as you set them; they are not two wallets. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” puts the whole of it into the one pool both call tabs spend from, in one click.</p>`;
   }
 
   function planEditor(p) {

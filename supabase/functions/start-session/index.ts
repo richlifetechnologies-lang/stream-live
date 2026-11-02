@@ -32,6 +32,8 @@ const STATUS_BY_REASON: Record<string, number> = {
   out_of_minutes: 402,
   no_subscription: 403,
   modality_disabled: 403,
+  clone_needs_paid_minutes: 403,
+  clone_closed: 403,
   device_revoked: 403,
   device_limit_reached: 403,
   status_canceled: 403,

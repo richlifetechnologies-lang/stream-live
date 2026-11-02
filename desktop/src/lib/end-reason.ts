@@ -3,11 +3,24 @@
 // becomes a generic sentence and the original goes to console.warn — never to
 // the screen.
 
+import { t } from "./i18n";
+
 const GENERIC_END = "Something went wrong, so the call stopped. You weren't charged for it — please try again.";
 
 const REASON_COPY: Record<string, string> = {
   out_of_minutes: "This account has no minutes to call with. Ask your administrator for more from your minutes dashboard.",
   modality_disabled: "This kind of call isn't switched on for your account. Ask your administrator to enable it.",
+  // The administrator's tick on the account, read by the customer in his own words.
+  clone_closed: "Voice cloning is closed on your account, so this kind of call can't start. Your administrator can open it again from your account.",
+  // A free minute buys an ordinary video call, not a cloned voice - the clone costs real
+  // money every time it answers, so it only ever runs on minutes that were paid for.
+  clone_needs_paid_minutes: "Voice cloning needs minutes you've paid for, not your free trial minutes. Top up your video minutes and this call opens up.",
+  // A microphone that isn't there, isn't allowed, or stopped feeding the app. Said plainly
+  // and before any call, because the one thing this used to cost was a whole billed call
+  // where nobody could hear the customer.
+  mic_not_ready: "Your microphone isn't reaching the app, so the call didn't start and nothing was used. Let the app use your microphone, then pick it in the bar at the bottom of the page and try again.",
+  // Mid-call: the picture kept moving but the voice stopped arriving.
+  clone_stopped: "The cloned voice stopped answering, so the call was closed rather than left running with no voice for the people watching. Anything not used is back in your minutes.",
   no_subscription: "Your account doesn't have a plan yet. Ask your administrator to set one up.",
   status_canceled: "Your administrator cancelled this account.",
   status_past_due: "This account is on hold for payment. Ask your administrator to sort it out.",
@@ -44,14 +57,17 @@ const REASON_COPY: Record<string, string> = {
 export function endReasonMessage(reason?: string | null, detail?: string): string {
   if (!reason) {
     if (detail) console.warn(`[end-reason] missing reason; detail: ${detail}`);
-    return GENERIC_END;
+    return t(GENERIC_END);
   }
   const copy = REASON_COPY[reason];
   if (!copy) {
     console.warn(`[end-reason] unmapped reason "${reason}"${detail ? ` (${detail})` : ""}`);
-    return GENERIC_END;
+    return t(GENERIC_END);
   }
-  return copy;
+  // Every reason line is a key in the language files too, so a customer in Spanish reads
+  // his own language where one exists and English where a sentence has not been written
+  // yet - never a blank toast in the middle of a call.
+  return t(copy);
 }
 
 // Raw infrastructure noise we must never show a user.

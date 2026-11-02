@@ -18,6 +18,20 @@ import { createClient, type Session, type SupabaseClient } from "@supabase/supab
 export type Modality = "video" | "audio" | "video_audio";
 export type TabName = "video-only" | "audio-only" | "video-audio";
 
+export const ALL_MODALITIES: Modality[] = ["video", "audio", "video_audio"];
+
+/**
+ * The buckets minutes are actually kept in. A Video + Audio call pays from the video
+ * bucket — its own rate is charged, but the pile it comes out of is shared — so there is
+ * no third pile to show, credit or ask for.
+ */
+export const POCKET_BUCKETS: Modality[] = ["video", "audio"];
+
+/** The bucket a call type is charged against. */
+export function payBucket(modality: Modality): Modality {
+  return modality === "video_audio" ? "video" : modality;
+}
+
 export type GatewayConfig = {
   supabaseUrl: string;
   supabaseAnonKey: string;
@@ -150,7 +164,19 @@ export type AccountSnapshot = {
   paid: boolean;
   planId: string | null;
   modalities: Record<Modality, boolean>;
+  /**
+   * The rate each call type is metered at, read straight off the administrator's own burn-rate
+   * table. A bucket that has never been touched used to come back priced at 1, because the only
+   * rate the snapshot carried was the one written on the bucket — so a tab could be counted down
+   * at a rate nobody had ever set.
+   */
+  rates: Partial<Record<Modality, number>>;
   maxConcurrentSessions: number;
+  /**
+   * The wallets this account actually holds minutes in. One pool: a Video + Audio call pays from
+   * the same bucket a video call does, so the pool is the only row that comes back — the money
+   * figure on screen can never be a copy of itself.
+   */
   wallets: SnapshotWallet[];
   openSessions: SnapshotSession[];
   app: { min_supported_version: string; latest_version: string | null; maintenance: boolean; maintenance_message: string | null; contact?: AdminContact | null; pay?: AdminPayment | null } | null;
@@ -168,6 +194,7 @@ type SnapshotJson = {
   modalities?: Partial<Record<Modality, boolean>>;
   max_concurrent_sessions?: number;
   wallets?: SnapshotWallet[];
+  burn_rates?: Partial<Record<Modality, number>>;
   open_sessions?: SnapshotSession[];
   app?: AccountSnapshot["app"];
 };
@@ -341,7 +368,7 @@ export class StreamLiveClient {
   }
 
   // ── Wallet ─────────────────────────────────────────────────────────────────
-  /** The three buckets, with the burn rate each one is charged at. */
+  /** The buckets minutes are kept in, with the rate each one is charged at. */
   async wallets(): Promise<Wallet[]> {
     await this.token();
     const [balRes, ratesRes] = await Promise.all([
@@ -353,18 +380,20 @@ export class StreamLiveClient {
     for (const r of ratesRes.data ?? []) rate.set(r.modality as string, Number(r.multiplier));
 
     const seen = new Set<Modality>();
-    const rows = (balRes.data ?? []).map((b) => {
-      const m = b.modality as Modality;
-      seen.add(m);
-      return {
-        modality: m,
-        balance: Number(b.balance),
-        unlimited: b.unlimited === true,
-        burnRate: rate.get(m) ?? 1,
-      } satisfies Wallet;
-    });
+    const rows = (balRes.data ?? [])
+      .filter((b) => POCKET_BUCKETS.includes(b.modality as Modality))
+      .map((b) => {
+        const m = b.modality as Modality;
+        seen.add(m);
+        return {
+          modality: m,
+          balance: Number(b.balance),
+          unlimited: b.unlimited === true,
+          burnRate: rate.get(m) ?? 1,
+        } satisfies Wallet;
+      });
     // Buckets the user has never touched do not exist yet — show them as zero.
-    for (const m of ["video", "audio", "video_audio"] as Modality[]) {
+    for (const m of POCKET_BUCKETS) {
       if (!seen.has(m)) rows.push({ modality: m, balance: 0, unlimited: false, burnRate: rate.get(m) ?? 1 });
     }
     return rows;
@@ -377,12 +406,27 @@ export class StreamLiveClient {
     if (!j) throw new Error("the account did not answer");
     if (j.ok !== true) throw new Error(String(j.error ?? "snapshot unavailable"));
 
-    const wallets = j.wallets ?? [];
+    // Each call type is metered at the rate the administrator set for it, read off the
+    // burn-rate table itself rather than off a bucket that may never have been touched.
+    const rates: Partial<Record<Modality, number>> = {};
+    for (const m of ALL_MODALITIES) {
+      const r = Number(j.burn_rates?.[m]);
+      if (Number.isFinite(r) && r > 0) rates[m] = r;
+    }
+
+    // One pool: a Video + Audio call pays from the video bucket, so that is the row that
+    // comes back. A leftover voice-cloning bucket is not shown as a third pile of minutes
+    // the customer cannot spend, and every real bucket is priced at its own rate.
     const seen = new Set<Modality>();
-    for (const w of wallets) seen.add(w.modality);
+    const wallets = (j.wallets ?? [])
+      .filter((w) => POCKET_BUCKETS.includes(w.modality))
+      .map((w) => {
+        seen.add(w.modality);
+        return { ...w, burn_rate: rates[w.modality] ?? (Number(w.burn_rate) || 1) };
+      });
     // A bucket the user has never been credited does not exist in the table yet.
-    for (const m of ["video", "audio", "video_audio"] as Modality[]) {
-      if (!seen.has(m)) wallets.push({ modality: m, balance: 0, unlimited: false, total_credited: 0, total_spent: 0, burn_rate: 1 });
+    for (const m of POCKET_BUCKETS) {
+      if (!seen.has(m)) wallets.push({ modality: m, balance: 0, unlimited: false, total_credited: 0, total_spent: 0, burn_rate: rates[m] ?? 1 });
     }
 
     return {
@@ -395,6 +439,7 @@ export class StreamLiveClient {
         video_audio: j.modalities?.video_audio === true,
       },
       maxConcurrentSessions: Number(j.max_concurrent_sessions ?? 1),
+      rates,
       wallets,
       openSessions: j.open_sessions ?? [],
       app: j.app ?? null,
@@ -875,6 +920,8 @@ export const REASON_MESSAGES: Record<string, string> = {
   device_limit_reached: "This account has reached its device limit. Remove a device first.",
   device_revoked: "This device was revoked by the administrator.",
   modality_disabled: "That call type is not enabled on your account.",
+  clone_closed: "Voice cloning is closed on your account. Your administrator can open it again.",
+  clone_needs_paid_minutes: "Voice cloning needs minutes you have paid for, not trial minutes. Ask your administrator to top up your video minutes.",
   no_subscription: "This account has no plan yet. Contact your administrator.",
   status_canceled: "This account was cancelled by the administrator.",
   status_past_due: "This account is on hold. Contact your administrator.",

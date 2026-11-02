@@ -345,6 +345,17 @@ export default function PlansPage() {
                   </div>
                 )}
 
+                {/* One pool, two call types, two rates of drain. Printed on every card, in
+                    both shelves' own accent, because the figure a customer is buying is only
+                    half the promise — how long it lasts is the other half, and the two tabs
+                    spend it at different speeds. */}
+                <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "hsl(222 40% 8%)", border: `1px solid ${acc.tint(0.18)}` }}>
+                  <p style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 50%)", margin: "0 0 6px" }}>{t("How these minutes are used")}</p>
+                  <p style={{ fontSize: 11.5, color: "hsl(222 25% 62%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.5 }}>
+                    {t("Every minute in this package lands in one pool, and both call tabs spend from it. A Video Call uses them at the normal rate; a Video + Audio call, which clones your voice, uses them faster because cloning costs more to run.")}
+                  </p>
+                </div>
+
                 {buyable !== undefined && (
                   <PrimaryButton onClick={() => openTill(shop!.page, SHELF_WAY[shelf], shelf)} style={{ marginTop: 12, alignSelf: "stretch", ...(shelf === "intl" ? { background: `linear-gradient(135deg, ${acc.solid} 0%, hsl(258 85% 58%) 100%)`, boxShadow: `0 0 26px ${acc.tint(0.3)}` } : {}) }}>
                     {shelf === "gh" ? <Smartphone style={{ width: 14, height: 14 }} /> : <CreditCard style={{ width: 14, height: 14 }} />} {t("Buy — {price}", { price: priceText ?? ghs(buyable) })}

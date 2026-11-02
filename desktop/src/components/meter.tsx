@@ -29,7 +29,7 @@ export function useTicker(periodMs = 1000): number {
  * clock comes in a pill: the number, and the drain bar under it once a call is
  * running.
  */
-export function MinuteMeter({ modality, compact = false }: { modality: Modality; compact?: boolean }) {
+export function MinuteMeter({ modality, compact = false, note }: { modality: Modality; compact?: boolean; note?: string }) {
   const account = useAccount();
   const lease = useLease();
   const now = useTicker();
@@ -102,7 +102,7 @@ export function MinuteMeter({ modality, compact = false }: { modality: Modality;
         {empty && !unlimited && !stale && (
           <span style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, fontWeight: 700, color: tone, fontFamily: "'Rajdhani',sans-serif" }}>
             <TriangleAlert style={{ width: 12, height: 12 }} />
-            {running ? t("Out of minutes — the call stops now") : t("No minutes in this bucket")}
+            {running ? t("Out of minutes — the call stops now") : t("No minutes left")}
           </span>
         )}
 
@@ -111,6 +111,14 @@ export function MinuteMeter({ modality, compact = false }: { modality: Modality;
           {t("Minutes dashboard →")}
         </button>
       </div>
+
+      {/* The one sentence about how this call type spends, before he presses Start.
+          It steps aside once a call is running so the clock does not move the page. */}
+      {note && !running && (
+        <div style={{ marginTop: 9, paddingTop: 9, borderTop: "1px dashed hsl(187 100% 52% / 0.22)" }}>
+          <p style={{ margin: 0, fontSize: 11, color: "hsl(187 60% 72%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>{note}</p>
+        </div>
+      )}
 
       {running && !unlimited && (
         <div style={{ marginTop: 9 }}>
@@ -129,7 +137,7 @@ export function MinuteMeter({ modality, compact = false }: { modality: Modality;
             margin: "5px 0 0", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase",
             color: "hsl(222 25% 46%)", fontFamily: "'Orbitron',monospace", fontVariantNumeric: "tabular-nums",
           }}>
-            {t("What is left in this bucket")}
+            {t("What is left")}
           </p>
         </div>
       )}

@@ -36,6 +36,10 @@
   .pkg .ml { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px }
   .pkg .mm { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; margin: 4px 0 }
   .pkg .mm b { font-weight: 700 }
+  .pkg .use { border-inline-start: 3px solid #24304f; background: #070d1e; border-radius: 8px;
+    padding: 9px 11px; margin-top: 12px; color: #b9c4dd; font-size: 12px; line-height: 1.5 }
+  .pkg .use b { display: block; font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 5px; font-weight: 700 }
   .ways { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)) }
   .way { cursor: pointer; text-align: start; color: inherit; font: inherit; background: #070d1e;
     border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px }
@@ -266,6 +270,8 @@ const DICT = {
     "Untitled package": "Paquete sin nombre",
     "Price not set": "Precio sin definir",
     "Minutes in this package": "Minutos en este paquete",
+    "How these minutes are used": "Cómo se usan estos minutos",
+    "Every minute in this package lands in one pool, and both call tabs spend from it. A Video Call uses them at the normal rate; a Video + Audio call, which clones your voice, uses them faster because cloning costs more to run.": "Todos los minutos de este paquete pasan a una sola reserva, y los dos tipos de llamada la gastan. La videollamada los usa a ritmo normal; la llamada de Vídeo + audio, que clona tu voz, los usa más rápido porque clonar la voz cuesta más.",
     "min": "min",
     "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este paquete todavía no tiene minutos asociados, así que no se puede pagar en esta página. Pídeselo al vendedor y lo preparará.",
     "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este paquete todavía no tiene precio, así que no se puede pagar en esta página. Pídeselo al vendedor y lo preparará.",
@@ -373,6 +379,8 @@ const DICT = {
     "Untitled package": "Pacote sem nome",
     "Price not set": "Preço não definido",
     "Minutes in this package": "Minutos neste pacote",
+    "How these minutes are used": "Como estes minutos são usados",
+    "Every minute in this package lands in one pool, and both call tabs spend from it. A Video Call uses them at the normal rate; a Video + Audio call, which clones your voice, uses them faster because cloning costs more to run.": "Todos os minutos deste pacote vão para um único saldo, e os dois tipos de chamada usam-no. Uma Videochamada usa-os à velocidade normal; uma chamada Vídeo + áudio, que clona a tua voz, usa-os mais depressa porque clonar a voz custa mais.",
     "min": "min",
     "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este pacote ainda não tem minutos associados, então não pode ser pago nesta página. Peça ao vendedor e ele providencia.",
     "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Este pacote ainda não tem preço, então não pode ser pago nesta página. Peça ao vendedor e ele providencia.",
@@ -480,6 +488,8 @@ const DICT = {
     "Untitled package": "Forfait sans nom",
     "Price not set": "Prix non défini",
     "Minutes in this package": "Minutes dans ce forfait",
+    "How these minutes are used": "Comment ces minutes sont utilisées",
+    "Every minute in this package lands in one pool, and both call tabs spend from it. A Video Call uses them at the normal rate; a Video + Audio call, which clones your voice, uses them faster because cloning costs more to run.": "Toutes les minutes de ce forfait vont dans un seul solde, et les deux types d'appel le consomment. Un Appel vidéo les utilise à vitesse normale ; un Appel Vidéo + audio, qui clone votre voix, les utilise plus vite parce que la clonation coûte plus cher.",
     "min": "min",
     "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Aucune minute n'est encore attachée à ce forfait, il ne peut donc pas être payé sur cette page. Préviens le vendeur et il s'en occupera.",
     "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "Aucun prix n'est encore fixé pour ce forfait, il ne peut donc pas être payé sur cette page. Préviens le vendeur et il s'en occupera.",
@@ -587,6 +597,8 @@ const DICT = {
     "Untitled package": "حزمة بلا اسم",
     "Price not set": "لم يُحدَّد سعر",
     "Minutes in this package": "الدقائق في هذه الحزمة",
+    "How these minutes are used": "كيف تُستخدم هذه الدقائق",
+    "Every minute in this package lands in one pool, and both call tabs spend from it. A Video Call uses them at the normal rate; a Video + Audio call, which clones your voice, uses them faster because cloning costs more to run.": "تُضاف كل دقائق هذه الحزمة إلى رصيد واحد، وينفقه نوعا المكالمة معًا. مكالمة الفيديو تستهلكها بالمعدل المعتاد، بينما مكالمة الفيديو + الصوت، التي تنسخ صوتك، تستهلكها أسرع لأن نسخ الصوت أعلى تكلفة.",
     "min": "دقيقة",
     "No minutes are attached to this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "لا دقائق مرتبطة بهذه الحزمة بعد، لذلك لا يمكن دفع ثمنها في هذه الصفحة. اطلب من البائع وسيهتم بالأمر.",
     "No price is set for this package yet, so it cannot be paid for on this page. Ask the seller and they will arrange it.": "لم يُحدَّد سعر لهذه الحزمة بعد، لذلك لا يمكن دفع ثمنها في هذه الصفحة. اطلب من البائع وسيهتم بالأمر.",
@@ -808,7 +820,9 @@ function notBuyable(p) {
  * minutes it carries. The
  * seller's marketing line, the list of what is included and the feature tags used to be
  * printed here too; he took them off every package, in the app and on this page, so the
- * buyer sees one figure and one number of minutes and nothing to read. A package the
+ * buyer sees one figure and one number of minutes and nothing to read. The one line that
+ * does print on every card is his own instruction: what the minutes pay for and why the
+ * cloning tab spends them faster. A package the
  * seller lists but cannot yet sell stays on the page and says why on the card.
  *
  * The body is a function rather than a string kept in the button, so that changing the
@@ -827,6 +841,12 @@ function cardBodyHtml(p) {
           + mods.map(([m, v]) => '<div class="mm"><span>' + tr(MOD_LABEL[m]) + "</span><b>"
             + Number(v).toLocaleString("en-US") + " " + tr("min") + "</b></div>").join("") + "</div>"
         : "")
+    // The one thing a price alone cannot say: the two call tabs spend the same minutes at
+    // different speeds. Printed on every card, on both shelves, so nobody buys a number and
+    // then discovers the rate.
+    + '<div class="use"><b>' + tr("How these minutes are used") + "</b>"
+    + tr("Every minute in this package lands in one pool, and both call tabs spend from it. A Video Call uses them at the normal rate; a Video + Audio call, which clones your voice, uses them faster because cloning costs more to run.")
+    + "</div>"
     + (why ? '<div class="why">' + tr(why) + "</div>" : "");
 }
 

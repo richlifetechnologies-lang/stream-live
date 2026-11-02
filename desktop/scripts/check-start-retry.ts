@@ -8,7 +8,7 @@
 import {
   PACED_RE_ASKS, PACED_WAIT_MAX_MS, PACED_WAIT_MIN_MS,
   START_RETRY_WAITS_MS, START_TRIES,
-  classifyStartFailure, startFailureMessage, startRetryWaitMs,
+  classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs,
 } from "../src/lib/start-retry";
 
 const fail: string[] = [];
@@ -24,7 +24,7 @@ const eq = (label: string, got: unknown, want: unknown) =>
 // later without ever sending a picture. 68 of the last 75 paid video failures on this
 // gateway died inside eight seconds of that token, so the app never even reached its own
 // thirty-second deadline.
-const dead = classifyStartFailure(null, true, "Stream Live: connection closed (1006)", "sess-1");
+const dead = classifyStartFailure(null, "Stream Live: connection closed (1006)", "sess-1");
 eq("stage", dead.stage, "engine");
 eq("carries the session for the record", dead.sessionId, "sess-1");
 const waits: number[] = [];
@@ -48,7 +48,7 @@ ok("no address of any kind", !/:\/\//.test(words));
 for (const reason of ["out_of_minutes", "modality_disabled", "no_subscription", "status_past_due",
                       "device_limit_reached", "device_revoked", "concurrent_limit", "not_entitled",
                       "maintenance", "update_required", "lines_busy"]) {
-  const f = classifyStartFailure(reason, true, `gateway refused (${reason})`, null);
+  const f = classifyStartFailure(reason, `gateway refused (${reason})`, null);
   eq(`${reason} is not repeated`, startRetryWaitMs(f, 0), null);
   const msg = startFailureMessage(f);
   ok(`${reason} gets its own sentence`, msg.length > 20 && msg !== "Something went wrong, so the call stopped. You weren't charged for it — please try again.");
@@ -56,20 +56,24 @@ for (const reason of ["out_of_minutes", "modality_disabled", "no_subscription", 
 
 // A gateway refusal that has no sentence must fall back, never leak the code.
 eq("unmapped reason stays generic",
-   startFailureMessage(classifyStartFailure("brand_new_code", true, "x", null)),
+   startFailureMessage(classifyStartFailure("brand_new_code", "x", null)),
    "Something went wrong, so the call stopped. You weren't charged for it — please try again.");
 
 // ── The two refusals that ARE worth asking about again ─────────────────────────
 ok("the gateway blaming the video service is retried",
-   startRetryWaitMs(classifyStartFailure("upstream_key", true, "x", "sess-2"), 0) === START_RETRY_WAITS_MS[0]);
+   startRetryWaitMs(classifyStartFailure("upstream_key", "x", "sess-2"), 0) === START_RETRY_WAITS_MS[0]);
+// A failure on the voice side never reached the video line, so there is nothing a second
+// ask could fix - and the app now knows that before it books anything.
 ok("a voice-side failure is not retried",
-   startRetryWaitMs(classifyStartFailure(null, false, "the voice service threw", "sess-3"), 0) === null);
+   startRetryWaitMs(preflightFailure("mic_not_ready"), 0) === null);
+eq("and the customer is told which part failed",
+   /microphone/.test(startFailureMessage(preflightFailure("mic_not_ready"))), true);
 
 // ── The paced refusal: the gateway measured this machine and announced a wait ──
 // This is what sl_start_session now answers a machine that pressed Start seconds after
 // its last call, instead of handing out a pass that dies in six seconds. The app's job is
 // to obey that number once, not to argue with it.
-const paced = classifyStartFailure("lines_busy", true, "gateway refused (lines_busy)", "sess-4", 47);
+const paced = classifyStartFailure("lines_busy", "gateway refused (lines_busy)", "sess-4", 47);
 eq("an announced wait is worth asking again", paced.retryable, true);
 eq("the wait is the server's own number", startRetryWaitMs(paced, 0), 47_000);
 eq("and it is asked exactly once more", startRetryWaitMs(paced, 1, 1), null);
@@ -83,18 +87,18 @@ eq("and on the third", startRetryWaitMs(paced, 2), 47_000);
 eq("but only ever once per press", startRetryWaitMs(paced, 0, PACED_RE_ASKS), null);
 
 // Clamped at both ends: a one-second pause is not worth a screen, and an hour is not his day.
-eq("a wait too short is raised", startRetryWaitMs(classifyStartFailure("lines_busy", true, "x", null, 1), 0), PACED_WAIT_MIN_MS);
-eq("a wait too long is capped", startRetryWaitMs(classifyStartFailure("lines_busy", true, "x", null, 3600), 0), PACED_WAIT_MAX_MS);
-eq("a fractional wait is counted in whole seconds", startRetryWaitMs(classifyStartFailure("lines_busy", true, "x", null, 12.6), 0), 13_000);
+eq("a wait too short is raised", startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, 1), 0), PACED_WAIT_MIN_MS);
+eq("a wait too long is capped", startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, 3600), 0), PACED_WAIT_MAX_MS);
+eq("a fractional wait is counted in whole seconds", startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, 12.6), 0), 13_000);
 
 // Nobody announced anything, so the old rules still hold.
 for (const none of [null, 0, -5, NaN]) {
   eq(`a refusal announcing ${String(none)} is not repeated`,
-     startRetryWaitMs(classifyStartFailure("lines_busy", true, "x", null, none), 0), null);
+     startRetryWaitMs(classifyStartFailure("lines_busy", "x", null, none), 0), null);
 }
 // Only the gateway can pace a call. The video line dying by itself keeps the table above.
 eq("an engine death ignores an announced wait",
-   startRetryWaitMs(classifyStartFailure(null, true, "connection closed (1006)", "sess-5", 90), 0), START_RETRY_WAITS_MS[0]);
+   startRetryWaitMs(classifyStartFailure(null, "connection closed (1006)", "sess-5", 90), 0), START_RETRY_WAITS_MS[0]);
 
 // What he reads when even the paced ask fails: the server's seconds never become his words.
 const pacedWords = startFailureMessage(paced);

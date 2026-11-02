@@ -3,6 +3,7 @@ import type { Session } from "@supabase/supabase-js";
 import {
   StreamLiveClient,
   deviceIdFrom,
+  payBucket,
   type CallTicket,
   type LeaseState,
   type Modality,
@@ -20,6 +21,17 @@ export type AccountState = {
   signedIn: boolean;
   email: string | null;
   wallets: Wallet[];
+  /**
+   * The rate each kind of call is metered at, read off the administrator's own table.
+   * One pool of video minutes pays for both video tabs, and the two tabs drain it at
+   * different speeds, so the price cannot live on the bucket any more.
+   */
+  rates: Partial<Record<Modality, number>>;
+  /**
+   * What the administrator has left switched on for this account. `video_audio` is the
+   * voice-cloning door: closed, the tab is still there but nothing in it works.
+   */
+  modalities: Record<Modality, boolean>;
   loading: boolean;
   /**
    * Why the last read of the account failed, in the customer's own words, or null when
@@ -39,7 +51,11 @@ export type AccountState = {
 
 export const gateway = new StreamLiveClient(GATEWAY_CONFIG);
 
-let state: AccountState = { signedIn: false, email: null, wallets: [], loading: true, error: null, paid: true, live: null };
+let state: AccountState = {
+  signedIn: false, email: null, wallets: [],
+  rates: {}, modalities: { video: true, audio: true, video_audio: true },
+  loading: true, error: null, paid: true, live: null,
+};
 const listeners = new Set<() => void>();
 
 function setState(patch: Partial<AccountState>) {
@@ -183,8 +199,23 @@ export function modalityForTab(tab: TabName): Modality {
   return "video_audio";
 }
 
+/**
+ * The minutes a kind of call is charged against, priced at that call's own rate.
+ *
+ * One pool: a Video + Audio call comes out of the video bucket, so the bucket the caller
+ * is shown is not always the one the money leaves — and the rate must come from the call
+ * type, never from the bucket it happens to be drawn from.
+ */
 export function bucketFor(state: AccountState, modality: Modality): Wallet | undefined {
-  return state.wallets.find(w => w.modality === modality);
+  const w = state.wallets.find(x => x.modality === payBucket(modality));
+  if (!w) return undefined;
+  const rate = Number(state.rates[modality]);
+  return Number.isFinite(rate) && rate > 0 ? { ...w, burnRate: rate } : w;
+}
+
+/** True while the administrator leaves voice cloning open on this account. */
+export function cloneOpen(state: AccountState): boolean {
+  return state.modalities.video_audio === true;
 }
 
 // A call is refused when its bucket cannot fund a lease; an unlimited bucket always passes.
@@ -195,7 +226,9 @@ export function hasMinutes(state: AccountState, modality: Modality): boolean {
   const w = bucketFor(state, modality);
   if (!w) return false;
   if (w.unlimited) return true;
-  return modality === "video" ? w.balance > 0 : w.balance >= 1;
+  // The floor belongs to the pool the call pays from, not to the tab: both video tabs draw
+  // the same minutes, and a stricter rule on one of them would read as a dead account.
+  return payBucket(modality) === "video" ? w.balance > 0 : w.balance >= 1;
 }
 
 // A payment that reached Paystack while this app was closed has no other witness: the
@@ -299,6 +332,8 @@ export async function refreshBalances(): Promise<void> {
     setState({
       paid: s.paid,
       error: null,
+      rates: s.rates,
+      modalities: s.modalities,
       wallets: s.wallets.map(w => ({
         modality: w.modality,
         balance: Number(w.balance),
@@ -341,9 +376,12 @@ export async function deviceId(): Promise<string> {
   return deviceIdFrom(`${navigator.platform}|${navigator.userAgent}`);
 }
 
+/** What an account that has not been read looks like: no numbers, nothing closed. */
+const BLANK = { wallets: [], rates: {} as Partial<Record<Modality, number>>, modalities: { video: true, audio: true, video_audio: true } };
+
 export async function restore(): Promise<Session | null> {
   const session = await gateway.restoreSession();
-  if (!session) { setState({ signedIn: false, email: null, wallets: [], loading: false, paid: true }); return null; }
+  if (!session) { setState({ signedIn: false, email: null, ...BLANK, loading: false, paid: true }); return null; }
   setState({ signedIn: true, email: session.user.email ?? null, loading: false });
   reportMeasuredSkew();
   await refreshBalances();
@@ -374,7 +412,7 @@ export async function signUp(email: string, password: string, displayName?: stri
 
 export async function signOut(): Promise<void> {
   await gateway.signOut();
-  setState({ signedIn: false, email: null, wallets: [], loading: false, paid: true, live: null });
+  setState({ signedIn: false, email: null, ...BLANK, loading: false, paid: true, live: null });
 }
 
 export async function requestTopup(input: {
@@ -389,5 +427,5 @@ export async function requestTopup(input: {
 }
 
 gateway.onChange((session) => {
-  if (!session) setState({ signedIn: false, email: null, wallets: [], loading: false, paid: true, live: null });
+  if (!session) setState({ signedIn: false, email: null, ...BLANK, loading: false, paid: true, live: null });
 });

@@ -103,6 +103,25 @@ export function classifyStartFailure(
 }
 
 /**
+ * A call this app refused before it ever asked the gateway for one — the microphone is not
+ * there, the voice service will not answer, the administrator has closed cloning.
+ *
+ * Nothing was booked, so nothing can be given back, and asking again in ten seconds fixes
+ * none of it. These come straight to the customer as their own sentence.
+ */
+export function preflightFailure(reason: string): StartFailure {
+  return {
+    retryable: false,
+    stage: "gateway",
+    detail: `refused before the call (${reason})`,
+    reason,
+    sessionId: null,
+    engine: null,
+    waitMs: null,
+  };
+}
+
+/**
  * How many asks this press may make. The trial line asks once; everything else keeps the
  * paid line's three, which is what the measurements behind the table above were taken on.
  */

@@ -248,7 +248,7 @@ export default function AccountPage() {
                 <span>
                   <span style={{ display: "block", fontSize: 13, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>{t("Your minutes")}</span>
                   <span style={{ display: "block", fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 2 }}>
-                    {t("Balances per bucket, your live countdown, and asking for more")}
+                    {t("What is left, your live countdown, and asking for more")}
                   </span>
                 </span>
               </span>

@@ -15,6 +15,15 @@ export function modalityForTab(tab?: string): Modality {
   return "video_audio";
 }
 
+/**
+ * Which wallet a modality actually spends minutes from — the mirror of sl_pay_bucket on the
+ * database, so a refusal read here and the charge taken there can never disagree. The modality
+ * still decides the rate; only the pool is shared.
+ */
+export function payBucket(modality: Modality): Modality {
+  return modality === "video_audio" ? "video" : modality;
+}
+
 export type Lease = {
   sessionId: string;
   modality: Modality;
@@ -80,6 +89,10 @@ export async function readAccount(userId: string, modality: Modality): Promise<A
   for (const w of wallets ?? []) {
     balances[w.modality as string] = w.unlimited ? null : Number(w.balance);
   }
+  // One pool: whatever is watching a refusal reads the figure the call would have spent from,
+  // never the row that no longer holds minutes.
+  const pool = payBucket(modality);
+  if (modality !== pool) balances[modality] = balances[pool] ?? 0;
 
   const state: AccountState = {
     ok: true,

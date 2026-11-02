@@ -10,9 +10,10 @@ import { gateway, useAccount, useLease, requestTopup } from "../lib/gateway";
 import { toUserMessage } from "../lib/end-reason";
 import { t } from "../lib/i18n";
 import type { AccountSnapshot, CheckoutInfo, Modality } from "@stream-live/client";
+import { payBucket } from "@stream-live/client";
 import { Hourglass, Radio, RefreshCw, Send, ArrowLeftRight, CircleCheck, CircleOff, CreditCard } from "lucide-react";
 
-const MODS: Modality[] = ["video", "audio", "video_audio"];
+const MODS: Modality[] = ["video", "audio"];
 
 const TAB_TO_MODALITY: Record<string, Modality> = {
   "video-only": "video",
@@ -36,9 +37,23 @@ function fmtDate(ts: string | null) {
 
 /** What a bucket holds right now: the gateway number, drained by this machine's lease. */
 function bucketRemaining(modality: Modality, snap: AccountSnapshot, live: LiveLease | null, burnRate: number, now: number): number | null {
-  if (live && live.modality === modality) return drainOf(live, burnRate, now).remaining;
+  const liveHere = leaseOn(live, modality);
+  if (liveHere) return drainOf(liveHere, rateOf(snap, liveHere, burnRate), now).remaining;
   const w = snap.wallets.find(x => x.modality === modality);
   return w?.unlimited ? null : Number(w?.balance ?? 0);
+}
+
+/**
+ * One pool: a Video + Audio call spends from the video bucket, so a lease counts against that
+ * row whichever tab opened it — and at the rate the administrator set for the call type, not
+ * the rate written on the bucket it happens to share.
+ */
+function leaseOn(live: LiveLease | null, modality: Modality): LiveLease | null {
+  return live && payBucket(live.modality) === modality ? live : null;
+}
+
+function rateOf(snap: AccountSnapshot, live: LiveLease, fallback: number): number {
+  return Number(snap.rates[live.modality]) || fallback;
 }
 
 export default function MinutesPage() {
@@ -54,7 +69,7 @@ export default function MinutesPage() {
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const [reqModality, setReqModality] = useState<Modality>("video_audio");
+  const [reqModality, setReqModality] = useState<Modality>("video");
   const [reqMinutes, setReqMinutes] = useState("60");
   const [reqReference, setReqReference] = useState("");
   const [reqNote, setReqNote] = useState("");
@@ -112,7 +127,7 @@ export default function MinutesPage() {
     return (
       <AppLayout>
         <Stage>
-          <PageHead name="Your minutes" note="Sign in to see what is left in each bucket and watch it drain while you are live." />
+          <PageHead name="Your minutes" note="Sign in to see what is left and watch it drain while you are live." />
           <Card style={{ maxWidth: 620, margin: "0 auto", textAlign: "center" }} pad={28}>
             <PrimaryButton onClick={() => setLocation("/account")} style={{ margin: "0 auto" }}>
               {t("Sign in")}
@@ -157,7 +172,7 @@ export default function MinutesPage() {
                 {totalUnlimited ? t("UNLIMITED") : countdown(total)}
               </p>
               <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 6 }}>
-                {t("minutes:seconds across all three buckets · they never expire")}
+                {t("minutes left in your account · they never expire")}
               </p>
               <div style={{ display: "flex", flexDirection: "column", gap: 8, alignItems: "flex-start", marginTop: 12 }}>
                 <Badge icon={Radio} tone={running > 0 ? "hsl(143 72% 55%)" : "hsl(222 25% 45%)"} text={running > 0 ? t("{n} live now", { n: running }) : t("no calls running")} />
@@ -185,8 +200,9 @@ export default function MinutesPage() {
         {snap?.wallets.map(w => {
           const burn = Number(w.burn_rate) || 1;
           const remaining = bucketRemaining(w.modality, snap, live, burn, now);
-          const modLive = live?.modality === w.modality ? drainOf(live, burn, now) : null;
-          const otherCall = snap.openSessions.some(s => TAB_TO_MODALITY[s.tab] === w.modality);
+          const liveHere = leaseOn(live, w.modality);
+          const modLive = liveHere ? drainOf(liveHere, rateOf(snap, liveHere, burn), now) : null;
+          const otherCall = snap.openSessions.some(s => payBucket(TAB_TO_MODALITY[s.tab] ?? "video") === w.modality);
           const allowed = snap.modalities[w.modality];
           const zero = !w.unlimited && (remaining ?? 0) < 1;
           const low = !w.unlimited && !zero && (remaining ?? 0) < 5;
@@ -206,6 +222,11 @@ export default function MinutesPage() {
                   : <Badge icon={CircleOff} tone="hsl(0 85% 62%)" text={t("switched off by your administrator")} />}
                 {(modLive || otherCall) && (
                   <Badge icon={Radio} tone={D2} text={modLive ? t("draining on this device") : t("in use on another device")} />
+                )}
+                {w.modality === "video" && (
+                  <span style={{ flexBasis: "100%", fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+                    {t("Both the Video Call tab and the Video + Audio tab spend from these minutes. The tab that clones your voice runs down faster, because a cloned voice costs more to run.")}
+                  </span>
                 )}
                 {/* Only what the administrator has put in, never what a call took
                     out - the balance above is already the answer to that. */}
@@ -235,7 +256,7 @@ export default function MinutesPage() {
           <CardTitle>{t("Calls running now")}</CardTitle>
           {running === 0 ? (
             <p style={{ fontSize: 13, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", margin: 0 }}>
-              {t("Nothing is metered at the moment. Minutes only leave your bucket while a call is open.")}
+              {t("Nothing is metered at the moment. Minutes only leave your account while a call is open.")}
             </p>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -266,7 +287,7 @@ export default function MinutesPage() {
             <form onSubmit={handleAsk} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "grid", gridTemplateColumns: "1.3fr 0.7fr", gap: 12 }}>
                 <div>
-                  <label style={labelSt}>{t("Bucket")}</label>
+                  <label style={labelSt}>{t("Call type")}</label>
                   <select value={reqModality} onChange={e => setReqModality(e.target.value as Modality)} style={inputSt}>
                     {MODS.map(m => <option key={m} value={m}>{t(MOD_LABELS[m])}</option>)}
                   </select>
@@ -292,7 +313,7 @@ export default function MinutesPage() {
               <p style={{ fontSize: 11, color: "hsl(222 25% 42%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.5 }}>
                 {shop?.enabled === true
                   ? t("Use this only when you paid outside the app — by MoMo, Bitcoin or in person. Anything bought with the Buy button needs no request; the minutes arrive on their own.")
-                  : t("Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in this bucket once they approve it and never expire.")}{" "}
+                  : t("Nothing is charged inside the app. Pay your administrator directly, then send the request — the minutes land in your account once they approve it and never expire.")}{" "}
                 <button onClick={() => setLocation("/plans")}
                   style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: D2, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", textDecoration: "underline" }}>
                   {t("See plans and prices")}

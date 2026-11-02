@@ -7,7 +7,8 @@
 //     for a voice modality, i.e. the minutes are already being metered by start-session
 //     and lease. Pass { sessionId }.
 //   * voice library work (/v1/voices, /v1/voices/add) is setup, not a call: allowed
-//     for an active account with audio or video+audio switched on, minutes or not.
+//     for an active account the administrator has left voice cloning switched on,
+//     minutes or not.
 //
 // The target path is restricted to an allow-list so this cannot become an open proxy.
 import { corsHeaders, preflight, json, fail } from "../_shared/cors.ts";
@@ -89,6 +90,19 @@ Deno.serve(async (req: Request) => {
       if (session.modality !== "audio" && session.modality !== "video_audio") {
         return fail("session does not include voice", 403, { reason: "modality_disabled" });
       }
+      // The administrator's Video + Audio tick closes this door while the call is running, not only
+      // at the next Start. A lease opened a minute ago is no reason to keep spending a voice key on
+      // an account he has just shut.
+      if (session.modality === "video_audio") {
+        const { data: sub } = await db
+          .from("subscriptions")
+          .select("video_audio_enabled")
+          .eq("user_id", user.id)
+          .maybeSingle();
+        if (sub && sub.video_audio_enabled !== true) {
+          return fail("voice cloning is closed on your account", 403, { reason: "clone_closed" });
+        }
+      }
       // The heartbeat is what keeps a call paid for. If it stopped landing — closed
       // app, lost network, a wallet that ran dry — the lease is past its TTL and
       // every voice call from here on would be billed to our keys and not to them.
@@ -99,16 +113,15 @@ Deno.serve(async (req: Request) => {
     } else {
       // Voice library: setup, not a call, so it must not require a funded bucket —
       // a user has to be able to prepare a voice before the first minute is spent.
-      // What it does require is an account the administrator has let use voice at
-      // all, so switching audio off for an account also closes its library.
-      const audio = await readAccount(user.id, "audio");
+      // What it does require is an account the administrator has let clone voices at
+      // all. It asks the cloning modality only: the audio-only switch belongs to a call
+      // type the app no longer has, and leaving it here would keep a locked account's
+      // library door open through a side nobody uses.
       const combined = await readAccount(user.id, "video_audio");
-      const allowed = (a: Awaited<ReturnType<typeof readAccount>>) => a.ok;
-      const usable = [audio, combined].find(allowed);
-      if (!usable) {
-        return fail(String(audio.message ?? audio.reason ?? "denied"), 403, {
-          reason: audio.reason,
-          balances: audio.balances,
+      if (!combined.ok) {
+        return fail(String(combined.message ?? combined.reason ?? "denied"), 403, {
+          reason: combined.reason === "modality_disabled" ? "clone_closed" : combined.reason,
+          balances: combined.balances,
         });
       }
     }

@@ -6,14 +6,14 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure, noteClockSkew } from "../lib/gateway";
+import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, cloneOpen, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure, noteClockSkew } from "../lib/gateway";
 import { stopDeadlineAt } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { Stage, PageHead, Pill, PillRow } from "../components/d2";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
-import { START_TRIES, classifyStartFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
+import { START_TRIES, classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
@@ -22,7 +22,7 @@ import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
   ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
-  Volume2, Upload, Trash2, Video, Headphones, VideoIcon, Smartphone, CameraOff, Sparkles,
+  Volume2, Upload, Trash2, Video, Headphones, VideoIcon, Smartphone, CameraOff, Sparkles, Lock,
 } from "lucide-react";
 import { GuidedTour, onTourRequested, tourSeen, tourStops } from "../components/guided-tour";
 import { encode, decode } from "@msgpack/msgpack";
@@ -231,11 +231,14 @@ class AudioSyncPipeline {
   onUpdate?: (delay: number, vu: number, measured: boolean, live: boolean, state: GateState,
               cableVu: number, reason: SyncReason) => void;
 
-  async start(videoEl: HTMLVideoElement, micDeviceId?: string):
+  // `mic` is a microphone this page already asked for and proved. Handing it in keeps a
+  // call from opening a second one — two asks of the same device is how a pre-flight
+  // check used to cost the customer the input he had just been shown working.
+  async start(videoEl: HTMLVideoElement, micDeviceId?: string, mic: MediaStream | null = null):
     Promise<{ engine: MediaStream; cable: MediaStream } | null> {
     this.videoEl = videoEl;
     try {
-      this.micStream = await navigator.mediaDevices.getUserMedia({
+      this.micStream = mic ?? await navigator.mediaDevices.getUserMedia({
         audio: micAudioConstraints(micDeviceId, 48000),
         video: false,
       });
@@ -391,6 +394,47 @@ const CLONE_IDLE_MS       = 5000; // a piece holding no speech at all is thrown 
 // wait has a deadline: the piece is abandoned and his next words are tried again.
 const CLONE_SEND_MS       = 6000;
 
+// A cloning call is not on air until the cloned voice has answered once, because a call
+// whose voice never arrived is not the call the customer bought. The hold is bounded so a
+// man who simply has not spoken yet still pays like anyone else, and it is cut short near
+// the minute mark so the metering stamp always lands well before the gateway's own
+// picture-less deadline.
+const CLONE_FIRST_AIR_MS   = 30_000;
+const CLONE_AIR_HARD_MS    = 60_000;
+
+/**
+ * The microphone, asked for and proven before anything is booked.
+ *
+ * A clone that is handed a dead or denied input records silence for the whole call: the
+ * picture moves, the meter runs, and nobody hears him. This costs no minutes, takes one
+ * permission answer, and the stream it returns is the very one the call then uses.
+ */
+async function openMicrophone(deviceId: string | undefined): Promise<MediaStream> {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: micAudioConstraints(deviceId, 48000), video: false,
+  });
+  const track = stream.getAudioTracks()[0];
+  if (!track || track.readyState !== "live") {
+    stream.getTracks().forEach(t => t.stop());
+    throw new Error("microphone produced no live input");
+  }
+  return stream;
+}
+
+/**
+ * The free ask that proves the voice service will answer this account, before a call is
+ * booked: it lists the voices. No lease, no inference, nothing billed. Null means the door
+ * opened; anything else is the reason it did not.
+ */
+async function voiceDoorReason(): Promise<string | null> {
+  try {
+    const res = await gateway.voice("/v1/voices", undefined, { method: "GET" });
+    if (res.ok) return null;
+    const j = await res.json().catch(() => null) as { reason?: string } | null;
+    return j?.reason || "upstream_key";
+  } catch { return "upstream_key"; }
+}
+
 class VoiceCloningEngine {
   private recorder:   MediaRecorder | null = null;
   private audioCtx:   AudioContext  | null = null;
@@ -428,6 +472,9 @@ class VoiceCloningEngine {
   // microphone back on the cable in the middle of a pause.
   spokeAt    = 0;
   answeredAt = 0;
+  // Fires once, on the first cloned audio that actually reaches the cable. A cloning call
+  // is not on air before that, so this is what releases the held money clock.
+  onFirstAnswer?: () => void;
 
   alive(graceSeconds: number): boolean {
     if (this.answeredAt >= this.spokeAt) return true;
@@ -596,9 +643,12 @@ class VoiceCloningEngine {
       const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
       const src = this.audioCtx.createBufferSource();
       src.buffer = decoded; src.connect(this.voiceBus!); src.start(playAt);
-      // Answered: the clock that decides whether his microphone has to come back to the
-      // cable is reset here, the moment real cloned audio is on its way to it.
+      // Answered: the watchdog that decides whether this call is still worth running is
+      // reset here, the moment real cloned audio is on its way to the cable. The first
+      // time it happens is also the moment the call goes on air and starts being metered.
+      const first = this.answeredAt === 0;
       this.answeredAt = Date.now();
+      if (first) this.onFirstAnswer?.();
       this.nextPlayAt = playAt + decoded.duration;
       // Level is read through the player, not off these samples. Measuring the audio
       // that merely arrived drew a dancing wave over total silence whenever the engine
@@ -926,7 +976,7 @@ export default function StreamPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStarting, setIsStarting]  = useState(false);
   const [isClosing, setIsClosing]    = useState(false);
-  const [connStep, setConnStep]       = useState<"auth"|"engine"|"retry"|null>(null);
+  const [connStep, setConnStep]       = useState<"mic"|"auth"|"engine"|"retry"|null>(null);
   // Seconds left on a wait the gateway announced for this machine. Null when nobody has
   // asked us to hold, so the overlay keeps its old wording for a plain retry.
   const [pacingSeconds, setPacingSeconds] = useState<number | null>(null);
@@ -1103,15 +1153,32 @@ export default function StreamPage() {
   const vcamCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const vcamTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const vcamOnRef     = useRef(false);
+  // Whether the call in flight was opened with cloning. Read by the money clock before the
+  // engine object exists, because the picture can reach the screen first.
+  const cloneThisCallRef = useRef(false);
+  // The meter held while a cloning call waits for its first cloned answer.
+  const airHoldRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
   const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
+
+  // ─── Who may clone a voice ───────────────────────────────────────────────────
+  // One tab does it, and two separate things can say no: the administrator's tick on the
+  // account, and this page's own switch. A free trial minute buys a picture, never a cloned
+  // voice — every answer from the cloning service costs the seller real money — so a trial
+  // account reads the tab but cannot open it.
+  const cloneTab = activeTab === "video-audio";
+  const cloneLocked = cloneTab && !cloneOpen(account);
+  const cloneNeedsPaid = cloneTab && account.signedIn && !account.paid;
+  // The tab stays readable and every control in it is shown — greyed, and answering to
+  // nothing. A customer who cannot see what he is missing has no reason to ask for it.
+  const cloneDead = cloneLocked || cloneNeedsPaid;
 
   // The free minute is the one thing in the app that cannot be lost, and the one thing
   // customers leave sitting there: nothing about it expires, and nothing on screen said
   // so. Shown only on a bucket this tab can actually start a call from, and only while
   // the account has never held anything but the trial — a paying customer has heard it.
-  const trialWaiting = account.signedIn && !account.paid && !account.live &&
+  const trialWaiting = account.signedIn && !account.paid && !account.live && !cloneNeedsPaid &&
     hasMinutes(account, modalityForTab(activeTab));
 
   // The same question asked across every bucket rather than the visible one: the tour
@@ -1538,13 +1605,12 @@ export default function StreamPage() {
     if (v) v.muted = true;
   }, [connStatus]);
 
-  // With cloning on, the cable carries the persona voice — but only while the voice service
-  // is actually answering him. A clone that went quiet used to leave the cable carrying
-  // nothing at all, because this effect had taken the microphone off it for the whole call
-  // and never looked again. So the microphone stands down while his words are being
-  // answered, and comes straight back if an answer never lands: sound out beats silence out,
-  // the same rule the automatic microphone follows. A pause in the conversation is not a
-  // fault, so it does not move the microphone - only an unanswered send does.
+  // With cloning on, the cable carries the persona voice — and nothing else. A clone that
+  // used to go quiet here simply put his raw microphone back on the cable, which let the
+  // call run on for minutes with a voice nobody bought. That trade is closed: a word he
+  // speaks that the service never answers ends the call instead, and everything the call had
+  // set aside but not used comes back. A pause in the conversation is not a fault, so it
+  // moves nothing — only an unanswered send does.
   const [cloneAlive, setCloneAlive] = useState(false);
   useEffect(() => {
     if (!vcActive) { setCloneAlive(false); return; }
@@ -1559,14 +1625,14 @@ export default function StreamPage() {
   useEffect(() => {
     const el = micRouteRef.current;
     if (!el) return;
-    if (vcActive && cloneAlive) { try { el.pause(); } catch { /* ignore */ } }
+    if (vcActive) { try { el.pause(); } catch { /* ignore */ } }
     else if (audioRouteOn) {
       if (micRouteStreamRef.current && el.srcObject !== micRouteStreamRef.current) {
         el.srcObject = micRouteStreamRef.current;
       }
       void el.play().catch(() => { /* nothing attached yet */ });
     }
-  }, [vcActive, cloneAlive, audioRouteOn, connStatus]);
+  }, [vcActive, audioRouteOn, connStatus]);
 
   // With routing OFF the clone already reaches your speakers through the audio
   // element; monitor mode only adds local playback when the clone is on the cable.
@@ -1627,6 +1693,29 @@ export default function StreamPage() {
 
   useEffect(() => () => micCheckRef.current?.stop(), []);
 
+  // ─── The money clock on a cloning call ───────────────────────────────────────
+  // A video call is metered from its first frame. A cloning call waits one step longer: the
+  // first frame only means the picture arrived, and the thing the customer paid for on this
+  // tab is the voice. The clock is held until the cloned voice actually answers, and a call
+  // that is still waiting after a bounded pause is metered like any other video call — a man
+  // who has simply not spoken yet is on air, and owes for it.
+  const releaseAirHold = useCallback(() => {
+    if (airHoldRef.current) { clearTimeout(airHoldRef.current); airHoldRef.current = null; }
+  }, []);
+
+  const markAirWhenReady = useCallback(() => {
+    if (!cloneThisCallRef.current) { markMedia(); return; }
+    const cloner = clonerRef.current;
+    if (cloner && cloner.answeredAt > 0) { releaseAirHold(); markMedia(); return; }
+    if (airHoldRef.current) return;
+    // Never let the hold run past the gateway's own picture-less deadline, or the server
+    // closes a call that was working and the customer reads that as a fault.
+    const lived = account.live ? Date.now() - account.live.startedAt : 0;
+    const hold = Math.min(CLONE_FIRST_AIR_MS, Math.max(0, CLONE_AIR_HARD_MS - lived));
+    if (hold <= 0) { markMedia(); return; }
+    airHoldRef.current = setTimeout(() => { airHoldRef.current = null; markMedia(); }, hold);
+  }, [account.live, releaseAirHold]);
+
   // ─── Teardown ──────────────────────────────────────────────────────────────
   const teardownStream = useCallback(async () => {
     sessionGenRef.current++;
@@ -1636,6 +1725,8 @@ export default function StreamPage() {
     closingRef.current = true; setIsClosing(true);
     try {
       endLease();
+      releaseAirHold();
+      cloneThisCallRef.current = false;
       videoSessionRef.current?.close(); videoSessionRef.current = null;
       clonerRef.current?.stop(); clonerRef.current = null;
       if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
@@ -1668,11 +1759,26 @@ export default function StreamPage() {
       closingRef.current = false; setIsClosing(false);
       void refreshBalances();
     }
-  }, []);
+  }, [releaseAirHold]);
 
   // Route changes (e.g. opening Settings mid-stream) unmount this page. Without
   // this the fal WebSocket would stay open and keep billing in the background.
   useEffect(() => { return () => { startCancelRef.current = true; void teardownStream(); }; }, [teardownStream]);
+
+  // The call itself goes with the voice: the picture stops, the cable goes quiet, and the
+  // customer is told what closed it while he is still looking at the page.
+  useEffect(() => {
+    if (!isStreaming || !vcActive || closingRef.current) return;
+    // The engine is asked live, not from the flag above: on the render that switches the
+    // clone on, the watcher has not reported yet, and its first answer is always "silent".
+    const cloner = clonerRef.current;
+    if (!cloner || cloner.alive(CLONE_ALIVE_SECONDS)) return;
+    void teardownStream();
+    toast({
+      title: t("Call ended"), description: endReasonMessage("clone_stopped"),
+      variant: "destructive", withContact: true,
+    });
+  }, [isStreaming, vcActive, cloneAlive, teardownStream, toast]);
 
   // ─── Stop the call when the countdown reaches zero ─────────────────────────
   // The gateway only re-prices the lease on the 45-second heartbeat, so left to
@@ -1720,8 +1826,25 @@ export default function StreamPage() {
     // held here too, for the record of what the video service answered.
     let sessionId: string | null = null;
     let engine: string | null = null;
-    setConnStep("auth"); setConnStatus("connecting");
+    // The microphone is proven before anything is booked on a cloning call, and the very
+    // stream that proved it is the one the call then runs on.
+    let mic: MediaStream | null = null;
+    let micHandedOff = false;
+    // On a cloning call the two questions asked first are the ones with no answer in the
+    // minutes: is his voice reaching the app, and will the voice service answer at all.
+    if (needsVoice) setConnStep("mic"); else setConnStep("auth");
+    setConnStatus("connecting");
     try {
+      if (needsVoice) {
+        try { mic = await openMicrophone(selectedMicId || undefined); }
+        catch { return preflightFailure("mic_not_ready"); }
+        // Nothing is metered here: this only asks the voice service to list his saved voices.
+        // A service that will not answer at all is known before the lease opens rather than
+        // discovered as a silent call after it.
+        const door = await voiceDoorReason();
+        if (door !== null) return preflightFailure(door === "modality_disabled" ? "clone_closed" : door);
+      }
+      setConnStep("auth");
       // Open the metered lease first: nothing touches WebRTC until the gateway
       // confirms this account and bucket can pay for the call.
       const ticket = await gateway.startCall(tabName, await deviceId());
@@ -1737,6 +1860,9 @@ export default function StreamPage() {
       if (skew !== null) noteClockSkew(skew);
 
       beginLease(ticket);
+      // From this second the lease is live, so the page remembers what kind of call it is:
+      // a cloning call is not on air until the cloned voice has answered.
+      cloneThisCallRef.current = needsVoice;
 
       setConnStep("engine");
       const style  = STYLES.find(s => s.id === selectedStyle)!;
@@ -1756,7 +1882,8 @@ export default function StreamPage() {
       // The camera is sampled from its own always-present sink rather than from the
       // picture-in-picture box, which portrait hides - a timing rule that only works in one
       // orientation is a rule that reports "not measured" to half the customers.
-      const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined);
+      const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined, mic);
+      micHandedOff = true;
       syncPipeRef.current = pipe;
       if (streams) {
         // The AI hears you the instant you speak. Holding it back can never line the
@@ -1819,12 +1946,21 @@ export default function StreamPage() {
       videoSessionRef.current = session;
 
       // ── Start voice cloning ────────────────────────────────────────────
+      // The tab he chose buys a cloned voice, not his own. If the microphone never reached
+      // the pipeline, the call would run silent-to-clone for its whole length; that is the
+      // one outcome worse than a refused start, so the lease is handed straight back.
+      if (needsVoice && !micStreamForCloner) {
+        void teardownStream();
+        return preflightFailure("mic_not_ready");
+      }
       if (needsVoice && micStreamForCloner) {
         const cloner = new VoiceCloningEngine();
         cloner.call    = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
         cloner.voiceId = vcVoiceId;
         cloner.setVideoDelay(syncPipeRef.current?.hold ?? FALLBACK_HOLD);
         cloner.onVu    = v => setVcVu(v);
+        // The first answer from the cloned voice is the moment this call is really on air.
+        cloner.onFirstAnswer = () => { releaseAirHold(); markMedia(); };
         cloner.playerLive = () => {
           const el = cloneAudioRef.current;
           return !!el && !el.paused && el.readyState >= 2;
@@ -1878,8 +2014,12 @@ export default function StreamPage() {
         err instanceof GatewayError ? err.retryAfterSeconds : null,
         engine,
       );
+    } finally {
+      // A microphone proven before the lease and never handed to a pipeline belongs to
+      // nothing, and Windows shows a recording light while it is open.
+      if (!micHandedOff && mic) mic.getTracks().forEach(t => t.stop());
     }
-  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation]);
+  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold]);
 
   /**
    * Sleep, counting the seconds on screen. A wait the server announced for this exact
@@ -1913,6 +2053,19 @@ export default function StreamPage() {
     // start while it has the device.
     micCheckRef.current?.stop();
     const needsVoice = activeTab !== "video-only" && vcEnabled;
+
+    // Three answers this page gives before it asks for a call, because each is cheaper for
+    // the customer than spending minutes on a call that cannot do what the tab promises: the
+    // administrator's tick, a trial minute, and this page's own cloning switch.
+    if (cloneLocked) {
+      toast({ title: t("Cannot start"), description: endReasonMessage("clone_closed"), variant: "destructive", withContact: true }); return;
+    }
+    if (cloneNeedsPaid) {
+      toast({ title: t("Cannot start"), description: endReasonMessage("clone_needs_paid_minutes"), variant: "destructive" }); return;
+    }
+    if (cloneTab && !vcEnabled) {
+      toast({ title: t("Cannot start"), description: t("Turn voice cloning on before starting. A call without it has no cloned voice to send, and that is the Video Call tab."), variant: "destructive" }); return;
+    }
 
     if (credsMissing) { setLocation(account.signedIn ? "/minutes" : "/account"); return; }
     if (!cameraReady || !localStreamRef.current) {
@@ -1959,7 +2112,8 @@ export default function StreamPage() {
     } finally {
       isStartingRef.current = false; setIsStarting(false); setConnStep(null); setPacingSeconds(null);
     }
-  }, [isStreaming, credsMissing, cameraReady, activeTab, selectedStyle, customPrompt, refImageB64,
+  }, [isStreaming, credsMissing, cameraReady, activeTab, cloneTab, cloneLocked, cloneNeedsPaid,
+      selectedStyle, customPrompt, refImageB64,
       selectedMicId, vcEnabled, vcVoiceId, attemptStart, teardownStream, toast, setLocation, account,
       countedWait]);
 
@@ -2119,7 +2273,7 @@ export default function StreamPage() {
             one element ever decodes the stream. */}
         <video
           ref={el => { remoteVideoRef.current = el; if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) el.srcObject = remoteStreamRef.current; }}
-          onPlaying={markMedia}
+          onPlaying={markAirWhenReady}
           autoPlay playsInline muted
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }} />
 
@@ -2272,7 +2426,7 @@ export default function StreamPage() {
   // ─── Stream button ─────────────────────────────────────────────────────────
   // Design 2's single big control: it lives in the foot bar beside the gear chips, so the
   // one thing a customer presses is next to the things he checks before pressing it.
-  const canStart = !credsMissing && cameraReady;
+  const canStart = !credsMissing && cameraReady && !cloneLocked && !cloneNeedsPaid;
   const armed = canStart && !isStarting && !isClosing;
   const StreamBtn = () => (
     <button data-tour="start"
@@ -2294,6 +2448,8 @@ export default function StreamPage() {
         : isStarting ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Starting…")}</>
         : isClosing ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Ending call…")}</>
         : credsMissing ? <><Settings style={{ width: 17, height: 17 }} /> {t("Request credits")}</>
+        : cloneLocked ? <><Lock style={{ width: 17, height: 17 }} /> {t("Cloning closed")}</>
+        : cloneNeedsPaid ? <><Lock style={{ width: 17, height: 17 }} /> {t("Paid minutes needed")}</>
         : !cameraReady ? <><Camera style={{ width: 17, height: 17 }} /> {t("Enable Camera")}</>
         : <><Play style={{ width: 17, height: 17 }} /> {t("Start call")}</>}
     </button>
@@ -2319,67 +2475,67 @@ export default function StreamPage() {
   );
 
   // ─── Design 2: the look card, the sync card, and the console below ─────────────
-  // His look sits in the left corner and the measurement of his voice sits opposite it,
-  // because those are the two things he checks while the picture is moving. Everything
-  // he sets once and forgets is laid out below the stage, open, where he can see it
-  // without hunting for a handle.
-  /** His look: the style and his own words, standing in the right corner of the page. */
-  const LookCard = () => (
-    <div style={{
-      background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)",
-      border: `1px solid ${C}3d`, borderRadius: 16,
-      boxShadow: "0 18px 44px hsl(226 80% 2% / 0.6)",
-    }}>
-      <p style={{ padding: "15px 16px 13px", fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.14em", fontFamily: "'Orbitron',monospace" }}>
+  // His look and the shape of the picture sit under the stage, where he is already
+  // looking; the measurement of his voice and the one box he types in stand in the
+  // column beside it. Everything he reads once is laid out below, open.
+  const glass: React.CSSProperties = {
+    background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)",
+    border: `1px solid ${C}3d`, borderRadius: 14,
+    boxShadow: "0 18px 44px hsl(226 80% 2% / 0.6)",
+  };
+  const headLab: React.CSSProperties = { fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" };
+
+  /** The nine styles he can be rendered in, under the picture. */
+  const StyleCard = () => (
+    <div style={glass}>
+      <p style={{ ...headLab, padding: "15px 16px 13px" }}>
         {t("How you will look")}
       </p>
-
-      <div style={{ padding: "0 16px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-          {/* Style presets */}
-          <div data-tour="style">
-            <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 10 }}>{t("AI Style")}</p>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
-              {STYLES.map(s => (
-                <button key={s.id} onClick={() => handleStyleSelect(s.id)}
-                  style={{ padding: "7px 4px", borderRadius: 8, cursor: "pointer", background: selectedStyle === s.id ? `${s.color}22` : "hsl(222 40% 8%)", border: `1px solid ${selectedStyle === s.id ? s.color + "66" : "hsl(222 40% 12%)"}`, color: selectedStyle === s.id ? s.color : "hsl(222 25% 55%)", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Orbitron',monospace", boxShadow: selectedStyle === s.id ? `0 0 12px ${s.color}33` : "none" }}>
-                  {t(s.label)}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Custom prompt — empty unless he writes one, so the app never speaks for him. */}
-          <div data-tour="prompt">
-            <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>{t("Custom Prompt")}</p>
-            <textarea value={customPrompt} onChange={e => handleCustomPromptChange(e.target.value)} placeholder={t("Describe the look you want, in your own words")} rows={3}
-              style={{ width: "100%", padding: 10, borderRadius: 8, resize: "vertical", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, outline: "none", boxSizing: "border-box" }}
-              onFocus={e => { e.target.style.borderColor = "hsl(187 100% 52% / 0.5)"; }}
-              onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
-            {customPrompt && <button onClick={() => handleCustomPromptChange("")} style={{ marginTop: 6, fontSize: 11, color: "hsl(222 25% 50%)", background: "none", border: "none", cursor: "pointer", fontFamily: "'Rajdhani',sans-serif" }}>{t("↺ Reset")}</button>}
-          </div>
+      <div data-tour="style" style={{ padding: "0 16px 16px" }}>
+        <p style={{ ...headLab, marginBottom: 10 }}>{t("AI Style")}</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))", gap: 6 }}>
+          {STYLES.map(s => (
+            <button key={s.id} onClick={() => handleStyleSelect(s.id)}
+              style={{ padding: "7px 4px", borderRadius: 8, cursor: "pointer", background: selectedStyle === s.id ? `${s.color}22` : "hsl(222 40% 8%)", border: `1px solid ${selectedStyle === s.id ? s.color + "66" : "hsl(222 40% 12%)"}`, color: selectedStyle === s.id ? s.color : "hsl(222 25% 55%)", fontSize: 9, fontWeight: 700, letterSpacing: "0.06em", fontFamily: "'Orbitron',monospace", boxShadow: selectedStyle === s.id ? `0 0 12px ${s.color}33` : "none" }}>
+              {t(s.label)}
+            </button>
+          ))}
         </div>
+      </div>
+    </div>
+  );
+
+  /** His own words about the look — empty unless he writes one, so the app never speaks for him. */
+  const PromptCard = () => (
+    <div data-tour="prompt" style={glass}>
+      <p style={{ ...headLab, padding: "15px 16px 0" }}>{t("Custom Prompt")}</p>
+      <div style={{ padding: "10px 16px 16px" }}>
+        <textarea value={customPrompt} onChange={e => handleCustomPromptChange(e.target.value)} placeholder={t("Describe the look you want, in your own words")} rows={3}
+          style={{ width: "100%", padding: 10, borderRadius: 8, resize: "vertical", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, outline: "none", boxSizing: "border-box" }}
+          onFocus={e => { e.target.style.borderColor = "hsl(187 100% 52% / 0.5)"; }}
+          onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
+        {customPrompt && <button onClick={() => handleCustomPromptChange("")} style={{ marginTop: 6, fontSize: 11, color: "hsl(222 25% 50%)", background: "none", border: "none", cursor: "pointer", fontFamily: "'Rajdhani',sans-serif" }}>{t("↺ Reset")}</button>}
+      </div>
+    </div>
+  );
+
+  /** The picture's shape, in the space under the stage. */
+  const ShapeCard = () => (
+    <div style={{ ...glass, display: "flex", flexDirection: "column", justifyContent: "center", gap: 10, padding: "14px 16px" }}>
+      {OrientationToggle()}
     </div>
   );
 
   /**
-   * Everything else the console has always had, laid out open below the stage: the shape
-   * of the picture, how the microphone behaves, the cloned voice, and the way out to
-   * Zoom / Teams / OBS. The camera and microphone themselves are picked in the bar.
+   * What stays below the stage: the way out to Zoom / Teams / OBS, which he reads
+   * across the room once and never again.
    */
   const Sheet = () => (
     <div style={{ marginTop: 20 }}>
       <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.14em", fontFamily: "'Orbitron',monospace", marginBottom: 12 }}>
         {t("More settings")}
       </p>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 14, alignItems: "start" }}>
-        {OrientationToggle()}
-        {MicGateCard()}
-      </div>
-      {/* The clone is the one panel with three things inside it, so it takes the whole
-          width below the short cards instead of squeezing in beside them. */}
-      {needsVoice && <div style={{ marginTop: 14 }}>{VoicePanel()}</div>}
-      <div style={{ marginTop: 14 }}>{renderVirtualDevices(true)}</div>
-      <div style={{ marginTop: 14 }}>{renderBroadcastGuide()}</div>
+      {renderBroadcastGuide()}
     </div>
   );
 
@@ -2459,28 +2615,45 @@ export default function StreamPage() {
         </div>
         {/* Toggle */}
         <button onClick={() => {
-          if (!voiceKeySet && !vcEnabled) { toast({ title: t("Out of minutes"), description: t("Ask your administrator to top up this bucket before using voice cloning."), variant: "destructive", withContact: true }); return; }
+          if (cloneDead) return;
+          if (!voiceKeySet && !vcEnabled) { toast({ title: t("Out of minutes"), description: t("Ask your administrator to add minutes before using voice cloning."), variant: "destructive", withContact: true }); return; }
           setVcEnabled(v => !v);
         }}
-          style={{ width: 40, height: 22, borderRadius: 11, border: "none", cursor: "pointer", background: vcEnabled ? VC : "hsl(222 40% 14%)", position: "relative", transition: "background 0.2s", flexShrink: 0 }}>
-          <span style={{ position: "absolute", top: 3, left: vcEnabled ? 21 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
+          style={{ width: 40, height: 22, borderRadius: 11, border: "none", cursor: cloneDead ? "not-allowed" : "pointer", background: vcEnabled && !cloneDead ? VC : "hsl(222 40% 14%)", position: "relative", transition: "background 0.2s", flexShrink: 0, opacity: cloneDead ? 0.42 : 1 }}>
+          <span style={{ position: "absolute", top: 3, left: vcEnabled && !cloneDead ? 21 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
         </button>
       </div>
+
+      {/* What the switch itself decides, in the first thing he reads on the card. */}
+      <div style={{ padding: "9px 11px", borderRadius: 9, background: "hsl(265 90% 65% / 0.09)", border: "1px solid hsl(265 90% 65% / 0.28)", marginBottom: 11 }}>
+        <p style={{ fontSize: 11.5, color: "hsl(265 60% 82%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
+          {t("With this switch off, this tab will not start a call. Use the Video tab to go out with your own voice.")}
+        </p>
+      </div>
+
+      {cloneDead && (
+        <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(265 90% 65% / 0.08)", border: "1px solid hsl(265 90% 65% / 0.25)", marginBottom: 10 }}>
+          <p style={{ fontSize: 11, color: "hsl(265 60% 78%)", fontFamily: "'Rajdhani',sans-serif", display: "flex", alignItems: "center", gap: 8 }}>
+            <Lock style={{ width: 13, height: 13, flexShrink: 0 }} />
+            {cloneLocked ? endReasonMessage("clone_closed") : endReasonMessage("clone_needs_paid_minutes")}
+          </p>
+        </div>
+      )}
 
       {!voiceKeySet && (
         <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(40 100% 52% / 0.08)", border: "1px solid hsl(40 100% 52% / 0.2)", marginBottom: 10 }}>
           <p style={{ fontSize: 11, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif" }}>
-            {t("You have no minutes left in this bucket. Ask your administrator to top up your account.")}{" "}
+            {t("You have no minutes left. Ask your administrator to top up your account.")}{" "}
             <button onClick={() => setLocation("/minutes")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>{t("Request credits")} →</button>
           </p>
         </div>
       )}
 
-      {/* Three doors of one panel, side by side: pick a voice, add your own, see what
-          you already saved. Each sits in the same box so the row reads as one control. */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, alignItems: "start" }}>
-      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 12 }}>
-        <label style={{ display: "block", fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 6 }}>{t("Clone Voice")}</label>
+      {/* The two doors of one panel, side by side: the voice he goes out with, and the
+          way to add his own right beside it. Nothing to hunt for under the fold. */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "stretch", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
+      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <label style={{ display: "block", fontSize: 9.5, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", marginBottom: 6, lineHeight: 1.45 }}>{t("Clone Voice")}</label>
         <div style={{ position: "relative" }}>
           <select value={vcVoiceId} onChange={e => setVcVoiceId(e.target.value)} disabled={isStreaming} style={{ ...selectSt, borderColor: vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)" }}>
             {savedVoices.length > 0 && (
@@ -2494,47 +2667,47 @@ export default function StreamPage() {
           </select>
           <ChevronDown style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "hsl(222 25% 50%)", pointerEvents: "none" }} />
         </div>
-      </div>
-
-      {/* Upload your own voice */}
-      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 12 }}>
-        <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 8 }}>{t("Upload Your Voice")}</p>
-        <input
-          type="text" placeholder={t("Voice name (optional)")}
-          value={uploadVoiceName} onChange={e => setUploadVoiceName(e.target.value)}
-          style={{ width: "100%", padding: "7px 10px", borderRadius: 7, background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 12, fontFamily: "'Rajdhani',sans-serif", outline: "none", marginBottom: 8 }}
-          onFocus={e => { e.target.style.borderColor = "hsl(265 90% 65% / 0.5)"; }}
-          onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }}
-        />
-        <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", borderRadius: 8, cursor: uploadingVoice ? "not-allowed" : "pointer", background: uploadingVoice ? "hsl(222 40% 10%)" : "hsl(265 90% 65% / 0.15)", border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 12, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
-          {uploadingVoice ? <Loader2 style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} /> : <Upload style={{ width: 14, height: 14 }} />}
-          {uploadingVoice ? t("Uploading…") : t("Upload Voice Sample (MP3/WAV/M4A)")}
-          <input type="file" accept=".mp3,.wav,.m4a,audio/*" onChange={handleVoiceUpload} disabled={uploadingVoice} style={{ display: "none" }} />
-        </label>
-        <p style={{ fontSize: 10, color: "hsl(222 25% 40%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 6, lineHeight: 1.4 }}>
-          {t("Upload 30s–3min of clear speech. Your voice will be cloned and saved for future sessions.")}
+        <p style={{ fontSize: 10, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, marginTop: "auto", paddingTop: 8 }}>
+          {t("Your saved voices come first in this list.")}
         </p>
       </div>
 
-      {/* Saved voices list */}
+      {/* Upload your own voice */}
+      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <p style={{ fontSize: 9.5, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", marginBottom: 6, lineHeight: 1.45 }}>{t("Upload Your Voice")}</p>
+        <input
+          type="text" placeholder={t("Voice name (optional)")}
+          value={uploadVoiceName} onChange={e => setUploadVoiceName(e.target.value)}
+          style={{ width: "100%", padding: "7px 8px", borderRadius: 7, background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 11.5, fontFamily: "'Rajdhani',sans-serif", outline: "none", marginBottom: 7, boxSizing: "border-box" }}
+          onFocus={e => { e.target.style.borderColor = "hsl(265 90% 65% / 0.5)"; }}
+          onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }}
+        />
+        <label style={{ display: "flex", alignItems: "center", gap: 6, padding: "8px 9px", borderRadius: 7, marginTop: "auto", cursor: uploadingVoice ? "not-allowed" : "pointer", background: uploadingVoice ? "hsl(222 40% 10%)" : "hsl(265 90% 65% / 0.15)", border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.3 }}>
+          {uploadingVoice ? <Loader2 style={{ width: 14, height: 14, flexShrink: 0, animation: "spin 1s linear infinite" }} /> : <Upload style={{ width: 14, height: 14, flexShrink: 0 }} />}
+          {uploadingVoice ? t("Uploading…") : t("Upload Voice Sample (MP3/WAV/M4A)")}
+          <input type="file" accept=".mp3,.wav,.m4a,audio/*" onChange={handleVoiceUpload} disabled={uploadingVoice} style={{ display: "none" }} />
+        </label>
+      </div>
+      </div>
+      <p style={{ fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 9, lineHeight: 1.45 }}>
+        {t("Upload 30s–3min of clear speech. It is saved and appears on the left for your next call.")}
+      </p>
+
+      {/* What he already saved: one chip per voice, tap it to go out with that voice. */}
       {savedVoices.length > 0 && (
-        <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 12 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.1em", fontFamily: "'Orbitron',monospace", marginBottom: 6 }}>{t("Your Voices")}</p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            {savedVoices.map(v => (
-              <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 10px", borderRadius: 7, background: vcVoiceId === v.id ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 8%)", border: `1px solid ${vcVoiceId === v.id ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 12%)"}`, cursor: "pointer" }}
-                onClick={() => setVcVoiceId(v.id)}>
-                <span style={{ fontSize: 11, color: "hsl(190 80% 90%)", fontFamily: "'Rajdhani',sans-serif", flex: 1, fontWeight: vcVoiceId === v.id ? 700 : 400 }}>★ {v.name}</span>
-                <button onClick={e => { e.stopPropagation(); handleDeleteVoice(v.id); }}
-                  style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(0 85% 55%)", padding: 2, display: "flex" }}>
-                  <Trash2 style={{ width: 11, height: 11 }} />
-                </button>
-              </div>
-            ))}
-          </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
+          {savedVoices.map(v => (
+            <span key={v.id} onClick={() => setVcVoiceId(v.id)} title={t("Use this voice")}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(190 80% 92%)", background: vcVoiceId === v.id ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 8%)", border: `1px solid ${vcVoiceId === v.id ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 12%)"}`, minWidth: 0 }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }}>★ {v.name}</span>
+              <button onClick={e => { e.stopPropagation(); handleDeleteVoice(v.id); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(0 85% 55%)", padding: 0, display: "flex", flexShrink: 0 }}>
+                <Trash2 style={{ width: 10, height: 10 }} />
+              </button>
+            </span>
+          ))}
         </div>
       )}
-      </div>
 
       {/* Waveform — the voice leaving the app, measured on the player itself */}
       {vcActive && (
@@ -2547,7 +2720,7 @@ export default function StreamPage() {
           <p style={{ marginTop: 6, fontSize: 10, color: cloneAlive ? "hsl(265 60% 72%)" : "hsl(40 90% 62%)" }}>
             {cloneAlive
               ? t("This is the voice your callers and OBS are hearing. Your raw microphone is off the cable while the cloned voice is arriving.")
-              : t("The cloned voice has produced nothing for the last few seconds, so your own microphone is back on the cable. Your callers hear you rather than silence.")}
+              : t("The cloned voice has stopped answering. The call closes in a few seconds rather than running with no voice for the people watching.")}
           </p>
         </div>
       )}
@@ -2801,7 +2974,7 @@ export default function StreamPage() {
         <div style={{ margin: "16px 32px 0", padding: "12px 18px", borderRadius: 10, background: "hsl(40 100% 52% / 0.1)", border: "1px solid hsl(40 100% 52% / 0.35)", display: "flex", alignItems: "center", gap: 12 }}>
           <Settings style={{ width: 16, height: 16, color: "hsl(40 100% 62%)", flexShrink: 0 }} />
           <p style={{ fontSize: 13, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif", flex: 1 }}>
-            {t("You have no minutes left in this bucket. Ask your administrator to top up your account.")}
+            {t("You have no minutes left. Ask your administrator to top up your account.")}
           </p>
           <button onClick={() => setLocation("/minutes")} style={{ padding: "6px 14px", borderRadius: 8, background: "hsl(40 100% 52% / 0.25)", border: "1px solid hsl(40 100% 52% / 0.5)", color: "hsl(40 100% 80%)", fontWeight: 700, fontSize: 12, fontFamily: "'Orbitron',monospace", cursor: "pointer" }}>
             {t("Request credits")}
@@ -2827,7 +3000,8 @@ export default function StreamPage() {
               <div>
                 <h3 style={{ fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 16, color: "hsl(190 80% 96%)", marginBottom: 8 }}>{t("Starting…")}</h3>
                 <p style={{ fontSize: 13, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>
-                  {connStep === "engine" ? t("2/2 · Connecting to AI engine…")
+                  {connStep === "mic" ? t("Checking your microphone…")
+                    : connStep === "engine" ? t("2/2 · Connecting to AI engine…")
                     : connStep === "retry" ? t("2/2 · The video line didn't answer. Asking again…")
                     : t("1/2 · Authorizing your account…")}
                 </p>
@@ -2874,19 +3048,36 @@ export default function StreamPage() {
                 ))}
               </PillRow>
             }
-            card={<MinuteMeter modality={modalityForTab(activeTab)} />}
+            card={<MinuteMeter modality={modalityForTab(activeTab)} note={cloneTab
+              ? t("A Video + Audio call runs your minutes down faster than the Video tab, because your cloned voice is generated alongside the picture.")
+              : undefined} />}
           />
 
-          {/* The stage: the AI picture takes the room, and the two cards he reads while
-              it moves — his look, then what his voice is doing — stand in the corner. */}
+          {/* The stage: the AI picture takes the room. Under it come the settings he
+              reaches for while looking at the frame — the shape, the microphone, his
+              look — and in the corner stands the column he reads before pressing Start. */}
           <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
             <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
               {renderVideoOutput(true)}
+
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.82fr) minmax(0, 1.55fr)", gap: 14, marginTop: 16, alignItems: "stretch" }}>
+                {ShapeCard()}
+                {MicGateCard()}
+              </div>
+
+              {/* On the cloning tab the OBS switches stand beside his look; on the
+                  natural-voice tab they close the column instead, so both sides end together. */}
+              <div style={{ display: "grid", gridTemplateColumns: cloneTab ? "minmax(0, 0.86fr) minmax(0, 1.14fr)" : "minmax(0, 1fr)", gap: 14, marginTop: 14, alignItems: "stretch" }}>
+                {StyleCard()}
+                {cloneTab && renderVirtualDevices(true)}
+              </div>
             </div>
 
             <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
-              {LookCard()}
+              {needsVoice && VoicePanel()}
               {AudioSyncPanel()}
+              {PromptCard()}
+              {!cloneTab && renderVirtualDevices(true)}
             </div>
           </div>
 
