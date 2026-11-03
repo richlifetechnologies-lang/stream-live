@@ -565,13 +565,13 @@ export const ADMIN_HTML = `<!doctype html>
 
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
-          <h2 style="font-size:14px;margin:0">Calls the app could not start — last 24 hours</h2>
+          <h2 style="font-size:14px;margin:0">Calls the app refused or lost — last 24 hours</h2>
           <div class="row" style="align-items:center;gap:10px">
             <span class="muted" id="faultWhen"></span>
             <button id="refreshFaults">Refresh</button>
           </div>
         </div>
-        <p class="muted" style="margin:6px 0 12px">What the customer's app saw when a call was refused. <b>engine</b> means the video line took the booking and then never produced a picture; <b>gateway</b> means the account itself was refused, and the reason is named in brackets. A row here is a call that was <b>not</b> billed.</p>
+        <p class="muted" style="margin:6px 0 12px">What the customer's app saw when a call was refused. <b>engine</b> means the video line took the booking and then never produced a picture; <b>gateway</b> means the account itself was refused, and the reason is named in brackets. Either of those is a call that was <b>not</b> billed. <b>video line closed</b> is a different case: the call was running and the service ended it, and the sentence names how many seconds it held first.</p>
         <div style="overflow:auto">
           <table id="faultTable">
             <thead><tr><th>When</th><th>Stage</th><th>Account</th><th>What came back</th></tr></thead>
@@ -1470,6 +1470,10 @@ export const ADMIN_HTML = `<!doctype html>
     $("who").textContent = ADMIN_EMAIL;
     $("authCard").classList.add("hidden");
     $("dash").classList.remove("hidden");
+    // The first read of every "last 24 hours" card is a subtraction from the server's clock, so it
+    // waits for that one measurement instead of using this machine's — on a machine twelve hours
+    // ahead it would otherwise show half a day and call it a day.
+    await CLOCK_READY;
     await loadPlans();
     await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadAirtime(), loadConfig(), loadContact(), loadAccounts(), loadCalls()]);
     await loadPricing();
@@ -1779,7 +1783,7 @@ export const ADMIN_HTML = `<!doctype html>
     try {
       const res = await api({ action: "set_engine", userId, engine: target });
       if (CUR && CUR.user_id === userId) {
-        CUR.pin = { ...(CUR.pin || {}), engine_override: res.engine_override ?? null, engine_override_at: new Date().toISOString() };
+        CUR.pin = { ...(CUR.pin || {}), engine_override: res.engine_override ?? null, engine_override_at: serverNowIso() };
         await renderEnginePin();
       }
       await Promise.all([loadAccounts(), loadSessions()]);
@@ -2481,7 +2485,7 @@ export const ADMIN_HTML = `<!doctype html>
           : '<div class="pill pending">Paystack already has this money — reject and let it land</div>';
       }
       const recent = r.user_id ? paidByUser[r.user_id] : null;
-      if (recent && Date.now() - new Date(recent.credited_at || recent.created_at).getTime() < 24 * 3600000) {
+      if (recent && serverNowMs() - new Date(recent.credited_at || recent.created_at).getTime() < 24 * 3600000) {
         return \`<div class="muted" style="color:#facc15">this account paid \${ghs(recent.amount)} by \`
           + (PAY_WAY[recent.channel] || recent.channel || "the website") + " "
           + payAgo(recent.credited_at || recent.created_at) + " — check this request is separate money</div>";
@@ -2542,7 +2546,7 @@ export const ADMIN_HTML = `<!doctype html>
   const ghs = (pesewas) => "GH\\u20B5" + (N(pesewas) / 100).toFixed(2);
 
   function payAgo(iso) {
-    const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+    const m = Math.round((serverNowMs() - new Date(iso).getTime()) / 60000);
     if (!Number.isFinite(m) || m < 1) return "just now";
     if (m < 60) return m + " min ago";
     if (m < 1440) return Math.round(m / 60) + " h ago";
@@ -2563,7 +2567,7 @@ export const ADMIN_HTML = `<!doctype html>
     if (p.status === "paid") return true;
     if (p.status === "pending") {
       if (p.expired_at) return false;
-      return Date.now() - new Date(p.created_at).getTime() > 3 * 60000;
+      return serverNowMs() - new Date(p.created_at).getTime() > 3 * 60000;
     }
     if (p.status === "failed" || p.status === "refunded") return true;
     if (p.status === "credited" && !p.user_id) return true;
@@ -2755,7 +2759,7 @@ export const ADMIN_HTML = `<!doctype html>
   // next to the button that re-reads it. Everything used to fail into "keyMsg", which
   // sits under the Save key pair form — so a refresh that could not reach the pool
   // looked like the form had broken, and the usage Refresh had no message of its own.
-  function stamp(id) { $(id).textContent = "read " + new Date().toISOString().slice(11, 19) + " UTC"; }
+  function stamp(id) { $(id).textContent = "read " + serverNowIso().slice(11, 19) + " UTC"; }
 
   // A provider's refusal is JSON noise on a monitoring screen. Left raw, a plan refusal on the
   // voice account reads exactly like a dead network — and the two cost completely different things.
@@ -3515,7 +3519,7 @@ export const ADMIN_HTML = `<!doctype html>
   }
 
   async function loadKeyUsage() {
-    const cutoff = new Date(Date.now() - 864e5).toISOString();
+    const cutoff = new Date(serverNowMs() - 864e5).toISOString();
     const { data, error } = await sb.from("key_usage_log")
       .select("created_at, key_id, provider, user_id, outcome, status, detail")
       .gt("created_at", cutoff).order("created_at", { ascending: false }).limit(200);
@@ -3539,7 +3543,7 @@ export const ADMIN_HTML = `<!doctype html>
   // raw answer is kept — the customer never sees it — so "the app said cannot start"
   // from a support message can be read against a real row instead of guessed at.
   async function loadCallFailures() {
-    const cutoff = new Date(Date.now() - 864e5).toISOString();
+    const cutoff = new Date(serverNowMs() - 864e5).toISOString();
     const { data, error } = await sb.from("call_failures")
       .select("created_at, stage, user_id, detail")
       .gt("created_at", cutoff).order("created_at", { ascending: false }).limit(200);
@@ -3549,10 +3553,10 @@ export const ADMIN_HTML = `<!doctype html>
     await emailsOf((data || []).map((r) => r.user_id));
     $("faultTable").querySelector("tbody").innerHTML = (data || []).map((r) => \`<tr>
       <td class="muted">\${when(r.created_at)}</td>
-      <td><span class="pill \${r.stage === "gateway" ? "warn" : "fail"}">\${esc(r.stage)}</span></td>
+      <td><span class="pill \${r.stage === "gateway" || r.stage === "video line closed" ? "warn" : "fail"}">\${esc(r.stage)}</span></td>
       <td class="muted">\${esc(EMAIL_OF[r.user_id] || shortId(r.user_id))}</td>
       <td class="muted">\${esc(r.detail || "")}</td></tr>\`).join("")
-      || '<tr><td colspan="4" class="muted">No call has been refused in the last 24 hours.</td></tr>';
+      || '<tr><td colspan="4" class="muted">No call has been refused or lost in the last 24 hours.</td></tr>';
   }
 
   async function loadAssignments() {
@@ -3981,7 +3985,7 @@ export const ADMIN_HTML = `<!doctype html>
   // start" could not be checked after the fact, which is exactly what this table is
   // for.
   async function loadSessions() {
-    const since = new Date(Date.now() - 3 * 86_400_000).toISOString();
+    const since = new Date(serverNowMs() - 3 * 86_400_000).toISOString();
     const { data, error } = await sb.from("usage_sessions")
       .select("id, user_id, tab, modality, device_id, engine, decart_key_id, started_at, lease_started_at, lease_expires_at, real_minutes, billed_minutes, pending_debit, ended_at")
       .gte("started_at", since)
@@ -5121,7 +5125,7 @@ export const ADMIN_HTML = `<!doctype html>
       lucy_video_per_sec_cost: +(falMin / 60).toFixed(6),
       voice_cloning_per_sec_cost: +(voiceMin / 60).toFixed(6),
       profit_margin_percent: Math.round(target),
-      last_verified_at: new Date().toISOString().slice(0, 10),
+      last_verified_at: serverNowIso().slice(0, 10),
       source_notes: \`fal.ai Lucy 2.5 realtime \${falMin}/min; ElevenLabs speech to speech \${voiceMin}/min. Saved from the Prices tab.\`,
     };
     const { data, error } = await sb.from("billing_config").update(row).eq("id", 1).select("id");
@@ -5235,15 +5239,16 @@ export const ADMIN_HTML = `<!doctype html>
   // The clock strip under the header. It has been called since the two-shelf release without ever
   // being written, which threw a ReferenceError at the last line of this script and silently killed
   // the "restore my session on reload" call underneath it — every reload dropped him back on the
-  // sign-in card. It exists because a rate stored in UTC and typed on a machine in the wrong zone is
-  // the one thing this panel cannot otherwise see, and that is exactly the burn-rate trap.
+  // sign-in card. It exists because every time window this panel reads ("the last 24 hours" on the
+  // refused-call card) is a subtraction, and a subtraction against a clock twelve hours ahead
+  // silently returns half the rows it promises.
   let SERVER_SKEW_MS = null;
-  // Every "is this rate in force yet?" the panel asks must be answered with the SERVER's clock,
-  // because that is the clock that meters the money. On a machine twelve hours ahead — which is this
-  // machine, as the strip above now says out loud — a rate that has been running for hours looks
-  // like it starts later, and a rate saved as "now" is quietly filed for tomorrow while every call
-  // keeps draining at the old figure.
+  // Every "is this in force yet?" and every "the last 24 hours" this panel asks must be answered with
+  // the SERVER's clock, because that is the clock the rows are stamped on. On a machine twelve hours
+  // ahead — which is this machine, as the strip above says out loud — a 24-hour window read against
+  // its own clock is a 12-hour window, and the card then reports "no calls" about calls it has.
   const serverNowMs = () => Date.now() - (SERVER_SKEW_MS ?? 0);
+  const serverNowIso = () => new Date(serverNowMs()).toISOString();
   async function syncClock() {
     // The server's own time, asked for as data rather than read off a response header: a cross-origin
     // script cannot see a Date header, which is why this measurement used to come back unknown and
@@ -5264,11 +5269,15 @@ export const ADMIN_HTML = `<!doctype html>
     if (!el) return;
     const now = new Date();
     const line = "This machine: " + now.toLocaleString() + " · " + now.toISOString().slice(0, 19).replace("T", " ") + " UTC (every figure here is stored in UTC)";
-    if (SERVER_SKEW_MS == null) { el.textContent = line + " · whatever time you type into a rate box is stamped by THIS clock, so check it before scheduling a rate."; return; }
+    if (SERVER_SKEW_MS == null) { el.textContent = line + " · the server's clock has not answered yet, so this panel cannot tell you what a \\"last 24 hours\\" card really covers. Reload once the strip names a gap."; return; }
     const skewMin = SERVER_SKEW_MS / 60000;
+    // Nothing on this panel is dated by this machine any more: a rate you press Save on is stamped
+    // by the server the instant it lands, and every "last 24 hours" window is counted from the
+    // reading below rather than from this clock. So a gap here is a fact about the PC, not a warning
+    // about your figures — and saying otherwise used to make a healthy rate look filed for tomorrow.
     el.textContent = Math.abs(skewMin) <= 2
       ? line + " · " + (skewMin === 0 ? "exactly" : "within " + Math.abs(skewMin).toFixed(1) + " min of") + " the server's clock."
-      : line + " · WARNING: this machine is " + (skewMin > 0 ? "ahead of" : "behind") + " the server by " + Math.abs(skewMin).toFixed(0) + " minutes. Anything you save here as a time — a rate's start, a retirement — is stamped by THIS clock, so the server may not honour it yet.";
+      : line + " · NOTE: this machine's own clock is " + (skewMin > 0 ? "ahead of" : "behind") + " the server by " + Math.abs(skewMin).toFixed(0) + " minutes, so do not trust the date printed above from it. Nothing here is stamped by that clock: a burn rate you save is dated by the server the second you press Save, and every time window on this panel is counted from the server's reading — this gap changes no figure and starts no rate late.";
     el.style.color = Math.abs(skewMin) <= 2 ? "" : "#facc15";
   }
 
@@ -5285,7 +5294,8 @@ export const ADMIN_HTML = `<!doctype html>
   // whether the machine's clock moved, instead of assuming the panel broke.
   paintClock();
   setInterval(paintClock, 1000);
-  void syncClock();
+  // The one measurement every time window on this panel is counted from. showDash waits on it.
+  const CLOCK_READY = syncClock();
   // A jump while the tab was in the background is caught the moment you look again.
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void syncClock(); });
 
