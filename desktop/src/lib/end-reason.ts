@@ -55,6 +55,11 @@ const REASON_COPY: Record<string, string> = {
   // held afterwards is the video line's decision, so the wait is described, not counted.
   camera_stalled: "Your camera stopped feeding pictures to the app, so there was nothing for the video service to turn into your AI picture, and the call was closed rather than left running blank. Nothing was used - your minutes are exactly where they were. Pick your camera again in the bar at the bottom of the page, or unplug it and plug it back in, then press Start again. If it holds for a couple of minutes first, that is the video line being released and it costs you nothing.",
   never_connected: "No connection came up between this computer and the video line, so nothing ever reached your screen. Nothing was used - your minutes are exactly where they were. This is nearly always something in the way on this machine: switch off a VPN, let the app through your firewall, or try a different network, then press Start again. If it holds for a couple of minutes first, that is the video line being released and it costs you nothing.",
+  // The one blank that is not his: the video service answered the dial itself with a refusal,
+  // so this machine's camera and network were never asked to do anything. It says whose problem
+  // it is in as few words as possible, because the sentence it replaces told him to go and
+  // turn off a VPN while the line on our side was the thing that was full.
+  line_full: "Our video line was full when you asked for it, so this call never opened. Nothing was used - your minutes are exactly where they were. There is nothing here for you to fix: it is our line, not your computer. Wait a couple of minutes and press Start again; if the button holds you for a short count-down first, that is the line being released and it costs you nothing.",
   // The voice-only tab has no picture to fail: the only thing it can lack is the cloned voice.
   // The meter never started without it, so the one thing worth telling him is that he was not
   // charged and can press Start again straight away.

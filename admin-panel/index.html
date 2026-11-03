@@ -3002,6 +3002,7 @@
             `${esc(g.machine)} — ${one(g.calls, "call")}, ${secs(g.seconds)} (${esc(g.who)})`).join(" · ");
           const side = bk.causes
             ? ` · what the app itself blamed: ${one(bk.causes.his_side, "call")} from his machine, ${one(bk.causes.our_side, "call")} from ours`
+              + (N(bk.causes.refused) > 0 ? ` (${N(bk.causes.refused)} of them: the video line itself said it was full)` : "")
             : " · no build that names the cause has reported these yet";
           spread = `Last 24 hours: <b>${one(bk.calls, "blank call")}</b> on <b>${one(bk.machines, "machine")}</b>`
             + ` (${one(bk.accounts, "account")})${side}.<br>` + (worst || "no machine named on the rows");

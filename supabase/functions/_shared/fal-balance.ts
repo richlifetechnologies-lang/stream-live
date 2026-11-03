@@ -128,7 +128,11 @@ export type FalBlankSpread = {
   machines: number;
   accounts: number;
   worst: FalBlankGroup[];
-  causes: { his_side: number; our_side: number } | null;
+  /**
+   * `refused` is the part of `our_side` where the video service answered the dial itself with a
+   * refusal — the number that says the line was full rather than that his machine was.
+   */
+  causes: { his_side: number; our_side: number; refused: number } | null;
 };
 
 export type FalBalancePayload = {
@@ -383,13 +387,16 @@ async function noFrame(monthStart: string): Promise<FalNoFrame | null> {
     .limit(2000);
   const marked = (fails ?? []).filter(f => String(f.detail ?? "").includes("cause="));
   if (marked.length) {
-    let his = 0, ours = 0;
+    let his = 0, ours = 0, refused = 0;
     for (const f of marked) {
       const d = String(f.detail ?? "");
-      if (d.includes("cause=camera_stalled") || d.includes("cause=never_connected")) his += 1;
+      // A refusal is counted on both lines it belongs to: it is ours, and it is the specific
+      // kind of ours that a raise in the concurrent limit will not fix.
+      if (d.includes("cause=line_full")) { ours += 1; refused += 1; }
       else if (d.includes("cause=picture_hold")) ours += 1;
+      else if (d.includes("cause=camera_stalled") || d.includes("cause=never_connected")) his += 1;
     }
-    causes = { his_side: his, our_side: ours };
+    causes = { his_side: his, our_side: ours, refused };
   }
 
   const named = [...byMachine.values()].sort((a, b) => b.calls - a.calls || b.seconds - a.seconds).slice(0, 3);

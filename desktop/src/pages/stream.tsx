@@ -2014,12 +2014,17 @@ export default function StreamPage() {
    * Taken before a teardown, never after one. The signals belong to the call being given up on,
    * and they are cleared when the next call opens rather than when this one closes, so the
    * answer cannot be contaminated by whatever the camera was doing beforehand.
+   *
+   * `lineAnswer` is what the video service itself said, and only the caller holding a thrown
+   * engine error has it. A call that was taken and then went blank leaves it empty, because
+   * there was no answer to quote.
    */
-  const blindReadout = useCallback(() => {
+  const blindReadout = useCallback((lineAnswer = "") => {
     const evidence: NoPictureEvidence = {
       cameraSeen: camCounterRanRef.current,
       cameraProducing: camFedFrameRef.current,
       connected: lineConnectedRef.current,
+      lineAnswer,
     };
     const cause = noPictureCause(evidence);
     const off = clockSkewMs();
@@ -2332,11 +2337,14 @@ export default function StreamPage() {
       // remainder (picture_hold) keeps the blanket one, because it promises a countdown this
       // path never shows, and the asks themselves are unchanged either way.
       const blank = sessionId !== null && !paintedRef.current;
-      const blind = blank ? blindReadout() : null;
+      // Only an answer from the video service can be a line saying it is full, and that is the
+      // one cause that is ours rather than this machine's. A gateway refusal already names
+      // itself, so its words are not read as a capacity answer.
+      const words = err instanceof Error ? err.message : String(err);
+      const blind = blank ? blindReadout(err instanceof GatewayError ? "" : words) : null;
       return classifyStartFailure(
         err instanceof GatewayError ? err.reason : null,
-        (err instanceof Error ? err.message : String(err))
-          + (blind === null ? clockNote : ` — ${blind.detail}`),
+        words + (blind === null ? clockNote : ` — ${blind.detail}`),
         sessionId,
         err instanceof GatewayError ? err.retryAfterSeconds : null,
         engine,

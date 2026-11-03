@@ -9,16 +9,24 @@ const panel = fs.readFileSync("admin-panel/index.html", "utf8");
 
 // SC picks which last-24-hours blank picture reading the stub hands the card, so every branch of
 // the new line is rendered rather than reasoned about: "none" = the count could not be taken,
-// "zero" = a quiet day, and the default = the spike that motivated the line.
+// "zero" = a quiet day, "uncaused" = blanks with no cause named yet, "full" = the video line
+// refused the dial on our side, and the default = the spike that motivated the line.
 const SC = process.env.SC || "";
 const BLANK = SC === "none" ? null : SC === "zero"
   ? { calls: 0, machines: 0, accounts: 0, worst: [], causes: null }
+  : SC === "full"
+  ? { calls: 11, machines: 3, accounts: 3,
+      worst: [
+        { machine: "2e6a88ad4c22", calls: 5, seconds: 15.3, who: "attorneygyanpim@gmail.com" },
+        { machine: "2b49532d6da0", calls: 5, seconds: 11.5, who: "davidallenmorrow9@gmail.com" },
+      ],
+      causes: { his_side: 0, our_side: 9, refused: 9 } }
   : { calls: 5, machines: 2, accounts: 2,
       worst: [
         { machine: "3f9a2b7c11d4", calls: 4, seconds: 16.8, who: "davidallenmorrow9@gmail.com" },
         { machine: "b71c0d0a99ee", calls: 1, seconds: 4.6, who: "lilylife238@gmail.com" },
       ],
-      causes: SC === "uncaused" ? null : { his_side: 3, our_side: 1 } };
+      causes: SC === "uncaused" ? null : { his_side: 3, our_side: 1, refused: 0 } };
 
 const PAST = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
 const FUTURE = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
