@@ -2987,6 +2987,32 @@
       frameLine = `<p class="muted" style="margin:14px 0 0;font-size:12px">Opened with no picture: <b style="color:${colour}">${secs(nf.today.seconds)}</b> today`
         + ` (${N(nf.today.sessions)} call${N(nf.today.sessions) === 1 ? "" : "s"}) · <b style="color:${colour}">${secs(nf.month.seconds)}</b> this month`
         + ` (${N(nf.month.sessions)} call${N(nf.month.sessions) === 1 ? "" : "s"})${price}${why}</p>`;
+
+      // Where the last day of blanks actually sits, and which side of the cable the app says it
+      // came from. The same number of seconds spread over forty machines is weather; on three
+      // machines it is one camera, one network, and one customer who can be told what to unplug.
+      const bk = nf.blank;
+      if (bk) {
+        const one = (n, word) => `${N(n)} ${word}${N(n) === 1 ? "" : "s"}`;
+        let spread;
+        if (N(bk.calls) === 0) {
+          spread = "Last 24 hours: no blank call has closed.";
+        } else {
+          const worst = (bk.worst || []).map((g) =>
+            `${esc(g.machine)} — ${one(g.calls, "call")}, ${secs(g.seconds)} (${esc(g.who)})`).join(" · ");
+          const side = bk.causes
+            ? ` · what the app itself blamed: ${one(bk.causes.his_side, "call")} from his machine, ${one(bk.causes.our_side, "call")} from ours`
+            : " · no build that names the cause has reported these yet";
+          spread = `Last 24 hours: <b>${one(bk.calls, "blank call")}</b> on <b>${one(bk.machines, "machine")}</b>`
+            + ` (${one(bk.accounts, "account")})${side}.<br>` + (worst || "no machine named on the rows");
+        }
+        frameLine += `<p class="muted" style="margin:6px 0 0;font-size:12px">${spread}</p>`;
+      } else {
+        // The seconds above came from one table and the spread from another, so a read that
+        // answered the first without the second is said out loud rather than left as silence -
+        // silence here reads as "a quiet day", which is the opposite claim.
+        frameLine += `<p class="muted" style="margin:6px 0 0;font-size:12px">Last 24 hours: which machines they sat on could not be counted this time.</p>`;
+      }
     }
 
     box.innerHTML = `

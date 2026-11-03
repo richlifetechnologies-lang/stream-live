@@ -48,6 +48,13 @@ const REASON_COPY: Record<string, string> = {
   // number the server holds this machine for, and the button counts it down in front of him
   // instead of dialing again on its own.
   picture_hold: "No picture arrived, so the app ended your call instead of letting it run. Nothing was used - your minutes are exactly where they were. This computer has to wait about two minutes for the video line to release before its next call, and the Start button is counting that time down. Press it again when it reaches zero; starting sooner only gets refused.",
+  // The two blanks this machine can prove, read off its own camera counter and its own
+  // connection. Each one names the side of the cable the customer can reach, because the
+  // one thing worse than a blank screen is a blank screen and a sentence about our service.
+  // Neither of them promises a countdown the app may not be showing: whether this machine is
+  // held afterwards is the video line's decision, so the wait is described, not counted.
+  camera_stalled: "Your camera stopped feeding pictures to the app, so there was nothing for the video service to turn into your AI picture, and the call was closed rather than left running blank. Nothing was used - your minutes are exactly where they were. Pick your camera again in the bar at the bottom of the page, or unplug it and plug it back in, then press Start again. If it holds for a couple of minutes first, that is the video line being released and it costs you nothing.",
+  never_connected: "No connection came up between this computer and the video line, so nothing ever reached your screen. Nothing was used - your minutes are exactly where they were. This is nearly always something in the way on this machine: switch off a VPN, let the app through your firewall, or try a different network, then press Start again. If it holds for a couple of minutes first, that is the video line being released and it costs you nothing.",
   // The voice-only tab has no picture to fail: the only thing it can lack is the cloned voice.
   // The meter never started without it, so the one thing worth telling him is that he was not
   // charged and can press Start again straight away.

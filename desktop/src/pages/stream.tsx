@@ -16,6 +16,7 @@ import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
 import { BLIND_RETRY_HOLD_MS, PICTURE_GIVE_UP_MS, START_TRIES, classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
+import { noPictureCause, noPictureDetail, type NoPictureEvidence } from "../lib/no-picture-cause";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
 import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../lib/lipsync";
@@ -1233,6 +1234,17 @@ export default function StreamPage() {
   // call whose picture arrived at 20 seconds is a working call even while it waits. This is
   // the only honest answer to "did he see anything".
   const firstFrameRef = useRef<number | null>(null);
+  // The three signals that decide what a blank screen actually means, gathered during the call
+  // by the code that already had them: the frame counter below the preview, the transport's own
+  // state, and the moment the line handed this computer a stream. Both are cleared when a call
+  // opens rather than when one closes, so what they say is about the call being given up on.
+  const camCounterRanRef = useRef(false);
+  const camFedFrameRef   = useRef(false);
+  const lineConnectedRef = useRef(false);
+  // Whether this call ever painted a frame. The give-up signals above are cleared when a call
+  // opens rather than when one closes, so a failure partway through a working call still has to
+  // be able to tell itself apart from a call that was blank from the start.
+  const paintedRef       = useRef(false);
   // The wait announced for this machine, as an instant rather than a number, so a re-render
   // mid-count never re-arms it and a press that arrives during it can be refused on the spot.
   const holdUntilRef = useRef<number | null>(null);
@@ -1426,7 +1438,19 @@ export default function StreamPage() {
       if (camCountRef.current) camCountRef.current.srcObject = stream;
       cameraReadyRef.current = true;
       setCameraReady(true); enumerateDevices();
-    } catch { toast({ title: t("Camera Error"), description: t("Could not access camera."), variant: "destructive", withContact: true }); }
+    } catch (err) {
+      // Windows lets one app hold a webcam at a time, and says so in the only two names a
+      // locked device ever arrives under. "Could not access camera" leaves him guessing; this
+      // tells him to go and close the thing that has it, which is on his side of the cable.
+      const busy = err instanceof DOMException && (err.name === "NotReadableError" || err.name === "AbortError");
+      toast({
+        title: t("Camera Error"),
+        description: busy
+          ? t("Your camera is being used by another app on this computer, so the app could not open it. Close the other app - another call, a phone link or a camera preview - and turn the camera on again here.")
+          : t("Could not access camera."),
+        variant: "destructive", withContact: true,
+      });
+    }
   }, [selectedCamId, enumerateDevices, toast]);
 
   // Refs so enumerateDevices can restart the live camera without a dep cycle.
@@ -1484,6 +1508,11 @@ export default function StreamPage() {
       const ai  = presented(remoteVideoRef.current);
       const camN = cam !== null && prevCam !== null ? cam - prevCam : null;
       const aiN  = ai  !== null && prevAi  !== null ? ai  - prevAi  : null;
+      // Read by the give-up on a blank call: a counter that produced a number during this call
+      // is a camera this app was really watching, and a camera that produced no frame at all is
+      // the one blank whose cause is on the customer's side of the cable.
+      if (camN !== null) camCounterRanRef.current = true;
+      if (camN !== null && camN >= 1) camFedFrameRef.current = true;
       if (fpsCamRef.current) fpsCamRef.current.textContent = camN === null ? t("Camera —") : t("Camera {n} fps", { n: camN });
       if (fpsAiRef.current)  fpsAiRef.current.textContent  = aiN === null ? t("AI picture —") : t("AI picture {n} fps", { n: aiN });
       if (fpsHintRef.current) {
@@ -1978,6 +2007,27 @@ export default function StreamPage() {
     return () => clearTimeout(id);
   }, [isStreaming, account, teardownStream, toast, setLocation]);
 
+  /**
+   * What this machine saw while the screen stayed blank, turned into the two things that need
+   * it: the sentence for the customer, and the line for his administrator's log.
+   *
+   * Taken before a teardown, never after one. The signals belong to the call being given up on,
+   * and they are cleared when the next call opens rather than when this one closes, so the
+   * answer cannot be contaminated by whatever the camera was doing beforehand.
+   */
+  const blindReadout = useCallback(() => {
+    const evidence: NoPictureEvidence = {
+      cameraSeen: camCounterRanRef.current,
+      cameraProducing: camFedFrameRef.current,
+      connected: lineConnectedRef.current,
+    };
+    const cause = noPictureCause(evidence);
+    const off = clockSkewMs();
+    const note = off === null || Math.abs(off) < CLOCK_NOTICE_MS
+      ? "" : ` [machine clock ${describeClockSkew(off)} real time]`;
+    return { cause, detail: noPictureDetail(evidence, cause, note), message: endReasonMessage(cause) };
+  }, []);
+
   // ─── Give up on a call that never puts a picture on screen ──────────────────
   // The gateway bills nothing before the first frame, so every second of a blank call is the
   // seller's cost and the customer's dead time. Left alone it sits there looking broken until
@@ -1994,14 +2044,15 @@ export default function StreamPage() {
       // A frame that arrived in the meantime, or a call that is no longer the one being
       // watched, both mean there is nothing to give up on.
       if (firstFrameRef.current !== null || sessionIdRef.current !== sid) return;
+      const blind = blindReadout();
       reportCallFailure(sid, "engine",
-        `no picture ${Math.round(PICTURE_GIVE_UP_MS / 1000)} s after the call opened; this app ended it`);
+        `no picture ${Math.round(PICTURE_GIVE_UP_MS / 1000)} s after the call opened; this app ended it — ${blind.detail}`);
       void teardownStream();
-      armHold(BLIND_RETRY_HOLD_MS, endReasonMessage("picture_hold"));
-      toast({ title: t("Call ended"), description: endReasonMessage("picture_hold"), variant: "destructive" });
+      armHold(BLIND_RETRY_HOLD_MS, blind.message);
+      toast({ title: t("Call ended"), description: blind.message, variant: "destructive" });
     }, Math.max(0, lease.startedAt + PICTURE_GIVE_UP_MS - Date.now()));
     return () => clearTimeout(id);
-  }, [isStreaming, account, teardownStream, armHold, toast]);
+  }, [isStreaming, account, teardownStream, armHold, toast, blindReadout]);
 
   // ─── Give up on a voice call whose voice never arrives ────────────────────────
   // A voice-only call has no picture to watch, and its meter now holds at zero until cloned
@@ -2084,6 +2135,12 @@ export default function StreamPage() {
       // From this second the lease is live, so the page remembers what kind of call it is:
       // a cloning call is not on air until the cloned voice has answered.
       cloneThisCallRef.current = needsVoice;
+      // A new call, so a clean set of signals: anything the counters say from here belongs to
+      // the call that may have to be given up on.
+      camCounterRanRef.current = false;
+      camFedFrameRef.current   = false;
+      lineConnectedRef.current = false;
+      paintedRef.current       = false;
 
       setConnStep(voiceOnly ? "voice" : "engine");
       const style  = STYLES.find(s => s.id === selectedStyle)!;
@@ -2147,6 +2204,9 @@ export default function StreamPage() {
           ticket.token, sendStream,
           remote => {
             if (sessionGenRef.current !== gen) return;
+            // A stream reached this computer: the line is connected as far as the blank screen
+            // is concerned, whatever the transport's own state machine goes on reporting.
+            lineConnectedRef.current = true;
             remoteStreamRef.current = remote;
             if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remote;
             window.__slRemoteStream = remote;
@@ -2157,6 +2217,7 @@ export default function StreamPage() {
             if (sessionGenRef.current !== gen) return;
             if (state === "connected") {
               if (iceGraceRef.current) { clearTimeout(iceGraceRef.current); iceGraceRef.current = null; }
+              lineConnectedRef.current = true;
               setConnStatus("connected");
               return;
             }
@@ -2233,13 +2294,16 @@ export default function StreamPage() {
         updateLease(ticket.sessionId, state);
         void refreshBalances();
         if (state.ended) {
+          // Read before the teardown: whichever of the two gets here first, the customer gets
+          // the sentence this machine can prove rather than the general one.
+          const blind = state.reason === "no_picture" ? blindReadout() : null;
           void teardownStream();
           const oom = state.reason === "out_of_minutes";
           // The gateway cut a blank call at its own deadline. Same hold as the app's give-up,
           // so whichever of the two gets there first leaves him with one number to wait for.
-          if (state.reason === "no_picture") armHold(BLIND_RETRY_HOLD_MS, endReasonMessage("picture_hold"));
+          if (blind) armHold(BLIND_RETRY_HOLD_MS, blind.message);
           toast({ title: oom ? t("Out of minutes") : t("Call ended"),
-                  description: state.reason === "no_picture" ? endReasonMessage("picture_hold") : endReasonMessage(state.reason),
+                  description: blind ? blind.message : endReasonMessage(state.reason),
                   variant: "destructive", withContact: true });
           if (oom) setLocation("/minutes");
         }
@@ -2260,21 +2324,30 @@ export default function StreamPage() {
       // Recorded beside the engine's own words so the panel can tell a machine whose clock was
       // hours off from a video line that genuinely stopped answering.
       const offMs = clockSkewMs();
+      const clockNote = offMs === null || Math.abs(offMs) < CLOCK_NOTICE_MS
+        ? "" : ` [machine clock ${describeClockSkew(offMs)} real time]`;
+      // A call that died with the screen blank, and never painted a frame at all: this machine
+      // knows whether its own camera was feeding the app and whether a connection ever came up,
+      // and either of those is worth more to the customer than the blanket sentence. The
+      // remainder (picture_hold) keeps the blanket one, because it promises a countdown this
+      // path never shows, and the asks themselves are unchanged either way.
+      const blank = sessionId !== null && !paintedRef.current;
+      const blind = blank ? blindReadout() : null;
       return classifyStartFailure(
         err instanceof GatewayError ? err.reason : null,
         (err instanceof Error ? err.message : String(err))
-          + (offMs === null || Math.abs(offMs) < CLOCK_NOTICE_MS
-            ? "" : ` [machine clock ${describeClockSkew(offMs)} real time]`),
+          + (blind === null ? clockNote : ` — ${blind.detail}`),
         sessionId,
         err instanceof GatewayError ? err.retryAfterSeconds : null,
         engine,
+        blind !== null && blind.cause !== "picture_hold" ? blind.cause : null,
       );
     } finally {
       // A microphone proven before the lease and never handed to a pipeline belongs to
       // nothing, and Windows shows a recording light while it is open.
       if (!micHandedOff && mic) mic.getTracks().forEach(t => t.stop());
     }
-  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold]);
+  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold, blindReadout]);
 
   /**
    * Sleep, counting the seconds on screen. A wait the server announced for this exact
@@ -2550,7 +2623,7 @@ export default function StreamPage() {
             one element ever decodes the stream. */}
         <video
           ref={el => { remoteVideoRef.current = el; if (el && remoteStreamRef.current && el.srcObject !== remoteStreamRef.current) el.srcObject = remoteStreamRef.current; }}
-          onPlaying={() => { if (firstFrameRef.current === null) firstFrameRef.current = Date.now(); markAirWhenReady(); }}
+          onPlaying={() => { if (firstFrameRef.current === null) firstFrameRef.current = Date.now(); paintedRef.current = true; markAirWhenReady(); }}
           autoPlay playsInline muted
           style={{ width: "100%", height: "100%", objectFit: "cover", display: "block", transform: "scaleX(-1)" }} />
 

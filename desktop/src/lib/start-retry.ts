@@ -82,6 +82,13 @@ export type StartFailure = {
    * so it beats the table above.
    */
   waitMs: number | null;
+  /**
+   * The cause this machine proved for a blank screen — his camera, or no connection coming
+   * up — when the ask died with a call open and nothing on screen. Null for every refusal
+   * that says why itself. It changes only the sentence: a second ask is still the right
+   * answer to a line that never connected, so the ladder is never shortened by it.
+   */
+  causeReason: string | null;
 };
 
 /**
@@ -104,6 +111,7 @@ export function classifyStartFailure(
   sessionId: string | null,
   waitSeconds: number | null = null,
   engine: string | null = null,
+  causeReason: string | null = null,
 ): StartFailure {
   const announced = Number(waitSeconds);
   const waitMs = Number.isFinite(announced) && announced > 0
@@ -118,9 +126,10 @@ export function classifyStartFailure(
       sessionId,
       engine,
       waitMs,
+      causeReason: null,
     };
   }
-  return { retryable: true, stage: "engine", detail, sessionId, engine, waitMs: null };
+  return { retryable: true, stage: "engine", detail, sessionId, engine, waitMs: null, causeReason };
 }
 
 /**
@@ -139,6 +148,7 @@ export function preflightFailure(reason: string): StartFailure {
     sessionId: null,
     engine: null,
     waitMs: null,
+    causeReason: null,
   };
 }
 
@@ -195,5 +205,7 @@ export function startFailureMessage(f: StartFailure): string {
   // The machine's clock, not the video line: say which, because they are fixed in different
   // places and only one of them is somewhere the customer can reach.
   if (f.stage === "engine" && clockRefusedThePass(f.detail)) return endReasonMessage("clock_skew");
-  return endReasonMessage(f.reason ?? (f.stage === "engine" ? "engine_no_answer" : null));
+  // Then this machine's own proved cause, when it has one: his camera, or no connection coming
+  // up. Both are things he can go and fix, which is what the old blanket sentence could not say.
+  return endReasonMessage(f.reason ?? (f.stage === "engine" ? (f.causeReason ?? "engine_no_answer") : null));
 }

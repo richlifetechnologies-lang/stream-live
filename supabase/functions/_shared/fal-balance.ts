@@ -100,6 +100,35 @@ export type FalWindowCount = {
 export type FalNoFrame = {
   today: FalWindowCount;
   month: FalWindowCount;
+  /** Where the last day of blanks actually sits. Null when the read could not be taken. */
+  blank: FalBlankSpread | null;
+};
+
+/** One machine's share of the last day of blank calls. */
+export type FalBlankGroup = {
+  /** The device the app booked the call on, shortened — the man reading this knows his own machines. */
+  machine: string;
+  calls: number;
+  seconds: number;
+  /** The account that was signed in on it. "several accounts" when more than one was. */
+  who: string;
+};
+
+/**
+ * Whether yesterday's blanks are his side of the cable or hers.
+ *
+ * The app writes the cause it proved onto the call it gave up on, and only two of the three
+ * causes are anywhere a customer can reach. A day that reads "all his side" is a support
+ * problem; a day that reads "all ours" is a supplier problem, and they are fixed in different
+ * places. Null when no call in the window carried a cause — which is what every build before
+ * the one that reports them leaves behind.
+ */
+export type FalBlankSpread = {
+  calls: number;
+  machines: number;
+  accounts: number;
+  worst: FalBlankGroup[];
+  causes: { his_side: number; our_side: number } | null;
 };
 
 export type FalBalancePayload = {
@@ -303,7 +332,7 @@ async function noFrame(monthStart: string): Promise<FalNoFrame | null> {
   // kept, because every call from that era sent a picture.
   const { data, error } = await db
     .from("usage_sessions")
-    .select("started_at, lease_expires_at, ended_at")
+    .select("started_at, lease_expires_at, ended_at, device_id, user_id")
     .eq("engine", "fal")
     .or("modality.is.null,modality.in.(video,video_audio)")
     .is("media_started_at", null)
@@ -312,7 +341,11 @@ async function noFrame(monthStart: string): Promise<FalNoFrame | null> {
   if (error) return null;
 
   const now = Date.now(), dayStart = Date.parse(utcDayStart());
+  const since24 = now - 24 * 3600_000;
   const gap = { sessions: 0, seconds: 0 }, mon = { sessions: 0, seconds: 0 };
+  const byMachine = new Map<string, { machine: string; calls: number; seconds: number; users: Set<string> }>();
+  const accounts = new Set<string>();
+  let calls24 = 0;
   for (const s of data ?? []) {
     const open = ms(s.started_at);
     if (open === null) continue;
@@ -322,9 +355,70 @@ async function noFrame(monthStart: string): Promise<FalNoFrame | null> {
     mon.sessions += 1;
     mon.seconds += took;
     if (open >= dayStart) { gap.sessions += 1; gap.seconds += took; }
+    if (open >= since24) {
+      calls24 += 1;
+      // The machine the app booked the call on, not the account: the same person on two
+      // computers is two different cameras and two different networks, and this line exists
+      // to find out whether one of them is the whole problem.
+      const machine = String(s.device_id ?? "").slice(0, 12) || "(no machine id on the row)";
+      const g = byMachine.get(machine) ?? { machine, calls: 0, seconds: 0, users: new Set<string>() };
+      g.calls += 1;
+      g.seconds += took;
+      const u = String(s.user_id ?? "");
+      if (u) { g.users.add(u); accounts.add(u); }
+      byMachine.set(machine, g);
+    }
   }
   const r = (v: number) => Math.round(v * 10) / 10;
-  return { today: { sessions: gap.sessions, seconds: r(gap.seconds) }, month: { sessions: mon.sessions, seconds: r(mon.seconds) } };
+
+  // What the app itself proved about each blank it gave up on. Rows only exist from the build
+  // that started writing them, so an empty read is reported as no read at all rather than as
+  // "nothing was his side", which is the wrong comfort to give a man deciding who to fix.
+  let causes: { his_side: number; our_side: number } | null = null;
+  const { data: fails } = await db
+    .from("call_failures")
+    .select("detail")
+    .eq("stage", "engine")
+    .gte("created_at", new Date(since24).toISOString())
+    .limit(2000);
+  const marked = (fails ?? []).filter(f => String(f.detail ?? "").includes("cause="));
+  if (marked.length) {
+    let his = 0, ours = 0;
+    for (const f of marked) {
+      const d = String(f.detail ?? "");
+      if (d.includes("cause=camera_stalled") || d.includes("cause=never_connected")) his += 1;
+      else if (d.includes("cause=picture_hold")) ours += 1;
+    }
+    causes = { his_side: his, our_side: ours };
+  }
+
+  const named = [...byMachine.values()].sort((a, b) => b.calls - a.calls || b.seconds - a.seconds).slice(0, 3);
+  const ids = [...new Set(named.flatMap(g => [...g.users]))];
+  const emails = new Map<string, string>();
+  if (ids.length) {
+    const { data: people } = await db.from("profiles").select("id, email").in("id", ids).limit(ids.length);
+    for (const p of people ?? []) emails.set(String(p.id), String(p.email ?? ""));
+  }
+  const blank: FalBlankSpread = {
+    calls: calls24,
+    machines: byMachine.size,
+    accounts: accounts.size,
+    worst: named.map(g => ({
+      machine: g.machine,
+      calls: g.calls,
+      seconds: r(g.seconds),
+      who: g.users.size === 0 ? "(no account on the row)"
+        : g.users.size > 1 ? `${g.users.size} accounts`
+        : emails.get([...g.users][0]) ?? "(account not listed)",
+    })),
+    causes,
+  };
+
+  return {
+    today: { sessions: gap.sessions, seconds: r(gap.seconds) },
+    month: { sessions: mon.sessions, seconds: r(mon.seconds) },
+    blank,
+  };
 }
 
 /**

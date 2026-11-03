@@ -7,6 +7,19 @@ import fs from "node:fs";
 const HERE = "C:/Users/david/Documents/Qoder/2026-10-30/19734475";
 const panel = fs.readFileSync("admin-panel/index.html", "utf8");
 
+// SC picks which last-24-hours blank picture reading the stub hands the card, so every branch of
+// the new line is rendered rather than reasoned about: "none" = the count could not be taken,
+// "zero" = a quiet day, and the default = the spike that motivated the line.
+const SC = process.env.SC || "";
+const BLANK = SC === "none" ? null : SC === "zero"
+  ? { calls: 0, machines: 0, accounts: 0, worst: [], causes: null }
+  : { calls: 5, machines: 2, accounts: 2,
+      worst: [
+        { machine: "3f9a2b7c11d4", calls: 4, seconds: 16.8, who: "davidallenmorrow9@gmail.com" },
+        { machine: "b71c0d0a99ee", calls: 1, seconds: 4.6, who: "lilylife238@gmail.com" },
+      ],
+      causes: SC === "uncaused" ? null : { his_side: 3, our_side: 1 } };
+
 const PAST = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString();
 const FUTURE = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
 // The server, 721 minutes behind this machine - the gap in his screenshot.
@@ -152,10 +165,13 @@ const STUB = `
       const action = (() => { try { return JSON.parse(opts.body).action; } catch (e) { return ""; } })();
       const body = action === "calls" ? ${JSON.stringify(CALLS)}
         : action === "resolve" ? { ok: true, users: [] }
-        : action === "fal_balance" ? { ok: true, balance: 74.64,
+        : action === "fal_balance" ? { ok: true, configured: true, tail: "••••9f2c", label: "billing",
+            balance: 74.64, currency: "USD",
             today: { cost: 30, seconds: 9000 }, month: { cost: 120, seconds: 36000 },
-            per_key: [], live: null,
-            no_frame: { today: { sessions: 1, seconds: 41.3 }, month: { sessions: 2, seconds: 82.6 } } }
+            per_second: 0.02083, per_second_source: "fal", minutes_left: 400, keys: [], live: null,
+            from_cache: false, detail: "stubbed reading for the offline proof",
+            no_frame: { today: { sessions: 5, seconds: 21.4 }, month: { sessions: 9, seconds: 118.2 },
+              blank: ${JSON.stringify(BLANK)} } }
         : action === "trial_supply" ? { ok: true, keys: [] }
         : { ok: true };
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });
@@ -170,10 +186,16 @@ const STUB = `
 </script>
 `;
 
+// The stub is assembled by interpolation, so a miscounted brace here would produce a boot copy
+// that renders a blank card and looks like a bug in the panel. Parse the injected script before
+// writing it: a broken harness fails loudly at generation time instead.
+const stubJs = STUB.replace(/^[\s\S]*?<script>/, "").replace(/<\/script>[\s\S]*$/, "");
+try { new Function(stubJs); } catch (e) { fs.writeFileSync(HERE + "/tmp-stub-dump.js", stubJs); throw new Error(`the stub does not parse: ${e.message}`); }
+
 // Replace only the CDN supabase-js tag with the stub; the app's own <script> is left byte for byte.
 const CDN = /<script src="https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js[^"]*"><\/script>/;
 if (!CDN.test(panel)) throw new Error("the CDN supabase-js tag is not where the harness expects it");
 const out = panel.replace(CDN, STUB);
-const file = HERE + "/tmp-panel-boot.html";
+const file = HERE + `/tmp-panel-boot${SC ? "-" + SC : ""}.html`;
 fs.writeFileSync(file, out, "utf8");
 console.log("wrote", file, fs.statSync(file).size, "bytes (built panel is", panel.length, "chars; only the CDN tag was replaced)");
