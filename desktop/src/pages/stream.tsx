@@ -72,6 +72,10 @@ const TABS: { id: TabId; label: string; sub: string; Icon: typeof Video; color: 
 // account the seller has not opened them for, and one pool of minutes means a balance can no
 // longer tell the tabs apart, so the money cannot be the clue any more.
 const TAB_STORAGE = "ss_open_tab";
+// The trial card is said once per machine, not once per call: a customer who has read that his
+// free minutes put a mark on the picture does not need it again, and a popup that returns every
+// call is the kind he learns to press without reading.
+const TRIAL_CARD_SEEN = "ss_trial_card_seen";
 function savedTab(): TabId | null {
   try {
     const v = localStorage.getItem(TAB_STORAGE);
@@ -1033,6 +1037,15 @@ export default function StreamPage() {
   const [connStatus, setConnStatus]   = useState<"idle"|"connecting"|"connected"|"reconnecting">("idle");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isStarting, setIsStarting]  = useState(false);
+  // The mark a trial puts on the picture, said two ways: the card he reads once, then the
+  // ribbon that stays at the top of his video for as long as his calls run on free minutes.
+  const [trialCard, setTrialCard]     = useState(false);
+  const [trialRibbonOff, setTrialRibbonOff] = useState(false);
+  // Nothing may outlive the call it was about: when the page is back to idle, the card goes with
+  // it, so a call that failed never leaves a popup sitting over the screen it failed on.
+  useEffect(() => {
+    if (!isStarting && !isStreaming && connStatus === "idle") setTrialCard(false);
+  }, [isStarting, isStreaming, connStatus]);
   const [isClosing, setIsClosing]    = useState(false);
   const [connStep, setConnStep]       = useState<"mic"|"auth"|"engine"|"voice"|"retry"|null>(null);
   // Seconds left on a wait the gateway announced for this machine. Null when nobody has
@@ -2397,6 +2410,18 @@ export default function StreamPage() {
     }
     isStartingRef.current = true; setIsStarting(true);
     startCancelRef.current = false;
+    // A trial is the only kind of call that puts a mark on his picture, so it is said at the
+    // press that starts it: the card once per machine, then the ribbon on every trial call.
+    // The voice-only tab sends no picture, so it has nothing to warn about.
+    if (!account.paid && tabName !== "audio-only") {
+      setTrialRibbonOff(false);
+      let seen = false;
+      try { seen = localStorage.getItem(TRIAL_CARD_SEEN) === "1"; } catch { seen = false; }
+      if (!seen) {
+        try { localStorage.setItem(TRIAL_CARD_SEEN, "1"); } catch { /* nowhere to remember: the card simply shows again next call */ }
+        setTrialCard(true);
+      }
+    }
     try {
       let last: StartFailure | null = null;
       let tries = START_TRIES;
@@ -2435,7 +2460,7 @@ export default function StreamPage() {
     } finally {
       isStartingRef.current = false; setIsStarting(false); setConnStep(null); setPacingSeconds(null);
     }
-  }, [attemptStart, toast, setLocation, countedWait, armHold]);
+  }, [attemptStart, toast, setLocation, countedWait, armHold, account.paid]);
 
   /**
    * Press of the one Start button on this page. Which call it dials is decided by the tab he is
@@ -2650,6 +2675,23 @@ export default function StreamPage() {
         {connStatus === "reconnecting" && (
           <div style={{ position: "absolute", top: 12, left: 12, zIndex: 15, display: "flex", alignItems: "center", gap: 8, padding: "7px 12px", borderRadius: 999, background: "rgba(0,0,0,0.72)", border: "1px solid rgba(0,210,211,0.5)", color: "#fff", fontSize: 12, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
             <Loader2 style={{ width: 14, height: 14, color: C, animation: "spin 1s linear infinite" }} /> {t("Reconnecting…")}
+          </div>
+        )}
+
+        {/* The trial's mark, kept in view for as long as his calls run on free minutes.
+            Its own x clears it for this call and it returns on the next one, so the reminder
+            outlives the popup without becoming the thing he learns to click past. */}
+        {!account.paid && activeTab !== "audio-only" && !trialRibbonOff && (isStarting || isStreaming) && (
+          <div style={{ position: "absolute", top: 12, left: "50%", transform: "translateX(-50%)", zIndex: 16, display: "flex", alignItems: "center", gap: 12, maxWidth: "70%", padding: "10px 38px 10px 14px", borderRadius: 14, background: "hsl(222 44% 6% / 0.93)", border: "1.5px solid hsl(38 100% 58%)", boxShadow: "0 16px 40px rgba(0,0,0,0.6)" }}>
+            <Sparkles style={{ width: 20, height: 20, color: "hsl(38 100% 58%)", flexShrink: 0 }} />
+            <div>
+              <p style={{ margin: 0, fontFamily: "'Orbitron',monospace", fontSize: 13, fontWeight: 700, letterSpacing: "0.04em", color: "hsl(38 100% 58%)" }}>{t("Trial minutes carry a watermark")}</p>
+              <p style={{ margin: "3px 0 0", fontSize: 12, lineHeight: 1.5, fontWeight: 600, fontFamily: "'Rajdhani',sans-serif", color: "hsl(40 55% 90%)" }}>{t("Paid minutes carry none — the mark is gone the moment minutes are in your account.")}</p>
+            </div>
+            <button onClick={() => setTrialRibbonOff(true)} title={t("Close")}
+              style={{ position: "absolute", top: 9, right: 9, width: 24, height: 24, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", background: "transparent", border: "1px solid hsl(38 100% 58% / 0.35)", color: "hsl(38 100% 75%)", cursor: "pointer", padding: 0 }}>
+              <X style={{ width: 13, height: 13 }} />
+            </button>
           </div>
         )}
 
@@ -3541,6 +3583,28 @@ export default function StreamPage() {
             )}
             <button onClick={() => { startCancelRef.current = true; void teardownStream(); }} style={{ padding: "10px 20px", borderRadius: 8, width: "100%", background: "transparent", border: "1px solid hsl(187 100% 52% / 0.25)", color: "hsl(187 100% 52% / 0.8)", fontWeight: 700, fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
               <X style={{ width: 14, height: 14 }} /> {t("Cancel")}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* The trial's first saying, at the press that starts it. The call is not held up by this:
+          it is dialled behind the card, and closing the card hands the reminder to the ribbon. */}
+      {trialCard && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ position: "absolute", inset: 0, backdropFilter: "blur(8px)", background: "hsl(222 47% 4% / 0.55)" }} />
+          <div style={{ position: "relative", zIndex: 10, display: "flex", flexDirection: "column", alignItems: "center", gap: 20, maxWidth: 360, width: "100%", margin: "0 16px", textAlign: "center", padding: 36, borderRadius: 20, background: "hsl(222 44% 6%)", border: "1px solid hsl(38 100% 58% / 0.38)", boxShadow: "0 24px 70px rgba(0,0,0,0.7)" }}>
+            <Sparkles style={{ width: 40, height: 40, color: "hsl(38 100% 58%)" }} />
+            <div>
+              <h3 style={{ margin: "0 0 10px", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 17, lineHeight: 1.35, color: "hsl(38 100% 58%)" }}>{t("Trial minutes carry a watermark")}</h3>
+              <p style={{ margin: 0, fontSize: 15, lineHeight: 1.6, fontWeight: 600, fontFamily: "'Rajdhani',sans-serif", color: "hsl(40 55% 88%)" }}>{t("Paid minutes carry none.")}</p>
+            </div>
+            <p style={{ margin: 0, fontSize: 13, lineHeight: 1.6, fontWeight: 500, fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 62%)" }}>
+              {t("This call is on your free trial, so a mark sits on the AI picture. It is the only thing the trial limits. Your picture is arriving behind this — close it when you have read it.")}
+            </p>
+            <button onClick={() => setTrialCard(false)}
+              style={{ padding: "11px 20px", borderRadius: 9, width: "100%", background: "hsl(38 100% 58%)", border: "none", color: "hsl(222 47% 6%)", fontWeight: 700, fontSize: 14, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer" }}>
+              {t("Close")}
             </button>
           </div>
         </div>
