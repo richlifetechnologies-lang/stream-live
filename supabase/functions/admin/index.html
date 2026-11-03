@@ -46,6 +46,11 @@
   .tabs { display: flex; gap: 6px; margin-bottom: 16px; flex-wrap: wrap; }
   .tabs button { background: #0e141b; }
   .tabs button.on { background: #0e7f86; border-color: #12a5ad; color: #04121a; font-weight: 700; }
+  /* The account window opens on one job, so the rest of it sits behind four small chips instead
+     of stacking under the figures he came for. */
+  .subtabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .subtabs button { background: #0b0f14; border-radius: 999px; padding: 5px 13px; font-size: 12px; }
+  .subtabs button.on { background: #0e7f86; border-color: #12a5ad; color: #04121a; font-weight: 700; }
   .feat { display: inline-flex; align-items: center; gap: 4px; margin-right: 12px; font-size: 12px; color: #cfe6ef; }
   code { background: #0b0f14; padding: 1px 5px; border-radius: 4px; border: 1px solid #1d2733; }
   .stat { background: #0b0f14; border: 1px solid #1d2733; border-radius: 10px; padding: 12px; }
@@ -157,68 +162,92 @@
           <div style="flex:1 1 320px"><label>Credit an account</label><input id="quickEmail" placeholder="the email the user signed up with" /></div>
           <div style="flex:0 0 auto"><button id="quickOpen" class="primary">Open to credit</button></div>
         </div>
-        <p class="muted" style="margin:10px 0 0">Minutes sit in <b>one pool</b> that both call tabs spend from, and never expire. A Video + Audio call drains that pool faster, because a cloned voice is metered at its own rate. Say who you are topping up and how much.</p>
+        <p class="muted" style="margin:10px 0 0">Minutes sit in <b>one pool</b> that both call tabs spend from, and never expire.</p>
         <div id="quickMsg"></div>
       </div>
 
       <div id="acctDetail" class="hidden">
-        <div class="card">
+        <div class="card" style="padding:12px 14px;margin-bottom:10px">
           <div class="row" style="justify-content:space-between;align-items:center">
             <h2 style="font-size:14px;margin:0" id="detTitle">Account</h2>
             <div class="btns">
               <button id="detReload">Reload</button>
-              <button id="detLedgerBtn">Recent ledger</button>
               <button id="detReap">Reap expired leases</button>
               <button id="detSignout" class="danger">Sign out everywhere</button>
             </div>
           </div>
-          <div id="detSummary" class="muted" style="margin-top:8px"></div>
+          <div id="detSummary" class="muted" style="margin-top:6px"></div>
+          <div class="subtabs" style="margin-top:10px">
+            <button data-pane="credit" class="on">Credit minutes</button>
+            <button data-pane="access">What it may use</button>
+            <button data-pane="devices">Devices</button>
+            <button data-pane="ledger">Ledger</button>
+          </div>
           <div id="detMsg"></div>
+        </div>
 
-          <div class="grid2" style="margin-top:14px">
-            <div>
-              <label>What this account may use</label>
-              <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
-                <label class="feat" style="margin:0 0 8px"><input type="checkbox" id="swVideo" /> Video Call</label>
-                <div style="margin-top:10px">
-                  <label style="margin-top:0">Voice cloning for this account</label>
-                  <select id="acctClone">
-                    <option value="off">Closed — nothing that clones</option>
-                    <option value="voice_only">Voice only — calls with no picture</option>
-                    <option value="voice_video">Voice + video — the whole tab</option>
-                  </select>
-                  <div class="muted" id="acctCloneNow" style="margin-top:6px"></div>
-                </div>
-              </div>
-              <div class="muted" style="margin-top:6px">A call type he has not allowed is refused the moment he presses Start, even while his pool holds minutes. <b>Voice cloning</b> is one door with three positions, and this box is his account's own line; the gateway-wide line on the Gateway tab can only close it further, never open it. <b>Closed</b> — the Video + Audio tab goes dead on his screen: he still sees it, every control in it greys, Start refuses him, a call already running is closed at its next voice ask, and his saved voices are out of reach. <b>Voice only</b> — that tab's own Start button (picture with the voice) stays dead, and his <b>Start voice cloning only (no video)</b> button works: an audio call from the same tab, with the cloned voice sent to his software microphone. <b>Voice + video</b> — both buttons work, and the two never run on one machine at the same time: whichever he starts first holds the machine, and starting the other closes the first and hands its unbilled minutes back. This line costs him no minutes and takes nothing off his pool — the call pays from the same pool, at its own rate. A trial account is refused cloning whatever is set here; only an account that has bought minutes can clone.</div>
-            </div>
-            <div>
-              <label>Max concurrent sessions (devices calling at once)</label>
-              <input id="detMaxConc" type="number" min="1" step="1" />
-              <div class="muted" style="margin-top:6px">Concurrent devices are expected — each one holds its own lease.</div>
-            </div>
-          </div>
-          <div class="btns" style="margin-top:12px"><button id="detSaveSwitches" class="primary">Save what it may use</button></div>
-
-          <div class="card" style="margin-top:14px;background:#0b0f14">
-            <h3 style="font-size:13px;margin:0 0 4px">Video service for this account</h3>
-            <p class="muted" style="margin:0 0 10px">By default only an account that was actually <b>granted a free minute</b> runs on the <b>free-trial pool</b> — accounts that joined before the trial existed, and admin accounts, run on the <b>paid service</b>. The moment an account is credited or buys minutes it moves to the paid service permanently. You can pin an account to either one here; nothing the customer does can reveal or change this.</p>
-            <div class="row" style="align-items:center">
-              <div style="flex:0 0 220px"><label style="margin-top:0">Pin to</label><select id="detEngine"><option value="">Automatic (the normal rule)</option><option value="fal">Paid service</option><option value="decart">Free-trial pool</option></select></div>
-              <div style="flex:0 0 auto"><button id="detSaveEngine">Save video service</button></div>
-              <div class="muted" id="detEngineNow" style="flex:1 1 240px"></div>
-            </div>
-          </div>
-
-          <div style="overflow:auto;margin-top:16px">
+        <div class="card acctPane" data-pane="credit">
+          <p class="phint" style="margin:0 0 10px">One pool, both call tabs spend from it. Type the time as <b>1:44</b> or as plain minutes (<b>60</b>); a reason is required.</p>
+          <div style="overflow:auto">
             <table id="bucketTable">
               <thead><tr><th>Wallet</th><th>Balance</th><th>Burn rate</th><th>Unlimited</th><th>Credited</th><th>Spent</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
+          <div class="row" style="margin-top:12px">
+            <div><label style="margin-top:0">Credit to</label><select id="gModality"></select></div>
+            <div style="flex:0 0 120px"><label style="margin-top:0">Time to add</label><input id="gMinutes" type="text" inputmode="numeric" autocomplete="off" placeholder="1:44" /></div>
+            <div style="flex:2 1 240px"><label style="margin-top:0">Reason (audit trail)</label><input id="gReason" placeholder="e.g. Interac e-transfer ref 8842" /></div>
+          </div>
+          <div class="muted" id="gMinHint" style="margin:4px 0 0"></div>
+          <div class="row" style="margin-top:10px;align-items:center">
+            <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gUnlimited" /> Set unlimited</label></div>
+            <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gClearUnlimited" /> Clear unlimited</label></div>
+            <div style="flex:0 0 auto"><button id="grantBtn" class="primary">Credit minutes</button></div>
+            <div style="flex:0 0 auto"><button id="deductBtn" class="danger">Deduct</button></div>
+            <div style="flex:0 0 auto"><button id="zeroBtn" class="danger">Empty to 0:00</button></div>
+          </div>
+          <div class="row" style="margin-top:12px;align-items:center;border-top:1px solid #1d2733;padding-top:10px">
+            <div style="flex:1 1 260px"><label style="margin-top:0">Or credit a whole package</label><select id="gPackage"></select></div>
+            <div style="flex:0 0 auto"><button id="packageBtn" style="margin-top:20px">Credit this package</button></div>
+            <div class="muted" id="gPackageHint" style="flex:1 1 200px;margin-top:20px"></div>
+          </div>
+          <div id="grantMsg"></div>
+        </div>
 
-          <div id="noSub" class="hidden" style="margin-top:14px;border:1px dashed #6b2233;border-radius:10px;padding:12px">
-            <div class="muted">This account has no subscription row yet, so the gateway refuses it with <code>no_subscription</code>. Pick a plan and create one.</div>
+        <div class="card acctPane hidden" data-pane="access">
+          <div class="grid2">
+            <div>
+              <label style="margin-top:0">Voice cloning for this account</label>
+              <select id="acctClone" style="display:none">
+                <option value="off">Closed</option>
+                <option value="voice_only">Voice only</option>
+                <option value="voice_video">Voice + video</option>
+              </select>
+              <div id="acctCloneBox"></div>
+              <div class="muted" id="acctCloneNow" style="margin-top:6px"></div>
+            </div>
+            <div>
+              <label style="margin-top:0">Calls he may make</label>
+              <label class="feat" style="margin:2px 0 10px"><input type="checkbox" id="swVideo" /> Video Call</label>
+              <label>Devices calling at once</label>
+              <input id="detMaxConc" type="number" min="1" step="1" />
+              <div class="muted" style="margin-top:6px">Each device holds its own lease.</div>
+            </div>
+          </div>
+          <div class="btns" style="margin-top:12px"><button id="detSaveSwitches" class="primary">Save what it may use</button></div>
+          <div class="muted" style="margin-top:8px">This line can only close further than the Gateway tab's line, never open it. A free trial is refused cloning whatever is set here.</div>
+
+          <div style="border-top:1px solid #1d2733;margin-top:12px;padding-top:12px">
+            <div class="row" style="align-items:center">
+              <div style="flex:0 0 220px"><label style="margin-top:0">Video service</label><select id="detEngine"><option value="">Automatic (the normal rule)</option><option value="fal">Paid service</option><option value="decart">Free-trial pool</option></select></div>
+              <div style="flex:0 0 auto"><button id="detSaveEngine">Save video service</button></div>
+              <div class="muted" id="detEngineNow" style="flex:1 1 240px"></div>
+            </div>
+          </div>
+
+          <div id="noSub" class="hidden" style="margin-top:12px;border:1px dashed #6b2233;border-radius:10px;padding:10px">
+            <div class="muted">This account has no subscription row yet, so the gateway refuses it. Pick a plan and create one.</div>
             <div class="row" style="margin-top:8px;align-items:center">
               <div><label style="margin-top:0">Plan</label><select id="detPlan"></select></div>
               <div style="flex:0 0 auto"><button id="detCreateSub">Create subscription</button></div>
@@ -226,33 +255,8 @@
           </div>
         </div>
 
-        <div class="card">
-          <h2 style="font-size:14px;margin:0 0 4px">Credit minutes into his pool</h2>
-          <p class="muted" style="margin:0 0 12px">The user paid you outside the software; you credit his pool. There is one pool and both call tabs spend from it, so a grant here never has to be aimed at a tab. Type the amount the way the meter shows it (1:44) or as plain minutes (60) — the line under the box repeats it in both units and previews the balance the click leaves. Deducting is a negative grant (corrections, refunds reversed); <b>Empty this wallet to 0:00</b> takes the exact stored amount so nothing is left over. Both write an append-only ledger row and go through <code>admin-api</code>. A reason is required.</p>
-          <div class="row" style="margin-bottom:14px;align-items:center">
-            <div style="flex:1 1 260px"><label style="margin-top:0">Or credit a whole package in one go</label><select id="gPackage"></select></div>
-            <div style="flex:0 0 auto"><button id="packageBtn" style="margin-top:20px">Credit this package</button></div>
-            <div class="muted" id="gPackageHint" style="flex:1 1 200px;margin-top:20px"></div>
-          </div>
-          <div class="row">
-            <div><label>Credited to</label><select id="gModality"></select></div>
-            <div><label>Time to add — type 1:44 (1 min 44 sec) or 60 (60 min)</label><input id="gMinutes" type="text" inputmode="numeric" autocomplete="off" placeholder="1:44" style="width:110px" /></div>
-            <div style="flex:2 1 260px"><label>Reason (required — audit trail)</label><input id="gReason" placeholder="e.g. Interac e-transfer ref 8842" /></div>
-          </div>
-          <div class="muted" id="gMinHint" style="margin:-4px 0 10px"></div>
-          <div class="row" style="margin-top:12px;align-items:center">
-            <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gUnlimited" /> Set unlimited</label></div>
-            <div style="flex:0 0 auto"><label class="feat" style="margin:0"><input type="checkbox" id="gClearUnlimited" /> Clear unlimited</label></div>
-            <div style="flex:0 0 auto"><button id="grantBtn" class="primary">Credit minutes</button></div>
-            <div style="flex:0 0 auto"><button id="deductBtn" class="danger">Deduct</button></div>
-            <div style="flex:0 0 auto"><button id="zeroBtn" class="danger">Empty this wallet to 0:00</button></div>
-          </div>
-          <div id="grantMsg"></div>
-        </div>
-
-        <div class="card">
-          <h2 style="font-size:14px;margin:0 0 4px">Bound devices</h2>
-          <p class="muted" style="margin:0 0 12px">A device binds itself the first time a call starts on it. Revoking stops that machine from calling; signing out everywhere also ends any lease it holds.</p>
+        <div class="card acctPane hidden" data-pane="devices">
+          <p class="phint" style="margin:0 0 10px">A machine binds itself on his first call. <b>Revoke</b> stops that machine calling; signing out everywhere also ends any lease it holds.</p>
           <div style="overflow:auto">
             <table id="deviceTable">
               <thead><tr><th>Device</th><th>Label</th><th>Last seen</th><th>Status</th><th></th></tr></thead>
@@ -262,8 +266,8 @@
           <div id="deviceMsg"></div>
         </div>
 
-        <div class="card">
-          <h2 style="font-size:14px;margin:0 0 12px">Recent ledger rows</h2>
+        <div class="card acctPane hidden" data-pane="ledger">
+          <p class="phint" style="margin:0 0 10px">Every minute this account gained or spent, newest first.</p>
           <div style="overflow:auto">
             <table id="ledgerTable">
               <thead><tr><th>When</th><th>Wallet</th><th>Kind</th><th style="text-align:right">Delta</th><th style="text-align:right">After</th><th>Reason</th></tr></thead>
@@ -739,22 +743,22 @@
         <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of his pool, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x. All three rates are read against the same pool — the call type decides how fast it drains, not which wallet it comes from. <b>Voice only (no video)</b> is the rate a cloning call with no picture runs at: the same button's minutes, priced on its own line.</p>
         <div style="overflow:auto">
           <table id="currentRates">
-            <thead><tr><th>Call type</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>Effective from (UTC)</th><th>Note</th></tr></thead>
+            <thead><tr><th>Call type</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>In force since</th><th>Note</th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
+        <div id="ratesPending"></div>
       </div>
 
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px">Post a new rate</h2>
-        <p class="muted" style="margin:0 0 12px">Rates are versioned history: never edit a rate that already ran, post a new row. A lease in flight keeps the multiplier it started with.</p>
+        <p class="muted" style="margin:0 0 12px">Rates are versioned history: never edit a rate that already ran, post a new row. <b>Saving a rate starts it the same second it is saved</b> — there is no start time to set and nothing to wait for. A lease already in flight keeps the multiplier it started with.</p>
         <div class="row">
           <div><label>Call type</label><select id="brModality"><option value="video">Video Call</option><option value="audio">Voice only (no video)</option><option value="video_audio">Video + Audio</option></select></div>
           <div><label>Multiplier</label><input id="brMult" type="number" min="0.05" step="0.05" value="1" /></div>
-          <div><label>Effective from (UTC)</label><input id="brFrom" type="datetime-local" /></div>
           <div style="flex:2 1 240px"><label>Note</label><input id="brNote" placeholder="e.g. ElevenLabs price rise" /></div>
         </div>
-        <div class="btns" style="margin-top:12px"><button id="saveRate" class="primary">Insert new rate</button></div>
+        <div class="btns" style="margin-top:12px"><button id="saveRate" class="primary">Save new rate</button></div>
         <div id="rateMsg"></div>
       </div>
 
@@ -883,12 +887,13 @@
           </div>
           <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
             <label style="margin-top:0">Voice cloning across the whole software</label>
-            <select id="cfgCloningMode">
-              <option value="off">Closed — everything that clones is shut</option>
-              <option value="voice_only">Voice only — no picture on that tab, for anyone</option>
-              <option value="voice_video">Voice + video — accounts run on their own line</option>
+            <select id="cfgCloningMode" style="display:none">
+              <option value="off">Closed</option>
+              <option value="voice_only">Voice only</option>
+              <option value="voice_video">Voice + video</option>
             </select>
-            <div class="muted" style="margin-top:6px">One line for the whole software, and it can only ever close what an account has opened — never open what an account has closed. <b>Closed</b> shuts <b>everything</b> on the Video + Audio tab for <b>every</b> screen whatever each account's own line says: no voice-and-picture call and no voice-only call starts, the tab's controls grey, a call already running of either kind closes at its next voice ask, and no voice key is spent on it. <b>Voice only</b> keeps the picture half of that tab dead for everyone and leaves voice-only calls to those accounts whose own line allows them. <b>Voice + video</b> leaves the door to each account's own line, untouched. It lands on the next read each app makes — there is nothing to restart on anybody's machine.</div>
+            <div id="cfgCloningBox"></div>
+            <div class="muted" style="margin-top:6px">Click the choice you want, then press <b>Save gateway config</b>. This is a ceiling over every account: it can close what an account's own line has opened, and it can never open what an account has closed. It lands on the next read each app makes — there is nothing to restart on anybody's machine.</div>
             <div class="muted" id="cfgCloningNow" style="margin-top:6px"></div>
           </div>
         </div>
@@ -1140,6 +1145,56 @@
     }
     return '<span class="pill yes">cloning on (voice + video)</span>';
   };
+  // The door, shown as three named choices you click instead of a dropdown you have to open and
+  // guess at. A dropdown hides what each position does until it is already picked, which is how an
+  // owner ends up unable to say which tab his customer sees — and each label here quotes the button
+  // on the customer's own screen, not an internal name.
+  const CLONE_ROWS = {
+    gateway: [
+      ["off", "Closed — no cloning anywhere", "Every customer's Video + Audio tab goes dead: no voice-and-picture call and no voice-only call. Nothing to restart on their machines; it lands on their next read."],
+      ["voice_only", "Voice only — for every customer", "The picture Start is off on everyone's Video + Audio tab. Only “Start voice cloning only (no video)” can run, and only for accounts whose own line allows voice."],
+      ["voice_video", "Open — each account decides for itself", "Nothing is closed from here. Who may clone is set per account on the Accounts tab."],
+    ],
+    account: [
+      ["off", "Closed for him", "His Video + Audio tab does nothing. He still sees the tab, every control in it greys, and Start refuses him."],
+      ["voice_only", "Voice only for him", "“Start voice cloning only (no video)” works. The picture Start on that tab stays grey."],
+      ["voice_video", "Voice + video for him", "Both Start buttons work, one at a time: starting the other closes the first and hands its unbilled minutes back."],
+    ],
+  };
+  const CLONE_UI = {};
+  function cloneChoiceUI(selectId, boxId, kind, saveLabel) {
+    const sel = $(selectId), box = $(boxId);
+    const ui = CLONE_UI[selectId] = { kind, saved: null };
+    ui.paint = () => {
+      const changed = ui.saved != null && sel.value !== ui.saved;
+      box.innerHTML = CLONE_ROWS[kind].map(([v, t, d]) => {
+        const on = v === sel.value;
+        return `<div data-v="${v}" style="border:1px solid ${on ? "#2dd4bf" : "#1d2733"};border-radius:8px;padding:7px 9px;margin-top:6px;background:${on ? "rgba(45,212,191,.08)" : "transparent"};${sel.disabled ? "opacity:.45" : "cursor:pointer"}">
+          <div style="font-size:12px"><span style="color:${on ? "#2dd4bf" : "#64748b"}">${on ? "●" : "○"}</span> <b>${t}</b></div>
+          <div class="muted" style="font-size:11px;margin-top:2px;line-height:1.45">${d}</div></div>`;
+      }).join("") + `<div class="muted" style="font-size:11px;margin-top:6px">${changed
+        ? `<span class="pill warn">not saved yet</span> press <b>${saveLabel}</b> to set it.`
+        : "The filled circle is what is in force right now."}</div>`;
+    };
+    box.onclick = (e) => {
+      const r = e.target.closest("[data-v]");
+      if (!r || sel.disabled) return;
+      sel.value = r.dataset.v;
+      ui.paint();
+    };
+    ui.paint();
+  }
+  // Recorded wherever the panel reads the door, so the rows can tell an unsaved click apart from a
+  // saved one instead of leaving him guessing whether the switch is already live.
+  function setCloneDoor(selectId, mode) {
+    const ui = CLONE_UI[selectId];
+    $(selectId).value = mode;
+    if (!ui) return;
+    ui.saved = mode;
+    ui.paint();
+  }
+  cloneChoiceUI("acctClone", "acctCloneBox", "account", "Save what it may use");
+  cloneChoiceUI("cfgCloningMode", "cfgCloningBox", "gateway", "Save gateway config");
   // The gateway-wide line, asked for on its own because a database that has not run 20261102120000
   // yet has no cloning_mode column, and naming a missing column fails the whole select. When it is
   // missing, the older two-position boolean answers — and it can only ever mean its two positions.
@@ -1213,6 +1268,12 @@
   const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const mask = (v) => (v ? "••••" + String(v).slice(-4) : "—");
   const mins = (v) => { const n = N(v); const s = n.toFixed(1); return s.endsWith(".0") ? s.slice(0, -2) : s; };
+  // A burn multiplier is NOT a minutes figure and must never go through mins(): mins rounds to one
+  // decimal, so an admin who types 1.25 sees "1.3x" back and reasonably believes his rate was
+  // changed. The stored figure is numeric(6,3) and is exact, so print exactly what is stored, with
+  // the filler zeros dropped (1.250 -> "1.25", 1.500 -> "1.5", 1.000 -> "1"). Named rateLabel
+  // because `rate` is already the provider-price object inside the Prices tab's own functions.
+  const rateLabel = (v) => N(v).toFixed(3).replace(/\.?0+$/, "");
   // One-minute-per-cell rule shared with the desktop: a balance or a stretch of
   // air time is printed as m:ss (the desktop's countdown), minutes consumed are
   // printed with the same decimals the desktop prints them with. Before this,
@@ -1399,7 +1460,6 @@
     $("dash").classList.remove("hidden");
     await loadPlans();
     await Promise.all([loadRequests(), loadKeys(), loadRates(), loadSessions(), loadAirtime(), loadConfig(), loadContact(), loadAccounts(), loadCalls()]);
-    setBrFromNow();
     await loadPricing();
   }
 
@@ -1861,15 +1921,16 @@
     const ownCloneMode = c.clone_own ?? (c.modalities?.video_audio === true ? "voice_video" : "off");
     const globalCloneMode = c.clone_global ?? CLONING_MODE;
     const effCloneMode = cloneFold(globalCloneMode, ownCloneMode);
-    $("acctClone").value = ownCloneMode;
     // A database that has not run 20261102120000 has no middle position to write, and offering one
     // there would either fail the save or turn a "voice only" choice into the wider answer behind
-    // his back. The box says which of those it is rather than guessing.
+    // his back. The rows say which of those it is rather than guessing — and they are painted after
+    // the disable, so a locked door looks locked.
     $("acctClone").disabled = !hasCloneModeSub;
+    setCloneDoor("acctClone", ownCloneMode);
     $("acctCloneNow").innerHTML = !hasCloneModeSub
       ? "The cloning line has not reached this database yet — run the migration, then reload this page. Until it has, this account can only ever be fully open or fully closed."
       : `${bought === false ? "He is refused cloning at the dial whatever is set here, because a free trial does not clone. " : ""}On his screen right now: <b>${CLONE_LABEL[effCloneMode]}</b>${effCloneMode !== ownCloneMode
-          ? ` — this line says ${CLONE_LABEL[ownCloneMode]}, but the gateway-wide line is at ${CLONE_LABEL[globalCloneMode]}, and that only ever closes an account further, never opens it.`
+          ? ` — this account is set to ${CLONE_LABEL[ownCloneMode]}, but the gateway-wide line is ${CLONE_LABEL[globalCloneMode]}, and that can only close further, never open.`
           : ""}`;
     // 1 is what a call start falls back to when an account has no subscription row - the
     // summary line above already says "of 1 allowed", so the box must not claim 2.
@@ -1916,7 +1977,7 @@
       const note = m === "video"
         ? `· both call tabs spend from here${hasStray ? ` <span class="pill warn">incl. ${clock(stray.balance)} left in the retired Video + Audio wallet — run migration 20261101120000 to move it into the pool</span>` : ""}`
         : `· a rate line, not a place minutes are kept${holdsSomething(m) ? ` <span class="pill warn">${clock(w.balance)} still standing here from before the fold — run migration 20261102120000 to move it into the pool</span>` : ""}`;
-      return `<tr><td>${MOD_LABEL[m]} <span class="muted" title="${tip}">${note}</span></td><td>${bucket(w)}</td><td class="mono">${mins(w.burn_rate ?? 1)}x</td>
+      return `<tr><td>${MOD_LABEL[m]} <span class="muted" title="${tip}">${note}</span></td><td>${bucket(w)}</td><td class="mono">${rateLabel(w.burn_rate ?? 1)}x</td>
         <td>${w.unlimited ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
         <td class="mono">${mins1(w.total_credited)}</td><td class="mono">${mins1(w.total_spent)}</td></tr>`;
     }).join("");
@@ -1978,7 +2039,22 @@
   $("quickEmail").onkeydown = (e) => { if (e.key === "Enter") creditByEmail(); };
 
   $("detReload").onclick = () => CUR && openAccount(CUR.user_id);
-  $("detLedgerBtn").onclick = () => CUR && loadLedger(CUR.user_id);
+
+  // Four panes, one visible at a time. Opening an account used to stack the wallet table, the
+  // switches, the service pin, the credit form, the devices and the ledger under each other, so
+  // the amount box was a scroll away from the balance it was about to change.
+  function acctPane(name) {
+    document.querySelectorAll("#acctDetail .subtabs button").forEach((b) => b.classList.toggle("on", b.dataset.pane === name));
+    document.querySelectorAll("#acctDetail .acctPane").forEach((p) => p.classList.toggle("hidden", p.dataset.pane !== name));
+  }
+  document.querySelectorAll("#acctDetail .subtabs button").forEach((b) => {
+    b.onclick = () => {
+      acctPane(b.dataset.pane);
+      if (!CUR) return;
+      if (b.dataset.pane === "ledger") loadLedger(CUR.user_id);
+      if (b.dataset.pane === "credit") $("gMinutes").focus();
+    };
+  });
 
   $("detSaveSwitches").onclick = async () => {
     if (!CUR) return;
@@ -3657,10 +3733,10 @@
   let RATE_ROWS = [];
 
   function effectiveRates() {
-    const nowMs = Date.now();
+    const nowMs = serverNowMs();
     const out = {};
     MODALITIES.forEach((m) => {
-      const live = RATE_ROWS.filter((r) => r.modality === m && !r.retired_at && new Date(r.effective_from) <= new Date(nowMs))
+      const live = RATE_ROWS.filter((r) => r.modality === m && !r.retired_at && new Date(r.effective_from).getTime() <= nowMs)
         .sort((a, b) => new Date(b.effective_from) - new Date(a.effective_from) || b.id - a.id);
       out[m] = live[0];
     });
@@ -3671,20 +3747,36 @@
     const eff = effectiveRates();
     $("currentRates").querySelector("tbody").innerHTML = RATE_MODALITIES.map((m) => {
       const r = eff[m];
-      return `<tr><td>${MOD_LABEL[m]}</td><td class="mono">${r ? mins(r.multiplier) + "x" : '<span class="pill n">unset (1x)</span>'}</td>
-        <td class="mono">${mins(r?.multiplier ?? 1)} minutes</td>
+      return `<tr><td>${MOD_LABEL[m]}</td><td class="mono">${r ? rateLabel(r.multiplier) + "x" : '<span class="pill n">unset (1x)</span>'}</td>
+        <td class="mono">${rateLabel(r?.multiplier ?? 1)} minutes</td>
         <td class="muted">${r ? when(r.effective_from) : "—"}</td><td class="muted">${esc(r?.note || "—")}</td></tr>`;
     }).join("");
 
     $("ratesTable").querySelector("tbody").innerHTML = [...RATE_ROWS]
       .sort((a, b) => MODALITIES.indexOf(a.modality) - MODALITIES.indexOf(b.modality) || new Date(b.effective_from) - new Date(a.effective_from))
       .map((r) => `<tr>
-        <td>${MOD_LABEL[r.modality]}</td><td class="mono">${mins(r.multiplier)}x</td>
+        <td>${MOD_LABEL[r.modality]}</td><td class="mono">${rateLabel(r.multiplier)}x</td>
         <td class="muted">${when(r.effective_from)}</td>
-        <td>${r.retired_at ? `<span class="pill rejected">${when(r.retired_at)}</span>` : '<span class="pill active">live</span>'}</td>
+        <td>${r.retired_at ? `<span class="pill rejected">${when(r.retired_at)}</span>`
+          : new Date(r.effective_from).getTime() > serverNowMs() ? '<span class="pill warn">not started yet</span>'
+          : '<span class="pill active">live</span>'}</td>
         <td class="muted">${esc(r.note || "—")}${r.created_by ? ` <span class="muted">· by ${shortId(r.created_by)}</span>` : ""}</td>
-        <td>${r.retired_at ? "" : `<button data-act="retire" data-id="${r.id}" class="danger">Retire</button>`}</td></tr>`).join("")
+        <td>${r.retired_at ? "" : (new Date(r.effective_from).getTime() > serverNowMs()
+          ? `<button data-act="startnow" data-id="${r.id}" class="primary">Start it now</button><button data-act="retire" data-id="${r.id}" class="danger">Retire</button>`
+          : `<button data-act="retire" data-id="${r.id}" class="danger">Retire</button>`)}</td></tr>`).join("")
       || '<tr><td colspan="6" class="muted">No rates recorded.</td></tr>';
+
+    // Rates posted from the old scheduling box are still in the table with an hour that has not
+    // arrived. They do nothing until that hour, and the money keeps draining at whatever was in
+    // force before them — and a new rate cannot simply be left underneath one, because the older
+    // row's hour outranks it when it comes. Saving a rate of the same call type clears these; this
+    // strip says so while any are left.
+    const pending = RATE_ROWS.filter((r) => !r.retired_at && new Date(r.effective_from).getTime() > serverNowMs())
+      .sort((a, b) => new Date(a.effective_from) - new Date(b.effective_from));
+    $("ratesPending").innerHTML = pending.length ? pending.map((r) => {
+      const running = eff[r.modality];
+      return `<div class="muted" style="margin-top:6px"><span class="pill warn">not in force yet</span> An older ${MOD_LABEL[r.modality]} rate of <b>${rateLabel(r.multiplier)}x</b> is still waiting on ${when(r.effective_from)} — a time set before this box stopped offering one. Until that hour arrives, ${MOD_LABEL[r.modality]} calls drain the pool at <b>${running ? rateLabel(running.multiplier) + "x" : "1x (no rate on record)"}</b>. Save a ${MOD_LABEL[r.modality]} rate above, or press <b>Retire</b> on that row below, to settle it.</div>`;
+    }).join("") : "";
 
     if ($("pgFalMin")) pgRenderAll();
   }
@@ -3697,28 +3789,44 @@
   }
   $("rateRefresh").onclick = loadRates;
 
-  function setBrFromNow() {
-    // Filled with the server's UTC wall time and read back as UTC below, so a machine
-    // on the wrong clock or in the wrong zone cannot queue a new rate twelve hours
-    // away when you meant "from now".
-    $("brFrom").value = new Date().toISOString().slice(0, 16);
-  }
-
+  // A saved rate has no clock of its own: it is stamped from the server's time, a minute back,
+  // so it is already in force the moment the write lands. Stamping it from this machine was the
+  // fault behind "I entered 1.25 and nothing changed" — a PC twelve hours ahead files the rate
+  // twelve hours into the server's future, where it does nothing at all while the old rate keeps
+  // draining the pool.
   $("saveRate").onclick = async () => {
     msg("rateMsg", "");
     const mult = N($("brMult").value);
     if (mult <= 0) return msg("rateMsg", "The multiplier must be above 0.");
+    const modality = $("brModality").value;
+    const from = serverNowIso();
     const row = {
-      modality: $("brModality").value,
+      modality,
       multiplier: mult,
       note: $("brNote").value.trim() || null,
-      effective_from: $("brFrom").value ? new Date($("brFrom").value + "Z").toISOString() : new Date().toISOString(),
+      effective_from: from,
       created_by: ADMIN_ID,
     };
     const { error } = await sb.from("burn_rates").insert(row);
     if (error) return msg("rateMsg", error.message);
-    msg("rateMsg", `New ${MOD_LABEL[row.modality]} rate of ${mins(mult)}x queued from ${when(row.effective_from)}.`, "ok");
-    $("brNote").value = ""; setBrFromNow();
+
+    // Nothing schedules a rate any more, but rows posted while it could are still standing with a
+    // future start. Their hour would outrank the rate saved here and move the money back to an old
+    // figure, so they are retired as this one lands.
+    const { data: swept, error: sweepErr } = await sb.from("burn_rates")
+      .update({ retired_at: from })
+      .eq("modality", modality)
+      .is("retired_at", null)
+      .gt("effective_from", from)
+      .select("id");
+    if (sweepErr) return msg("rateMsg", sweepErr.message);
+
+    const sweptN = (swept || []).length;
+    msg("rateMsg",
+      `New ${MOD_LABEL[modality]} rate of ${rateLabel(mult)}x is in force from this second: the next call drains the pool at that figure.`
+      + (sweptN ? ` ${sweptN} older ${MOD_LABEL[modality]} rate${sweptN === 1 ? "" : "s"} waiting on a future hour retired with it, so nothing changes later.` : ""),
+      "ok");
+    $("brNote").value = "";
     await Promise.all([loadRates(), loadAccounts()]);
   };
 
@@ -3840,7 +3948,7 @@
       a.calls++;
       a.real += N(r.real_minutes);
       a.used += N(r.billed_minutes);
-      if (r.multiplier != null) a.rates.add(mins(r.multiplier) + "x");
+      if (r.multiplier != null) a.rates.add(rateLabel(r.multiplier) + "x");
       if (r.started_at && (!a.last || new Date(r.started_at) > new Date(a.last))) a.last = r.started_at;
     }
     AIR_ROWS = Object.values(acc).sort((x, y) => y.real - x.real);
@@ -3921,10 +4029,20 @@
       } catch (err) { msg("sessMsg", err.message); }
       return;
     }
+    if (b.dataset.act === "startnow") {
+      const row = RATE_ROWS.find((r) => String(r.id) === id);
+      if (!row) return;
+      if (!confirm(`Make the ${MOD_LABEL[row.modality]} rate of ${rateLabel(row.multiplier)}x the rate the next call uses?\n\nIts start moves to ${when(serverNowIso())} on the server's clock. Nothing else about the row changes, and every call already running keeps the multiplier it started with.`)) return;
+      const { error } = await sb.from("burn_rates").update({ effective_from: serverNowIso() }).eq("id", id);
+      if (error) return msg("rateMsg", error.message);
+      msg("rateMsg", `Started. ${MOD_LABEL[row.modality]} now drains the pool at ${rateLabel(row.multiplier)}x, from the next call.`, "ok");
+      await Promise.all([loadRates(), loadAccounts()]);
+      return;
+    }
     if (b.dataset.act === "retire") {
       const row = RATE_ROWS.find((r) => String(r.id) === id);
-      if (!confirm(`Retire the ${row ? MOD_LABEL[row.modality] + " " + mins(row.multiplier) + "x" : ""} rate from now on? History is kept.`)) return;
-      const { error } = await sb.from("burn_rates").update({ retired_at: new Date().toISOString() }).eq("id", id);
+      if (!confirm(`Retire the ${row ? MOD_LABEL[row.modality] + " " + rateLabel(row.multiplier) + "x" : ""} rate from now on? History is kept.`)) return;
+      const { error } = await sb.from("burn_rates").update({ retired_at: serverNowIso() }).eq("id", id);
       if (error) return msg("rateMsg", error.message);
       msg("rateMsg", "Retired.", "ok");
       await loadRates();
@@ -4047,7 +4165,7 @@
     // write.
     const globalMode = await readGlobalClone();
     $("cfgCloningMode").disabled = !hasCloneModeCfg;
-    $("cfgCloningMode").value = globalMode ?? "voice_video";
+    setCloneDoor("cfgCloningMode", globalMode ?? "voice_video");
     $("cfgCloningNow").innerHTML = !hasCloneModeCfg
       ? (hasCloningCfg
         ? "This database only has the old two-position switch, so this box can close everything or open voice + video — the middle position needs the migration, and saving here leaves a voice-only choice closed."
@@ -4095,6 +4213,9 @@
     }
     const { error } = await sb.from("app_config").update(row).eq("id", 1);
     if (error) return msg("cfgMsg", error.message);
+    // Paint what actually landed, not what was clicked: on a database without the middle position a
+    // voice-only click lands as closed, and rows still showing the click would be a second lie.
+    setCloneDoor("cfgCloningMode", hasCloneModeCfg ? globalCloneMode : CLONING_MODE);
     const landed = !hasCloneModeCfg && hasCloningCfg && globalCloneMode === "voice_only"
       ? " (this database has no middle position, so it landed as closed)" : "";
     msg("cfgMsg", "Gateway config saved — voice cloning across the whole software is now "
@@ -4742,7 +4863,7 @@
     $("pgUnitTable").querySelector("tbody").innerHTML = CALL_MODALITIES.map((m) => `<tr>
       <td>${PG_SHOP_LABEL[m]}</td>
       <td class="mono" style="text-align:right">${pgUsd(rate[m])}</td>
-      <td class="mono" style="text-align:right">${mins(mult[m])}</td>
+      <td class="mono" style="text-align:right">${rateLabel(mult[m])}</td>
       <td class="mono" style="text-align:right">${pgUsd(cc[m], 3)}</td></tr>`).join("");
   }
 
@@ -4773,7 +4894,7 @@
       <div class="stat"><div class="l">Price the buyer pays</div><div class="v">${pgUsd(price)}</div>
         <div class="l">${mins(minutes)} ${PG_SHOP_LABEL[m]} minute${PG_PLURAL(minutes)}${own === "" ? " · our suggestion" : " · your price"}</div></div>
       <div class="stat"><div class="l">AI cash this costs you</div><div class="v">${pgUsd(cost)}</div>
-        <div class="l">${mins(airtime)} airtime minute${PG_PLURAL(airtime)} at ${pgUsd(rate[m])} · burn rate ${mins(mult[m])}x</div></div>
+        <div class="l">${mins(airtime)} airtime minute${PG_PLURAL(airtime)} at ${pgUsd(rate[m])} · burn rate ${rateLabel(mult[m])}x</div></div>
       <div class="stat"><div class="l">Cash you keep</div><div class="v" style="color:${cash < 0 ? "#fb7185" : "#4ade80"}">${pgUsd(cash)}</div>
         <div class="l">${pct >= 0 ? pct.toFixed(0) + "% of the price" : "no price typed yet"} · you asked for ${target}% ${pgBasis() === "cost" ? "mark-up" : "of price"}</div></div>
       <div class="stat"><div class="l">AI credit you don't spend</div><div class="v" style="color:${idleUsd < 0 ? "#fb7185" : "#4ade80"}">${pgUsd(idleUsd)}</div>
@@ -4959,6 +5080,46 @@
   };
 
   // ── Auth ──────────────────────────────────────────────────────────────────
+  // The clock strip under the header. It has been called since the two-shelf release without ever
+  // being written, which threw a ReferenceError at the last line of this script and silently killed
+  // the "restore my session on reload" call underneath it — every reload dropped him back on the
+  // sign-in card. It exists because a rate stored in UTC and typed on a machine in the wrong zone is
+  // the one thing this panel cannot otherwise see, and that is exactly the burn-rate trap.
+  let SERVER_SKEW_MS = null;
+  // Every "is this rate in force yet?" the panel asks must be answered with the SERVER's clock,
+  // because that is the clock that meters the money. On a machine twelve hours ahead — which is this
+  // machine, as the strip above now says out loud — a rate that has been running for hours looks
+  // like it starts later, and a rate saved as "now" is quietly filed for tomorrow while every call
+  // keeps draining at the old figure.
+  const serverNowMs = () => Date.now() - (SERVER_SKEW_MS ?? 0);
+  // A minute behind the server, deliberately: the header carries whole seconds and the request took
+  // some time, and a start that lands a second in the future is a start that has not happened yet.
+  const serverNowIso = () => new Date(serverNowMs() - 60000).toISOString();
+  async function syncClock() {
+    try {
+      const res = await fetch(SUPABASE_URL + "/auth/v1/health", { method: "GET" });
+      const head = res.headers.get("date");
+      const serverMs = head ? Date.parse(head) : NaN;
+      SERVER_SKEW_MS = Number.isFinite(serverMs) ? Date.now() - serverMs : null;
+    } catch (err) { SERVER_SKEW_MS = null; }
+    paintClock();
+    // Re-judge the rates once the truth is known: before this answers, the tables were reading this
+    // machine's clock.
+    renderRates();
+  }
+  function paintClock() {
+    const el = $("clockNote");
+    if (!el) return;
+    const now = new Date();
+    const line = "This machine: " + now.toLocaleString() + " · " + now.toISOString().slice(0, 19).replace("T", " ") + " UTC (every figure here is stored in UTC)";
+    if (SERVER_SKEW_MS == null) { el.textContent = line + " · whatever time you type into a rate box is stamped by THIS clock, so check it before scheduling a rate."; return; }
+    const skewMin = SERVER_SKEW_MS / 60000;
+    el.textContent = Math.abs(skewMin) <= 2
+      ? line + " · " + (skewMin === 0 ? "exactly" : "within " + Math.abs(skewMin).toFixed(1) + " min of") + " the server's clock."
+      : line + " · WARNING: this machine is " + (skewMin > 0 ? "ahead of" : "behind") + " the server by " + Math.abs(skewMin).toFixed(0) + " minutes. Anything you save here as a time — a rate's start, a retirement — is stamped by THIS clock, so the server may not honour it yet.";
+    el.style.color = Math.abs(skewMin) <= 2 ? "" : "#facc15";
+  }
+
   $("signIn").onclick = async () => {
     msg("authMsg", "");
     const { data, error } = await sb.auth.signInWithPassword({ email: $("email").value.trim(), password: $("password").value });
@@ -4972,6 +5133,7 @@
   // whether the machine's clock moved, instead of assuming the panel broke.
   paintClock();
   setInterval(paintClock, 1000);
+  void syncClock();
   // A jump while the tab was in the background is caught the moment you look again.
   document.addEventListener("visibilitychange", () => { if (!document.hidden) void syncClock(); });
 

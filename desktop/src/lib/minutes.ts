@@ -30,8 +30,8 @@ export type LiveLease = {
   startedAt: number;
   observedAt: number;
   /**
-   * When the engine's picture first reached the screen, or null while it has not.
-   * A video call bills from here, not from startedAt.
+   * When the call's own delivery first reached this machine — the first picture frame, or the
+   * first piece of cloned voice — or null while nothing has arrived. Every call bills from here.
    */
   mediaAt: number | null;
   leaseExpiresAt: string | null;
@@ -46,7 +46,7 @@ export type Drain = {
   /** Wall-clock minutes the call has been running. */
   live: number;
   unlimited: boolean;
-  /** A video call that has not shown a frame yet: connected, but not on air. */
+  /** A call that has delivered nothing yet, picture or voice: connected, but not on air. */
   waiting: boolean;
 };
 
@@ -55,14 +55,14 @@ export type Drain = {
  * gateway bills in lease windows, so the UI interpolates what the next settle
  * will say and the number moves every second rather than every 45.
  *
- * For video the clock is held at the frame, not at the dial-tone: the gateway
- * charges the same way, so nothing is spent — and nothing appears to be spent —
- * while the engine is still starting up or has failed to start at all.
+ * The clock is held at the delivery, not at the dial-tone: the gateway charges the same way, so
+ * nothing is spent — and nothing appears to be spent — while the engine is still starting up, has
+ * failed to start at all, or has never sent a single sound back.
  */
 export function drainOf(lease: LiveLease, burnRate: number, now: number): Drain {
-  const waiting = lease.modality !== "audio" && lease.mediaAt === null;
+  const waiting = lease.mediaAt === null;
   const gate = Math.max(lease.observedAt, lease.mediaAt ?? now);
-  const airAt = lease.modality === "audio" ? lease.startedAt : (lease.mediaAt ?? now);
+  const airAt = lease.mediaAt ?? now;
   const drift = (Math.max(0, now - gate) / 60000) * burnRate;
   const used = lease.billedMinutes + drift;
   return {
@@ -96,10 +96,11 @@ export function countdown(mins: number | null): string {
  * heartbeat reaches the wallet: lose the heartbeat and the call stops with the airtime that
  * was actually paid for, instead of running unbilled until the engine gives up.
  *
- * Before the first renewal - and for a video call still waiting for its picture, where the
- * server names no bound because nothing is being spent - there is only the meter's own
- * estimate, so that is what gets armed. `minFundedMs` keeps a call opened on the last sliver
- * of change on screen for its first seconds rather than dropping it like a failure.
+ * Before the first renewal - and for a call still waiting for its first delivered frame or
+ * first delivered voice, where the server names no bound because nothing is being spent - there
+ * is only the meter's own estimate, so that is what gets armed. `minFundedMs` keeps a call opened
+ * on the last sliver of change on screen for its first seconds rather than dropping it like a
+ * failure.
  */
 export function stopDeadlineAt(
   lease: LiveLease,
@@ -108,7 +109,7 @@ export function stopDeadlineAt(
   minFundedMs: number,
 ): number {
   const drain = drainOf(lease, burnRate, now);
-  const airStart = lease.modality === "audio" ? lease.startedAt : (lease.mediaAt ?? lease.startedAt);
+  const airStart = lease.mediaAt ?? lease.startedAt;
   // Only an unlimited bucket reports a null countdown, and the caller does not arm a timer
   // for one, so this never has to time anything but a real number of minutes.
   const remaining = drain.remaining ?? 0;

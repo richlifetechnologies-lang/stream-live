@@ -1989,6 +1989,29 @@ export default function StreamPage() {
     return () => clearTimeout(id);
   }, [isStreaming, account, teardownStream, armHold, toast]);
 
+  // ─── Give up on a voice call whose voice never arrives ────────────────────────
+  // A voice-only call has no picture to watch, and its meter now holds at zero until cloned
+  // audio actually reaches this machine. So a call the voice service never answers costs the
+  // customer nothing and leaves the seller's voice line open: this closes it, on the same
+  // 40 seconds the picture call gives itself, rather than leaving him sitting on a silent page
+  // until the gateway's own check-in cuts the lease.
+  useEffect(() => {
+    const lease = account.live;
+    const sid = sessionIdRef.current;
+    if (!isStreaming || !lease || !sid || lease.modality !== "audio") return;
+    if (lease.mediaAt !== null) return;
+    const id = setTimeout(() => {
+      // Cloned audio that arrived in the meantime, or a call that is no longer the one being
+      // watched, both mean there is nothing to give up on.
+      if (sessionIdRef.current !== sid || account.live?.mediaAt !== null) return;
+      reportCallFailure(sid, "engine",
+        `no cloned audio ${Math.round(PICTURE_GIVE_UP_MS / 1000)} s after the call opened; this app ended it`);
+      void teardownStream();
+      toast({ title: t("Call ended"), description: endReasonMessage("no_voice"), variant: "destructive", withContact: true });
+    }, Math.max(0, lease.startedAt + PICTURE_GIVE_UP_MS - Date.now()));
+    return () => clearTimeout(id);
+  }, [isStreaming, account, teardownStream, toast]);
+
   // ─── Start stream ──────────────────────────────────────────────────────────
   /**
    * One ask for a call: open the metered lease, then the pipelines.
@@ -2989,20 +3012,13 @@ export default function StreamPage() {
             <Lock style={{ width: 13, height: 13, flexShrink: 0 }} />
             {voiceLocked ? endReasonMessage("clone_closed") : endReasonMessage("clone_needs_paid_minutes")}
           </p>
-          {voiceNeedsPaid && (
-            <button onClick={() => setLocation("/plans")}
-              style={{ marginTop: 6, fontSize: 10.5, fontWeight: 700, color: "hsl(265 70% 82%)", background: "hsl(265 90% 65% / 0.12)", border: "1px solid hsl(265 90% 65% / 0.3)", borderRadius: 7, padding: "5px 9px", cursor: "pointer", fontFamily: "'Rajdhani',sans-serif" }}>
-              {t("See the packages")}
-            </button>
-          )}
         </div>
       )}
 
       {!voiceKeySet && (
         <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(40 100% 52% / 0.08)", border: "1px solid hsl(40 100% 52% / 0.2)", marginBottom: 10 }}>
           <p style={{ fontSize: 11, color: "hsl(40 100% 75%)", fontFamily: "'Rajdhani',sans-serif" }}>
-            {t("You have no minutes left. Ask your administrator to top up your account.")}{" "}
-            <button onClick={() => setLocation("/minutes")} style={{ color: "hsl(40 100% 75%)", fontWeight: 700, background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "'Rajdhani',sans-serif", fontSize: 11, padding: 0 }}>{t("Request credits")} →</button>
+            {t("You have no minutes left. Ask your administrator to top up your account.")}
           </p>
         </div>
       )}

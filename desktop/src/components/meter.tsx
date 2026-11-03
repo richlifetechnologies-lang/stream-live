@@ -159,7 +159,9 @@ export function MinuteMeter({ modality, compact = false, note, label }: { modali
 
       {drain?.waiting && (
         <p style={{ margin: "7px 0 0", fontSize: 10.5, color: "hsl(187 60% 62%)", fontFamily: "'Rajdhani',sans-serif" }}>
-          {t("Connecting — minutes start when your video appears.")}
+          {modality === "audio"
+            ? t("Connecting — minutes start when the cloned voice answers.")
+            : t("Connecting — minutes start when your video appears.")}
         </p>
       )}
 
