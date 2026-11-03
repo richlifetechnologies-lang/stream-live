@@ -54,20 +54,27 @@ export function CardTitle({ children, accent }: { children: React.ReactNode; acc
 /**
  * A page's opening row: its name and pills to the left, one floating summary card to the
  * right. Every tab uses it, so the eye finds the same shape wherever the customer lands.
+ *
+ * The text block shrinks (flex 1 1 0) rather than pushing the card off the line: the card is
+ * the minutes reading and it belongs in this corner at every window width, so the pills fold
+ * inside the text block instead.
  */
-export function PageHead({ name, note, pills, card, tour }: {
-  name: string; note?: string; pills?: React.ReactNode; card?: React.ReactNode; tour?: string;
+export function PageHead({ name, note, pills, card, badge, tour }: {
+  name: string; note?: string; pills?: React.ReactNode; card?: React.ReactNode; badge?: React.ReactNode; tour?: string;
 }) {
   return (
     <div data-tour={tour} style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 20, flexWrap: "wrap", marginBottom: 20 }}>
-      <div style={{ minWidth: 0 }}>
-        <h1 style={{
-          fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 15,
-          letterSpacing: "0.2em", textTransform: "uppercase", color: "hsl(190 80% 96%)",
-          margin: 0, marginBottom: pills ? 12 : 0,
-        }}>
-          {t(name)}
-        </h1>
+      <div style={{ flex: "1 1 0", minWidth: 0 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: pills ? 12 : 0 }}>
+          <h1 style={{
+            fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 15,
+            letterSpacing: "0.2em", textTransform: "uppercase", color: "hsl(190 80% 96%)",
+            margin: 0,
+          }}>
+            {t(name)}
+          </h1>
+          {badge}
+        </div>
         {note && (
           <p style={{ fontSize: 12.5, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", margin: "7px 0 0", maxWidth: 620, lineHeight: 1.5 }}>
             {t(note)}

@@ -10,6 +10,7 @@ import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, 
 import { stopDeadlineAt } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { Stage, PageHead, Pill, PillRow } from "../components/d2";
+import { LanguageMenu } from "../components/lang-menu";
 import { CABLE_ANY_RE, CABLE_NAME, CABLE_OUTPUT_RE, IS_MAC } from "../lib/platform";
 import { GatewayError, type TabName } from "@stream-live/client";
 import { endReasonMessage, toUserMessage } from "../lib/end-reason";
@@ -828,7 +829,7 @@ function getElectronAPI(): ElectronAPI | undefined {
   return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
 }
 
-async function _startVideoSession(token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void, onConnectionState: (state: RTCPeerConnectionState) => void, onDisconnect: () => void, prompt: string, refB64: string | null): Promise<VideoSession> {
+async function _startVideoSession(token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void, onConnectionState: (state: RTCPeerConnectionState) => void, onDisconnect: (why: string) => void, prompt: string, refB64: string | null): Promise<VideoSession> {
   const ws = new WebSocket(`${_RELAY_WS}?fal_jwt_token=${encodeURIComponent(token)}&max_buffering=8`);
   ws.binaryType = "arraybuffer";
   const send = (o: Record<string, unknown>) => { if (ws.readyState === WebSocket.OPEN) ws.send(encode(o)); };
@@ -884,7 +885,9 @@ async function _startVideoSession(token: string, localStream: MediaStream, onRem
     ws.onerror = () => abort(new Error(`${APP}: connection error`));
     ws.onclose = ev => {
       if (!settled) abort(new Error(`${APP}: connection closed (${ev.code})`));
-      else if (ev.code !== 1000) onDisconnect();
+      // The code is the only thing that distinguishes a service that ran out of patience from
+      // a network that dropped, and this page has no other record of it.
+      else if (ev.code !== 1000) onDisconnect(`code ${ev.code}${ev.reason ? ` — ${_engineWords(ev.reason)}` : ""}`);
     };
   });
 }
@@ -913,7 +916,7 @@ function _engineWords(e: unknown): string {
 
 async function _startTrialVideoSession(
   token: string, localStream: MediaStream, onRemote: (s: MediaStream) => void,
-  onConnectionState: (state: RTCPeerConnectionState) => void, onDisconnect: () => void,
+  onConnectionState: (state: RTCPeerConnectionState) => void, onDisconnect: (why: string) => void,
   prompt: string, refB64: string | null,
 ): Promise<VideoSession> {
   const sdk = await import("@decartai/sdk");
@@ -970,8 +973,9 @@ async function _startTrialVideoSession(
   // is allowed to put a provider name on the screen and a silent teardown cannot be
   // diagnosed afterwards.
   rc.on("sessionEnded", (e: { reason?: string } | undefined) => {
-    console.warn("[video] the call ended:", e?.reason ?? "no reason given");
-    onDisconnect();
+    const why = e?.reason ?? "no reason given";
+    console.warn("[video] the call ended:", why);
+    onDisconnect(why);
   });
   rc.on("error", (e: unknown) => console.warn("[video] engine reported a problem:", e));
 
@@ -2128,6 +2132,16 @@ export default function StreamPage() {
       if (!voiceOnly) {
         if (!ticket.token) throw new Error(`${APP}: gateway returned no video token`);
         const gen = ++sessionGenRef.current;
+        const lineOpenedAt = Date.now();
+        // The line's own close, written while the call is still on the page. Without this a
+        // call that ended on its own leaves a row saying it started and a row saying it ended,
+        // and nothing at all saying what closed it — which is why "it stopped by itself" could
+        // only ever be reconstructed after the fact from the lease windows.
+        const reportLineClose = (why: string) => {
+          if (sessionGenRef.current !== gen) return;
+          const held = Math.max(0, Math.round((Date.now() - lineOpenedAt) / 1000));
+          reportCallFailure(sessionId, "video line closed", `${held} s into the call — ${why}`);
+        };
         const open = ticket.engine === "decart" ? _startTrialVideoSession : _startVideoSession;
         const session = await open(
           ticket.token, sendStream,
@@ -2156,12 +2170,14 @@ export default function StreamPage() {
             iceGraceRef.current = setTimeout(() => {
               iceGraceRef.current = null;
               if (sessionGenRef.current !== gen) return;
+              reportLineClose("the transport went away and did not come back within 6 s");
               void teardownStream();
               toast({ title: t("Call ended"), description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
             }, 6000);
           },
-          () => {
+          why => {
             if (sessionGenRef.current !== gen) return;
+            reportLineClose(`the video service closed the line (${why})`);
             void teardownStream();
             toast({ title: t("Call ended"), description: endReasonMessage("connection_lost"), variant: "destructive", withContact: true });
           },
@@ -2976,8 +2992,10 @@ export default function StreamPage() {
         </div>
       )}
 
-      {/* Waveform — the voice leaving the app, measured on the player itself */}
-      {vcActive && (
+      {/* Waveform — the voice leaving the app, measured on the player itself.
+          On the voice-only tab the same proof stands in its own card in the right column,
+          so it is not printed twice on the one screen. */}
+      {!voiceTab && vcActive && (
         <div style={{ marginTop: 8 }}>
           <p style={{ fontSize: 9, color: "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 4 }}>{t("Cloned Voice Output")}</p>
           <Waveform analyser={vcAnalyser} color={VC} height={60} />
@@ -3022,8 +3040,15 @@ export default function StreamPage() {
         </div>
       )}
 
-      {/* Local monitor — only meaningful where cloning actually runs */}
-      <div style={{ marginTop: 10, background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${voiceMonitor ? "hsl(265 90% 65% / 0.35)" : "hsl(187 100% 52% / 0.24)"}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
+      {/* On the voice-only tab this switch stands beside the readout it belongs to, so the
+          column that shows what the clone is doing also holds the one thing that changes it. */}
+      {!voiceTab && VoiceMonitorCard(true)}
+    </div>
+  );
+
+  // ─── Local monitor — only meaningful where cloning actually runs ───────────
+  const VoiceMonitorCard = (inPanel: boolean) => (
+    <div style={{ marginTop: inPanel ? 10 : 0, background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${voiceMonitor ? "hsl(265 90% 65% / 0.35)" : "hsl(187 100% 52% / 0.24)"}`, borderRadius: 12, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12 }}>
         <div style={{ width: 32, height: 32, borderRadius: 8, background: voiceMonitor ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 10%)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
           <Headphones style={{ width: 15, height: 15, color: voiceMonitor ? VC : "hsl(222 25% 45%)" }} />
         </div>
@@ -3040,6 +3065,95 @@ export default function StreamPage() {
           <span style={{ position: "absolute", top: 3, left: voiceMonitor ? 25 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
         </button>
       </div>
+  );
+
+  // ─── Voice service check — the one card on this tab that proves the clone is working ──
+  // On a picture call the proof is the frame itself. A voice-only call has nothing to look at,
+  // so this carries what the voice service is doing: the audio coming back from it, the two
+  // levels either side of that service, and the four counts the engine keeps of its own pieces.
+  // It stands here whether or not a call is running, because the question "is it working" is
+  // asked before the dial as often as after it.
+  const VoiceServiceCheck = () => (
+    <div style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(265 90% 65% / 0.3)", borderRadius: 14, padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 10 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: VC, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", margin: 0 }}>{t("Voice Service Check")}</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 20, background: cloneAlive ? "hsl(265 90% 65% / 0.14)" : "hsl(222 40% 9%)", border: `1px solid ${cloneAlive ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)"}` }}>
+          {cloneAlive ? <Wifi style={{ width: 10, height: 10, color: VC }} /> : <WifiOff style={{ width: 10, height: 10, color: "hsl(222 25% 40%)" }} />}
+          <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: cloneAlive ? VC : "hsl(222 25% 40%)" }}>
+            {cloneAlive ? t("Cloned voice on the line") : t("Idle")}
+          </span>
+        </div>
+      </div>
+
+      <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 92%)", fontFamily: "'Rajdhani',sans-serif", margin: "0 0 8px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        {allVoices.find(v => v.id === vcVoiceId)?.name ?? "—"}
+      </p>
+
+      {vcActive ? (
+        <Waveform analyser={vcAnalyser} color={VC} height={54} />
+      ) : (
+        <div style={{ height: 54, borderRadius: 8, background: "hsl(222 40% 7%)", border: "1px dashed hsl(265 90% 65% / 0.28)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 42%)" }}>{t("Waiting for the call")}</span>
+        </div>
+      )}
+
+      <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+        {[
+          [t("Your voice → the clone"), addMicBar, t("into the voice service"), C] as const,
+          [t("Cloned voice → your callers"), addCableBar, t("after the service"), VC] as const,
+        ].map(([lab, barRef, hint, col]) => (
+          <div key={lab}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em" }}>{lab}</span>
+              <span style={{ fontSize: 10, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif" }}>{hint}</span>
+            </div>
+            <div style={{ height: 6, background: "hsl(222 40% 11%)", borderRadius: 3, overflow: "hidden" }}>
+              <div ref={barRef} style={{ height: "100%", width: "0%", borderRadius: 3, transition: "width 0.06s linear", background: col }} />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6 }}>
+        {[
+          [t("Your voice sent"), `${voiceRead.inS.toFixed(1)} s`],
+          [t("Cloned voice back"), `${voiceRead.outS.toFixed(1)} s`],
+          [t("Parts sent"), `${voiceRead.sent}`],
+          [t("Parts answered"), `${voiceRead.back}`],
+        ].map(([lab, val]) => (
+          <div key={lab} style={{ padding: "6px 8px", borderRadius: 7, background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 12%)" }}>
+            <p style={{ fontSize: 9, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.35, margin: 0 }}>{lab}</p>
+            <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", margin: 0 }}>{val}</p>
+          </div>
+        ))}
+      </div>
+
+      <p style={{ marginTop: 9, fontSize: 10.5, color: vcActive ? "hsl(222 25% 55%)" : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+        {vcActive
+          ? <>{t("Last answer arrived in {ms} ms.", { ms: String(voiceRead.lastMs) })}{" "}
+              {cloneAlive
+                ? t("It goes to your software microphone, so the calling app hears this voice and nothing else.")
+                : t("The cloned voice has stopped answering. The call closes in a few seconds rather than running with no voice for the people watching.")}</>
+          : t("Press Start voice call. This card moves the moment the voice service answers — and if it never answers, these figures stay at zero and the call costs you nothing.")}
+      </p>
+    </div>
+  );
+
+  // ─── What this tab is, in the few lines that settle it ─────────────────────
+  const VoiceOnlyNote = () => (
+    <div style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(187 100% 52% / 0.24)", borderRadius: 14, padding: 16 }}>
+      <p style={{ fontSize: 10, fontWeight: 700, color: C, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", margin: "0 0 10px" }}>{t("This call is voice only")}</p>
+      <p style={{ fontSize: 11.5, color: "hsl(190 80% 92%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, margin: "0 0 7px", display: "flex", gap: 7 }}>
+        <span style={{ color: VC, flexShrink: 0 }}>✓</span>
+        {t("Your cloned voice goes out the moment it is made — nothing is held back.")}
+      </p>
+      <p style={{ fontSize: 11.5, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5, margin: 0, display: "flex", gap: 7 }}>
+        <span style={{ color: "hsl(222 25% 40%)", flexShrink: 0 }}>—</span>
+        {t("No camera, no AI picture, and no lip-sync to measure.")}
+      </p>
+      <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: "9px 0 0", paddingTop: 9, borderTop: "1px solid hsl(265 90% 65% / 0.18)" }}>
+        {t("Minutes start when the cloned voice answers, not when you press Start.")}
+      </p>
     </div>
   );
 
@@ -3282,7 +3396,9 @@ export default function StreamPage() {
 
   // ─── RENDER ────────────────────────────────────────────────────────────────
   return (
-    <AppLayout>
+    // The language switch rides in this page's own header: the corner it usually sits in is
+    // where the minutes reading stands, and the two would cover each other.
+    <AppLayout langInPage>
       {/* Cloned voice playback — routed to the virtual microphone so calling
           apps and OBS hear the persona voice instead of the raw mic. */}
       <audio ref={cloneAudioRef} autoPlay style={{ display: "none" }} />
@@ -3375,6 +3491,7 @@ export default function StreamPage() {
           <PageHead
             tour="tabs"
             name="Stream"
+            badge={<LanguageMenu drop="left" />}
             pills={
               <PillRow>
                 {TABS.map(tab => (
@@ -3396,19 +3513,29 @@ export default function StreamPage() {
 
           {voiceTab ? (
             /* His voice alone. There is no stage here, no shape, no look and no prompt — none of
-               those draw anything, and this call sends nothing to be seen. What the tab holds is
-               the voice he goes out with, the microphone feeding it, and the switches that put
-               the cloned voice on the calling app's line, with the camera switch left out of the
-               broadcast panel because this call has no camera in it. */
+               those draw anything, and this call sends nothing to be seen. So the left column is
+               the voice he goes out with and the microphone feeding it, and the right column is
+               the proof that the voice service is working: the audio coming back from it, the two
+               levels either side of it, and the counts it keeps of its own pieces. Lip-sync has no
+               place here — there is no picture for anything to be late against. */
             <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
                 {VoicePanel()}
-                {MicInputCard()}
-                {MicGateCard()}
+                {/* The microphone and how it is handled are one decision seen from two sides,
+                    so they sit side by side instead of stacked half-empty. */}
+                <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14 }}>
+                  {MicInputCard()}
+                  {MicGateCard()}
+                </div>
                 {renderVirtualDevices(false)}
               </div>
+              {/* The right column is the proof, not a control: what the voice service is doing
+                  right now, the one switch that changes where it goes, and what this tab is.
+                  Lip-sync has no place here — there is no picture to line anything up with. */}
               <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
-                {AudioSyncPanel()}
+                {VoiceServiceCheck()}
+                {VoiceMonitorCard(false)}
+                {VoiceOnlyNote()}
               </div>
             </div>
           ) : (
