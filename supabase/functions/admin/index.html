@@ -3852,10 +3852,28 @@
   let RATE_READ_OK = false;
   // Whether the history behind the Burn rate column was actually read. A column that answers
   // 1x because the read failed is a figure he would act on, so it says it was not read instead.
+  // What current_burn_rate() answers right now, read from the database. This is kept apart from the
+  // history because the history has to be judged by the clock that meters the money, and a browser
+  // holding a twelve-hour-off clock judges it wrong: the rate is filed for an hour that has not come,
+  // the meter quietly uses the seeded figure, and every screen here agrees with the wrong one.
+  let RATE_LIVE = null;
 
   function effectiveRates() {
-    const nowMs = serverNowMs();
     const out = {};
+    if (RATE_LIVE) {
+      // The database has already done this computation. Nothing here re-dates a row to second it.
+      MODALITIES.forEach((m) => {
+        const v = Number(RATE_LIVE[m]);
+        if (!Number.isFinite(v)) return;
+        const src = RATE_ROWS.find((r) => !r.retired_at && r.modality === m
+          && Math.abs(Number(r.multiplier) - v) < 1e-9);
+        out[m] = { id: src ? src.id : null, multiplier: v,
+          effective_from: src ? src.effective_from : RATE_LIVE.asked_at,
+          note: src ? src.note : null };
+      });
+      return out;
+    }
+    const nowMs = serverNowMs();
     MODALITIES.forEach((m) => {
       const live = RATE_ROWS.filter((r) => r.modality === m && !r.retired_at && new Date(r.effective_from).getTime() <= nowMs)
         .sort((a, b) => new Date(b.effective_from) - new Date(a.effective_from) || b.id - a.id);
@@ -3907,46 +3925,48 @@
     if (error) return msg("rateMsg", error.message);
     RATE_ROWS = data || [];
     RATE_READ_OK = true;
+    // The verdict comes from the database, not from a recomputation here. If that read fails the
+    // column falls back to judging the history by the corrected server clock, and says so.
+    try {
+      const { data: live, error: liveErr } = await sb.rpc("sl_burn_rates_live");
+      RATE_LIVE = (!liveErr && live) ? live : null;
+    } catch { RATE_LIVE = null; }
     renderRates();
   }
   $("rateRefresh").onclick = loadRates;
 
-  // A saved rate has no clock of its own: it is stamped from the server's time, a minute back,
-  // so it is already in force the moment the write lands. Stamping it from this machine was the
-  // fault behind "I entered 1.25 and nothing changed" — a PC twelve hours ahead files the rate
-  // twelve hours into the server's future, where it does nothing at all while the old rate keeps
-  // draining the pool.
+  // A saved rate is dated by this database, never by the browser posting it. The old path inserted
+  // the row here with a start computed from this machine's clock, and a machine twelve hours ahead
+  // filed the rate twelve hours into the future — the write succeeded, the meter ignored it, and the
+  // screen agreed with the meter. The reply now carries current_burn_rate() read back from the same
+  // call, so "Saved" means the next call pays this figure or the message says otherwise.
   $("saveRate").onclick = async () => {
     msg("rateMsg", "");
     const mult = N($("brMult").value);
     if (mult <= 0) return msg("rateMsg", "The multiplier must be above 0.");
     const modality = $("brModality").value;
-    const from = serverNowIso();
-    const row = {
-      modality,
-      multiplier: mult,
-      note: $("brNote").value.trim() || null,
-      effective_from: from,
-      created_by: ADMIN_ID,
-    };
-    const { error } = await sb.from("burn_rates").insert(row);
-    if (error) return msg("rateMsg", error.message);
+    let res;
+    try {
+      const { data, error } = await sb.rpc("sl_set_burn_rate", {
+        p_modality: modality, p_multiplier: mult, p_note: $("brNote").value.trim() || null,
+      });
+      if (error) return msg("rateMsg", error.message);
+      res = data;
+    } catch (err) { return msg("rateMsg", err.message); }
+    if (!res || !res.ok) return msg("rateMsg", (res && res.detail) || "the rate was not saved.");
 
-    // Nothing schedules a rate any more, but rows posted while it could are still standing with a
-    // future start. Their hour would outrank the rate saved here and move the money back to an old
-    // figure, so they are retired as this one lands.
-    const { data: swept, error: sweepErr } = await sb.from("burn_rates")
-      .update({ retired_at: from })
-      .eq("modality", modality)
-      .is("retired_at", null)
-      .gt("effective_from", from)
-      .select("id");
-    if (sweepErr) return msg("rateMsg", sweepErr.message);
-
-    const sweptN = (swept || []).length;
+    const inForce = Number(res.in_force);
+    if (Math.abs(inForce - mult) > 1e-9) {
+      return msg("rateMsg",
+        `Saved, but the meter still answers ${rateLabel(inForce)}x for ${MOD_LABEL[modality]} — it did not take this figure. Do not rely on it until this line goes green.`,
+        "err");
+    }
+    const sweptN = Number(res.retired_with_it) || 0;
+    const repriced = Number(res.calls_repriced) || 0;
     msg("rateMsg",
-      `New ${MOD_LABEL[modality]} rate of ${rateLabel(mult)}x is in force from this second: the next call drains the pool at that figure.`
-      + (sweptN ? ` ${sweptN} older ${MOD_LABEL[modality]} rate${sweptN === 1 ? "" : "s"} waiting on a future hour retired with it, so nothing changes later.` : ""),
+      `${MOD_LABEL[modality]} now drains the pool at ${rateLabel(mult)}x, dated by the server clock at ${when(res.effective_from)}. The gateway answers ${rateLabel(inForce)}x for that tab this second, so the next call on it — any account, old or new — is metered at that figure.`
+      + (sweptN ? ` ${sweptN} older ${MOD_LABEL[modality]} rate${sweptN === 1 ? "" : "s"} retired with it, so nothing changes later.` : "")
+      + (repriced ? ` ${repriced} call${repriced === 1 ? "" : "s"} already running on that tab switched to it too.` : ""),
       "ok");
     $("brNote").value = "";
     await Promise.all([loadRates(), loadAccounts()]);
@@ -4154,19 +4174,27 @@
     if (b.dataset.act === "startnow") {
       const row = RATE_ROWS.find((r) => String(r.id) === id);
       if (!row) return;
-      if (!confirm(`Make the ${MOD_LABEL[row.modality]} rate of ${rateLabel(row.multiplier)}x the rate the next call uses?\n\nIts start moves to ${when(serverNowIso())} on the server's clock. Nothing else about the row changes, and every call already running keeps the multiplier it started with.`)) return;
-      const { error } = await sb.from("burn_rates").update({ effective_from: serverNowIso() }).eq("id", id);
+      if (!confirm(`Make the ${MOD_LABEL[row.modality]} rate of ${rateLabel(row.multiplier)}x the rate the next call uses?\n\nThis database stamps its start with its own clock, this second. Any call already running on ${MOD_LABEL[row.modality]} switches to it as well.`)) return;
+      const { data, error } = await sb.rpc("sl_use_burn_rate", { p_id: Number(id) });
       if (error) return msg("rateMsg", error.message);
-      msg("rateMsg", `Started. ${MOD_LABEL[row.modality]} now drains the pool at ${rateLabel(row.multiplier)}x, from the next call.`, "ok");
+      if (!data || !data.ok) return msg("rateMsg", (data && data.detail) || "that rate row could not be found.");
+      const now = Number(data.in_force);
+      if (Math.abs(now - Number(row.multiplier)) > 1e-9) {
+        return msg("rateMsg", `Started, but the meter still answers ${rateLabel(now)}x for ${MOD_LABEL[row.modality]} — something else is in front of it.`, "err");
+      }
+      const repriced = Number(data.calls_repriced) || 0;
+      msg("rateMsg", `Started. ${MOD_LABEL[row.modality]} drains the pool at ${rateLabel(row.multiplier)}x from the next call, and the gateway agrees.`
+        + (repriced ? ` ${repriced} call${repriced === 1 ? "" : "s"} already running switched to it too.` : ""), "ok");
       await Promise.all([loadRates(), loadAccounts()]);
       return;
     }
     if (b.dataset.act === "retire") {
       const row = RATE_ROWS.find((r) => String(r.id) === id);
       if (!confirm(`Retire the ${row ? MOD_LABEL[row.modality] + " " + rateLabel(row.multiplier) + "x" : ""} rate from now on? History is kept.`)) return;
-      const { error } = await sb.from("burn_rates").update({ retired_at: serverNowIso() }).eq("id", id);
+      const { data, error } = await sb.rpc("sl_retire_burn_rate", { p_id: Number(id) });
       if (error) return msg("rateMsg", error.message);
-      msg("rateMsg", "Retired.", "ok");
+      if (!data || !data.ok) return msg("rateMsg", (data && data.detail) || "that rate row could not be found.");
+      msg("rateMsg", `Retired. ${MOD_LABEL[row.modality]} now drains the pool at ${rateLabel(Number(data.in_force))}x — whatever the next row on that tab says.`, "ok");
       await loadRates();
       return;
     }
@@ -5214,14 +5242,14 @@
   // like it starts later, and a rate saved as "now" is quietly filed for tomorrow while every call
   // keeps draining at the old figure.
   const serverNowMs = () => Date.now() - (SERVER_SKEW_MS ?? 0);
-  // A minute behind the server, deliberately: the header carries whole seconds and the request took
-  // some time, and a start that lands a second in the future is a start that has not happened yet.
-  const serverNowIso = () => new Date(serverNowMs() - 60000).toISOString();
   async function syncClock() {
+    // The server's own time, asked for as data rather than read off a response header: a cross-origin
+    // script cannot see a Date header, which is why this measurement used to come back unknown and
+    // the browser's own clock — twelve hours off on the machine this panel is typed from — stamped
+    // rates with a future the meter will not honour.
     try {
-      const res = await fetch(SUPABASE_URL + "/auth/v1/health", { method: "GET" });
-      const head = res.headers.get("date");
-      const serverMs = head ? Date.parse(head) : NaN;
+      const { data, error } = await sb.rpc("sl_server_time");
+      const serverMs = error ? NaN : Date.parse(data);
       SERVER_SKEW_MS = Number.isFinite(serverMs) ? Date.now() - serverMs : null;
     } catch (err) { SERVER_SKEW_MS = null; }
     paintClock();
