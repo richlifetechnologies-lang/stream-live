@@ -55,7 +55,7 @@ export function useTourSeen(): boolean {
   return seen;
 }
 
-export type TourTab = "video-audio" | "video-only";
+export type TourTab = "video-audio" | "video-only" | "audio-only";
 
 /**
  * One stop of the walk-through.

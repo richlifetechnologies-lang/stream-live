@@ -33,7 +33,7 @@ function fmtMins(n: number | null | undefined) {
 
 const TAB_LABELS: Record<string, string> = {
   "video-only": "Video Call",
-  "audio-only": "Audio Call",
+  "audio-only": "Voice Clone Only",
   "video-audio": "Video + Audio",
 };
 

@@ -225,7 +225,7 @@ export default function MinutesPage() {
                 )}
                 {w.modality === "video" && (
                   <span style={{ flexBasis: "100%", fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
-                    {t("Both the Video Call tab and the Video + Audio tab spend from these minutes. The tab that clones your voice runs down faster, because a cloned voice costs more to run.")}
+                    {t("All three call tabs — Video Call, Video + Audio and Voice Clone Only — spend from these minutes. The two tabs that clone your voice run down faster, because a cloned voice costs more to run.")}
                   </span>
                 )}
                 {/* Only what the administrator has put in, never what a call took

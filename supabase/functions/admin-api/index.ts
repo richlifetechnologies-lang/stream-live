@@ -354,16 +354,25 @@ Deno.serve(async (req: Request) => {
       // security policy that filters him out answers an empty list with no error at
       // all: a card that reads "no calls have happened" while calls are happening.
       // The gateway's own role is not filtered, so the money side comes through here.
+      //
+      // The rows carry their modality because the card is three lists, not one: the natural-voice
+      // video call, the voice-cloning-only call, and the picture-and-cloned-voice call. A voice
+      // session is written with the paid engine too — only a video call can ever run on the trial
+      // machine — so the engine alone cannot tell the three apart, and a list that mixed them put
+      // the price of a picture on a call that sent none.
       case "calls": {
         const db = adminClient();
         const reads = await Promise.all([
           db.from("usage_sessions")
-            .select("id, user_id, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
-            .eq("engine", "fal").order("started_at", { ascending: false }).limit(60),
+            .select("id, user_id, modality, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
+            .eq("engine", "fal").order("started_at", { ascending: false }).limit(150),
           db.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "fal"),
           db.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "decart"),
           db.from("usage_sessions").select("id", { count: "exact", head: true }),
-          db.from("billing_config").select("lucy_video_per_sec_cost").eq("id", 1).maybeSingle(),
+          db.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "fal").eq("modality", "video"),
+          db.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "fal").eq("modality", "audio"),
+          db.from("usage_sessions").select("id", { count: "exact", head: true }).eq("engine", "fal").eq("modality", "video_audio"),
+          db.from("billing_config").select("lucy_video_per_sec_cost, voice_cloning_per_sec_cost").eq("id", 1).maybeSingle(),
           db.from("app_config").select("paystack_ghs_per_usd").eq("id", 1).maybeSingle(),
           db.from("plans").select("id, name, active, monthly_minutes, video_minutes, price_cents, price_ghp"),
           db.from("subscriptions").select("user_id, plan_id"),
@@ -371,7 +380,7 @@ Deno.serve(async (req: Request) => {
         ]);
         const failed = reads.find((r) => r.error)?.error;
         if (failed) return fail(`the call ledger could not be read: ${failed.message}`);
-        const [rows, falCount, trialCount, allCount, cfg, ac, plans, subs, paid] = reads;
+        const [rows, falCount, trialCount, allCount, videoCount, audioCount, comboCount, cfg, ac, plans, subs, paid] = reads;
         const ids = [...new Set((rows.data || []).map((r) => r.user_id).filter(Boolean))];
         const names = ids.length ? await db.from("profiles").select("id, email").in("id", ids) : { data: [] };
         return json({
@@ -380,12 +389,20 @@ Deno.serve(async (req: Request) => {
           names: names.data || [],
           paidUsers: (paid.data || []).map((p) => p.user_id),
           perSecond: cfg.data?.lucy_video_per_sec_cost ?? null,
+          // What a second of cloned voice costs the voice key. A voice-only call is costed with
+          // this figure alone; a picture-and-voice call is costed with both.
+          voicePerSecond: cfg.data?.voice_cloning_per_sec_cost ?? null,
           fx: ac.data?.paystack_ghs_per_usd ?? null,
           plans: plans.data || [],
           subs: subs.data || [],
           falRows: falCount.count ?? 0,
           trialRows: trialCount.count ?? 0,
           allRows: allCount.count ?? 0,
+          kindRows: {
+            video: videoCount.count ?? 0,
+            audio: audioCount.count ?? 0,
+            video_audio: comboCount.count ?? 0,
+          },
         });
       }
 

@@ -164,7 +164,7 @@ export const ADMIN_HTML = `<!doctype html>
           <div style="flex:1 1 320px"><label>Credit an account</label><input id="quickEmail" placeholder="the email the user signed up with" /></div>
           <div style="flex:0 0 auto"><button id="quickOpen" class="primary">Open to credit</button></div>
         </div>
-        <p class="muted" style="margin:10px 0 0">Minutes sit in <b>one pool</b> that both call tabs spend from, and never expire.</p>
+        <p class="muted" style="margin:10px 0 0">Minutes sit in <b>one pool</b> that all three call tabs spend from, and never expire.</p>
         <div id="quickMsg"></div>
       </div>
 
@@ -189,10 +189,10 @@ export const ADMIN_HTML = `<!doctype html>
         </div>
 
         <div class="card acctPane" data-pane="credit">
-          <p class="phint" style="margin:0 0 10px">One pool, both call tabs spend from it. Type the time as <b>1:44</b> or as plain minutes (<b>60</b>); a reason is required.</p>
+          <p class="phint" style="margin:0 0 10px">One pool, all three call tabs spend from it. Type the time as <b>1:44</b> or as plain minutes (<b>60</b>); a reason is required.</p>
           <div style="overflow:auto">
             <table id="bucketTable">
-              <thead><tr><th>Wallet</th><th>Balance</th><th>Burn rate</th><th>Unlimited</th><th>Credited</th><th>Spent</th></tr></thead>
+              <thead><tr><th>Wallet</th><th>Balance</th><th>Burn rate in force</th><th>Unlimited</th><th>Credited</th><th>Spent</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -223,7 +223,7 @@ export const ADMIN_HTML = `<!doctype html>
               <label style="margin-top:0">Voice cloning for this account</label>
               <select id="acctClone" style="display:none">
                 <option value="off">Closed</option>
-                <option value="voice_only">Voice only</option>
+                <option value="voice_only">Voice Clone Only</option>
                 <option value="voice_video">Voice + video</option>
               </select>
               <div id="acctCloneBox"></div>
@@ -287,7 +287,7 @@ export const ADMIN_HTML = `<!doctype html>
           <button id="acctSearchBtn">Search</button>
           <button id="acctRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:8px 0 12px">Minutes sit in <b>one pool</b> and never expire: both call tabs spend from it, a Video + Audio call at its own faster rate because a cloned voice costs more to run. <b>Video</b> is what is left in that pool; <b>cloning</b> is the door to the Video + Audio tab, and off it that tab goes dead on his screen — see the tick inside the account. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
+        <p class="muted" style="margin:8px 0 12px">Minutes sit in <b>one pool</b> and never expire: all three call tabs spend from it, a Video + Audio call and a Voice Clone Only call each at its own rate because a cloned voice costs more to run. <b>Video</b> is what is left in that pool; <b>cloning</b> is the door to the two cloning tabs, and off it both of those tabs go dead on his screen — see the tick inside the account. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
         <div style="overflow:auto">
           <table id="acctTable">
             <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video service</th><th>Video pool</th><th>Voice cloning</th><th>Lifetime</th><th></th></tr></thead>
@@ -420,7 +420,11 @@ export const ADMIN_HTML = `<!doctype html>
       </div>
 
       <!-- One line per call, never a pack of totals: this is where a single call can be
-           pointed at and asked "what did this cost me, and what did I sell it for". -->
+           pointed at and asked "what did this cost me, and what did I sell it for".
+           Three lists, one per kind of call, because the app sells three: a picture with the
+           customer's own voice, a picture with a cloned voice, and a cloned voice with no
+           picture at all. A cloned-voice call is not a video call whose picture failed, and
+           showing it in that list read as money burned on a call nobody could see. -->
       <div class="card">
         <div class="row" style="justify-content:space-between;align-items:center">
           <h2 style="font-size:14px;margin:0">Every paid call, what it cost and what it paid</h2>
@@ -429,6 +433,11 @@ export const ADMIN_HTML = `<!doctype html>
             <button id="refreshCalls">Refresh</button>
             <button id="foldCalls" title="Show or hide the list of calls" style="display:none">+</button>
           </div>
+        </div>
+        <div class="subtabs" id="fcTabs" style="margin-top:12px">
+          <button class="on" data-kind="video">Video Call tab · natural voice</button>
+          <button data-kind="video_audio">Video + Audio tab</button>
+          <button data-kind="audio">Voice Clone Only tab</button>
         </div>
         <div id="fcBody"></div>
       </div>
@@ -671,7 +680,7 @@ export const ADMIN_HTML = `<!doctype html>
           <div>
             <label>Trial minutes granted at sign-up</label>
             <input id="engTrialMinutes" type="number" min="0" step="0.5" />
-            <div class="muted" style="margin-top:6px">Into the one video pool, which both call tabs spend. A new account gets this the moment it is created, so the Minutes page already reads the trial before they press Start. Existing accounts are not topped up.</div>
+            <div class="muted" style="margin-top:6px">Into the one video pool, which all three call tabs spend. A new account gets this the moment it is created, so the Minutes page already reads the trial before they press Start. Existing accounts are not topped up.</div>
           </div>
           <div>
             <label>Trial calls allowed at once, across all accounts</label>
@@ -742,7 +751,7 @@ export const ADMIN_HTML = `<!doctype html>
     <section id="tab-burn" class="hidden">
       <div class="card">
         <h2 style="font-size:14px;margin:0 0 4px">Currently effective multiplier</h2>
-        <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of his pool, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x. All three rates are read against the same pool — the call type decides how fast it drains, not which wallet it comes from. <b>Voice only (no video)</b> is the rate a cloning call with no picture runs at: the same button's minutes, priced on its own line.</p>
+        <p class="muted" style="margin:0 0 12px">One minute of airtime costs <b>N</b> minutes out of his pool, so a 60-minute grant buys 60 minutes of calling at 1x and 40 at 1.5x. All three rates are read against the same pool — the call type decides how fast it drains, not which wallet it comes from. <b>Voice Clone Only (no picture)</b> is the rate a cloning call with no picture runs at: the same button's minutes, priced on its own line.</p>
         <div style="overflow:auto">
           <table id="currentRates">
             <thead><tr><th>Call type</th><th>Multiplier</th><th>1 minute of airtime costs</th><th>In force since</th><th>Note</th></tr></thead>
@@ -756,7 +765,7 @@ export const ADMIN_HTML = `<!doctype html>
         <h2 style="font-size:14px;margin:0 0 4px">Post a new rate</h2>
         <p class="muted" style="margin:0 0 12px">Rates are versioned history: never edit a rate that already ran, post a new row. <b>Saving a rate starts it the same second it is saved</b> — there is no start time to set and nothing to wait for. A lease already in flight keeps the multiplier it started with.</p>
         <div class="row">
-          <div><label>Call type</label><select id="brModality"><option value="video">Video Call</option><option value="audio">Voice only (no video)</option><option value="video_audio">Video + Audio</option></select></div>
+          <div><label>Call type</label><select id="brModality"><option value="video">Video Call</option><option value="audio">Voice Clone Only (no picture)</option><option value="video_audio">Video + Audio</option></select></div>
           <div><label>Multiplier</label><input id="brMult" type="number" min="0.05" step="0.05" value="1" /></div>
           <div style="flex:2 1 240px"><label>Note</label><input id="brNote" placeholder="e.g. ElevenLabs price rise" /></div>
         </div>
@@ -891,7 +900,7 @@ export const ADMIN_HTML = `<!doctype html>
             <label style="margin-top:0">Voice cloning across the whole software</label>
             <select id="cfgCloningMode" style="display:none">
               <option value="off">Closed</option>
-              <option value="voice_only">Voice only</option>
+              <option value="voice_only">Voice Clone Only</option>
               <option value="voice_video">Voice + video</option>
             </select>
             <div id="cfgCloningBox"></div>
@@ -1091,11 +1100,12 @@ export const ADMIN_HTML = `<!doctype html>
   const FEATURES = ["video", "voice", "portrait_obs"];
   const FEATURE_LABEL = { video: "Video calls", voice: "Voice / audio", portrait_obs: "Portrait OBS output" };
   const MODALITIES = ["video", "audio", "video_audio"];
-  const MOD_LABEL = { video: "Video Call", audio: "Voice only (no video)", video_audio: "Video + Audio" };
-  // Two call tabs, three kinds of call: the Video + Audio tab answers for both a voice-and-picture
-  // call and a voice-only one, and the modality on the record is what says which. CALL_MODALITIES
-  // is what a BUYER can be given — minutes are sold in two figures because both video calls draw
-  // the one pool; a third box for the voice-only call would be a price nobody has ever been
+  const MOD_LABEL = { video: "Video Call", audio: "Voice Clone Only (no picture)", video_audio: "Video + Audio" };
+  // Three call tabs, three kinds of call: each tab answers for exactly one kind — a natural-voice
+  // picture, a picture with a cloned voice, or a cloned voice alone, and the modality on the record is
+  // what says which. CALL_MODALITIES
+  // is what a BUYER can be given — minutes are sold in two figures because both video tabs draw
+  // the one pool; a third box for the Voice Clone Only call would be a price nobody has ever been
   // charged, and the plans guard refuses it. RATE_MODALITIES is what this panel can PRICED and
   // READ at the meter: the voice-only call is billed at the stored audio rate, which is the rate
   // he asked to keep a handle on. MODALITIES stays the full vocabulary for READING: wallets,
@@ -1113,7 +1123,7 @@ export const ADMIN_HTML = `<!doctype html>
   const CLONE_MODES = ["off", "voice_only", "voice_video"];
   const CLONE_LABEL = {
     off: "closed",
-    voice_only: "voice only (no video)",
+    voice_only: "Voice Clone Only (no picture)",
     voice_video: "voice + video",
   };
   // The account's own line, off one row as the database reads it. A subscription row that does
@@ -1143,7 +1153,7 @@ export const ADMIN_HTML = `<!doctype html>
     if (eff === "off") return '<span class="pill no" title="voice cloning is closed on this account">cloning off</span>';
     if (eff === "voice_only") {
       const why = own === "voice_only" ? "this account's own line" : "the gateway-wide line";
-      return \`<span class="pill past_due" title="voice-only calls with no picture are open, the Video + Audio Start button is not — closed by \${why}">voice only</span>\`;
+      return \`<span class="pill past_due" title="his Voice Clone Only tab dials, his Video + Audio tab does not — closed by \${why}">voice clone only</span>\`;
     }
     return '<span class="pill yes">cloning on (voice + video)</span>';
   };
@@ -1153,14 +1163,14 @@ export const ADMIN_HTML = `<!doctype html>
   // on the customer's own screen, not an internal name.
   const CLONE_ROWS = {
     gateway: [
-      ["off", "Closed — no cloning anywhere", "Every customer's Video + Audio tab goes dead: no voice-and-picture call and no voice-only call. Nothing to restart on their machines; it lands on their next read."],
-      ["voice_only", "Voice only — for every customer", "The picture Start is off on everyone's Video + Audio tab. Only “Start voice cloning only (no video)” can run, and only for accounts whose own line allows voice."],
+      ["off", "Closed — no cloning anywhere", "Every customer's two cloning tabs go dead: no picture-and-voice call and no Voice Clone Only call. Nothing to restart on their machines; it lands on their next read."],
+      ["voice_only", "Voice Clone Only — for every customer", "The Video + Audio tab is shut for everyone, so no call pairs a picture with a cloned voice. Their Voice Clone Only tab still dials, for the accounts whose own line allows voice."],
       ["voice_video", "Open — each account decides for itself", "Nothing is closed from here. Who may clone is set per account on the Accounts tab."],
     ],
     account: [
-      ["off", "Closed for him", "His Video + Audio tab does nothing. He still sees the tab, every control in it greys, and Start refuses him."],
-      ["voice_only", "Voice only for him", "“Start voice cloning only (no video)” works. The picture Start on that tab stays grey."],
-      ["voice_video", "Voice + video for him", "Both Start buttons work, one at a time: starting the other closes the first and hands its unbilled minutes back."],
+      ["off", "Closed for him", "His two cloning tabs do nothing. He still sees them, every control in each greys, and Start refuses him."],
+      ["voice_only", "Voice Clone Only for him", "His Voice Clone Only tab sends his cloned voice with no picture. His Video + Audio tab stays grey."],
+      ["voice_video", "Voice + video for him", "Both cloning tabs dial, each with its own Start: one sends a picture with the cloned voice beside it, the other sends the cloned voice alone. Two calls, one pool of minutes."],
     ],
   };
   const CLONE_UI = {};
@@ -1850,6 +1860,9 @@ export const ADMIN_HTML = `<!doctype html>
         tookHere = took.data;
       }
     }
+    // The credit window quotes a burn rate, and the Accounts tab never loads the rate history on
+    // its own — asked here, or the column would print the default rather than his figure.
+    await loadRates();
     CUR = {
       ...snap, user_id: userId, email: EMAIL_OF[userId] || userId, pin: pin || null,
       joined_on: joinedOn, joined_at: joinedAt, came_from: cameFrom, machine: machine,
@@ -1924,7 +1937,7 @@ export const ADMIN_HTML = `<!doctype html>
     const globalCloneMode = c.clone_global ?? CLONING_MODE;
     const effCloneMode = cloneFold(globalCloneMode, ownCloneMode);
     // A database that has not run 20261102120000 has no middle position to write, and offering one
-    // there would either fail the save or turn a "voice only" choice into the wider answer behind
+    // there would either fail the save or turn a Voice Clone Only choice into the wider answer behind
     // his back. The rows say which of those it is rather than guessing — and they are painted after
     // the disable, so a locked door looks locked.
     $("acctClone").disabled = !hasCloneModeSub;
@@ -1973,20 +1986,38 @@ export const ADMIN_HTML = `<!doctype html>
       };
     };
     const shownMods = POCKET_BUCKETS.filter((m) => m === "video" || holdsSomething(m));
+    // The Burn rate column cannot come from the wallet row: no such column exists on
+    // credit_balances, and the figure the snapshot answers with is the one the meter used when it
+    // read. What he set on the Burn rates tab is a versioned history, so this prints the row the
+    // meter is actually obeying this second — newest un-retired start that has already arrived,
+    // with the seeded default underneath, exactly as current_burn_rate() computes it — and names a
+    // rate that is filed for a future hour instead of quietly showing the old one.
+    const inForce = effectiveRates();
+    const SEED_RATE = { video: 1.000, audio: 0.500, video_audio: 1.500 };
+    const queuedRate = (m) => RATE_ROWS
+      .filter((r) => r.modality === m && !r.retired_at && new Date(r.effective_from).getTime() > serverNowMs())
+      .sort((a, b) => new Date(a.effective_from) - new Date(b.effective_from))[0];
+    const rateCell = (m) => {
+      if (!RATE_READ_OK) return '<span class="pill warn" title="the rate history did not load, so this page will not guess at it">not read</span>';
+      const r = inForce[m];
+      const q = queuedRate(m);
+      return \`\${rateLabel(r ? r.multiplier : SEED_RATE[m])}x\`
+        + (q ? \` <span class="pill warn" title="\${esc(\`A \${MOD_LABEL[m]} rate of \${rateLabel(q.multiplier)}x is filed for \${when(q.effective_from)} and has not started. Until it does, calls drain the pool at \${rateLabel(r ? r.multiplier : SEED_RATE[m])}x. Start it now or retire it on the Burn rates tab.\`)}">\${rateLabel(q.multiplier)}x queued</span>\` : "");
+    };
     $("bucketTable").querySelector("tbody").innerHTML = shownMods.map((m) => {
       const w = poolRow(m);
-      const tip = m === "video" ? "Both call tabs spend from this wallet." : "A voice-only call is metered at this line's rate but spends the pool, like every other call — minutes are no longer kept in this wallet, so anything standing here is a figure the fold migration has not moved yet.";
+      const tip = m === "video" ? "All three call tabs spend from this wallet." : "A Voice Clone Only call is metered at this line's rate but spends the pool, like every other call — minutes are no longer kept in this wallet, so anything standing here is a figure the fold migration has not moved yet.";
       const note = m === "video"
-        ? \`· both call tabs spend from here\${hasStray ? \` <span class="pill warn">incl. \${clock(stray.balance)} left in the retired Video + Audio wallet — run migration 20261101120000 to move it into the pool</span>\` : ""}\`
+        ? \`· all three call tabs spend from here\${hasStray ? \` <span class="pill warn">incl. \${clock(stray.balance)} left in the retired Video + Audio wallet — run migration 20261101120000 to move it into the pool</span>\` : ""}\`
         : \`· a rate line, not a place minutes are kept\${holdsSomething(m) ? \` <span class="pill warn">\${clock(w.balance)} still standing here from before the fold — run migration 20261102120000 to move it into the pool</span>\` : ""}\`;
-      return \`<tr><td>\${MOD_LABEL[m]} <span class="muted" title="\${tip}">\${note}</span></td><td>\${bucket(w)}</td><td class="mono">\${rateLabel(w.burn_rate ?? 1)}x</td>
+      return \`<tr><td>\${MOD_LABEL[m]} <span class="muted" title="\${tip}">\${note}</span></td><td>\${bucket(w)}</td><td class="mono" title="\${m === "video" ? "The multiplier a call started right now uses. It is not a column on the wallet — it is the rate row in force on the Burn rates tab." : "The Voice Clone Only line's rate. It meters that call but spends the pool."}">\${rateCell(m)}</td>
         <td>\${w.unlimited ? '<span class="pill yes">yes</span>' : '<span class="pill n">no</span>'}</td>
         <td class="mono">\${mins1(w.total_credited)}</td><td class="mono">\${mins1(w.total_spent)}</td></tr>\`;
     }).join("");
 
     // One pool leaves exactly one bucket to credit, so the box states it instead of asking:
     // a dropdown with one answer and an empty first entry is a click that buys nothing.
-    $("gModality").innerHTML = '<option value="video">Video Call pool (both call tabs)</option>';
+    $("gModality").innerHTML = '<option value="video">Video Call pool (all three call tabs)</option>';
     $("gModality").value = "video";
     $("gPackage").innerHTML = '<option value="">pick a package</option>'
       + PLAN_ROWS.filter((p) => p.active).map((p) => {
@@ -2081,7 +2112,7 @@ export const ADMIN_HTML = `<!doctype html>
       hasCloneModeSub
         ? \`voice cloning \${CLONE_LABEL[mode]}\`
         : \`voice cloning \${mode === "voice_video" ? "open (voice + video)" : "closed"}\`
-          + " — this database has no middle position yet, so " + (mode === "voice_only" ? "voice only could only be written as closed" : "it holds the two positions it always had"),
+          + " — this database has no middle position yet, so " + (mode === "voice_only" ? "a Voice Clone Only choice could only be written as closed" : "it holds the two positions it always had"),
     ].join(", and ") + ".", "ok");
     await openAccount(CUR.user_id);
   };
@@ -2228,7 +2259,7 @@ export const ADMIN_HTML = `<!doctype html>
     const parts = CALL_MODALITIES.filter((m) => amounts[m] > 0).map((m) => \`\${mins(amounts[m])} \${MOD_LABEL[m]}\`);
     const pool = amounts.video + (amounts.video_audio || 0);
     $("gPackageHint").textContent = parts.length
-      ? \`\${parts.join(" · ")} — \${mins(pool)} min into the one pool both tabs spend\`
+      ? \`\${parts.join(" · ")} — \${mins(pool)} min into the one pool all three tabs spend\`
       : "no minutes attached — set them on the Plans tab";
   }
 
@@ -2247,11 +2278,11 @@ export const ADMIN_HTML = `<!doctype html>
     // A package priced before the audio-only tab went may still carry that bucket. Selling it
     // must not hand a buyer minutes he cannot spend, so they are left out — and said out loud.
     const dead = amounts.audio > 0
-      ? \`\\n\\nNote: this package also carries \${mins(amounts.audio)} Audio Call minutes. There is no audio-only call in the app, so those are NOT credited.\`
+      ? \`\\n\\nNote: this package also carries \${mins(amounts.audio)} Audio Call minutes. Every call in the app, the Voice Clone Only one included, pays out of the one video pool, so those are NOT credited.\`
       : "";
     const split = CALL_MODALITIES.filter((m) => amounts[m] > 0)
       .map((m) => \`\${mins(amounts[m])} \${MOD_LABEL[m]}\`).join(" + ");
-    if (!confirm(\`Credit \${CUR.email}\\n\\n\${mins(pool)} min into the Video Call pool (both call tabs spend from it)\\nfrom \${split}\\n\\nReason: \${reason}\\n\\nThis writes one ledger row.\${dead}\`)) return;
+    if (!confirm(\`Credit \${CUR.email}\\n\\n\${mins(pool)} min into the Video Call pool (all three call tabs spend from it)\\nfrom \${split}\\n\\nReason: \${reason}\\n\\nThis writes one ledger row.\${dead}\`)) return;
     $("packageBtn").disabled = true;
     const wasPaid = await paidOf(CUR.user_id);
     const done = [];
@@ -3057,19 +3088,43 @@ export const ADMIN_HTML = `<!doctype html>
   let CALL_ROWS = [];
   let CALL_RATE = null;
   let CALL_SKIPPED = 0;
+  // What a second of cloned voice costs the voice key, read beside the video figure so the two
+  // lists can never price a call with the other kind's number.
+  let CALL_VOICE_RATE = null;
   // Three counts, kept apart on purpose: "no calls" and "calls you cannot see" look
   // identical in a blank card, and only the second one is a fault.
   let CALL_FAL = 0;   // calls on the paid machine, all of them
   let CALL_TOTAL = 0; // every call on record, both machines
+  let CALL_KINDS = { video: 0, audio: 0, video_audio: 0 }; // on the paid machine, per kind
   let CALL_SEEN = -1; // what this browser's own sign-in is allowed to see
   let CALL_WHY = "";  // a read that failed, said in words
   let CALL_LIST_SHOWN = false; // is there a list for the + to open right now
-  // Forty rows is a long read, so this card opens folded to its one-line total and the
-  // sign on its header opens the list. The choice is remembered in this browser. Folded
-  // hides the list only - the figures themselves never blank.
-  const FOLD_KEY = "streamlive.calls.folded";
-  let CALLS_FOLD = true;
-  try { if (localStorage.getItem(FOLD_KEY) === "0") CALLS_FOLD = false; } catch { }
+  // The one list this card shows at a time. It opens on the natural-voice video call because that
+  // is the call this card was written for, and a cloning history is a different question.
+  let CALL_KIND = "video";
+  const CALL_KIND_META = {
+    video: {
+      name: "video call", picName: "Picture", noneName: "no picture", voice: false, picture: true,
+      door: "This list is the Video Call tab: an AI picture with the customer's own voice. A call that cloned a voice is not here — it is on one of the two tabs beside it, and it did not fail to send a picture.",
+    },
+    video_audio: {
+      name: "video + voice call", picName: "Picture", noneName: "no picture", voice: true, picture: true,
+      door: "This list is the Video + Audio tab: an AI picture and a cloned voice on the same call, so every row here is costed on both keys.",
+    },
+    audio: {
+      name: "Voice Clone Only call", picName: "Voice", noneName: "no voice", voice: true, picture: false,
+      door: "This list is the Voice Clone Only tab: a cloned voice and no picture at all, so it spends the voice key alone. Nothing here is a video that failed — a call on this tab was never meant to send a frame.",
+    },
+  };
+  // Forty rows is a long read, so each list opens folded to its one-line total and the
+  // sign on the card header opens it. Every kind remembers its own fold in this browser,
+  // because a cloning history he keeps open and a video history he keeps shut are two
+  // different questions. Folded hides the list only - the figures never blank.
+  const foldKey = (kind) => \`streamlive.calls.folded.\${kind}\`;
+  const CALLS_FOLD = { video: true, audio: true, video_audio: true };
+  for (const k of Object.keys(CALLS_FOLD)) {
+    try { if (localStorage.getItem(foldKey(k)) === "0") CALLS_FOLD[k] = false; } catch { }
+  }
 
   // Two things this card is deliberately strict about. A minute is priced from the packages he
   // sets on the Plans tab - not from the margin box, which is a wish, not a price - and trial
@@ -3090,9 +3145,16 @@ export const ADMIN_HTML = `<!doctype html>
       CALL_RATE = per > 0
         ? ledgerRates(p.plans || [], p.subs || [], (p.paidUsers || []).map((u) => ({ user_id: u })), fx, per)
         : null;
+      const voicePer = N(p.voicePerSecond);
+      CALL_VOICE_RATE = voicePer > 0 ? voicePer : null;
       CALL_SKIPPED = N(p.trialRows);
       CALL_FAL = N(p.falRows);
       CALL_TOTAL = N(p.allRows);
+      CALL_KINDS = {
+        video: N((p.kindRows || {}).video),
+        audio: N((p.kindRows || {}).audio),
+        video_audio: N((p.kindRows || {}).video_audio),
+      };
       CALL_ROWS = p.rows || [];
       CALL_WHY = "";
       // One deliberate read with his own sign-in, so a card fed by the gateway can still
@@ -3158,44 +3220,84 @@ export const ADMIN_HTML = `<!doctype html>
     return { perSecond, forUser, paidBy, shelf: n ? sum / n : null };
   }
 
+  // The seconds a call actually held a key: from the first frame, or the first cloned answer,
+  // when one arrived — otherwise the whole held line. Every kind is costed on that figure, so a
+  // call that delivered nothing is not quietly priced as though it had.
+  function callSeconds(r, now) {
+    const began = Date.parse(r.started_at);
+    // A lease nobody renewed stopped at its expiry even while the row waits to be
+    // closed, so counting past that instant would invent a burn the service never charged.
+    const stop = r.ended_at ? Date.parse(r.ended_at) : Math.min(now, r.lease_expires_at ? Date.parse(r.lease_expires_at) : now);
+    const line = Number.isFinite(began) ? Math.max(0, (stop - began) / 1000) : 0;
+    const got = r.media_started_at ? Date.parse(r.media_started_at) : NaN;
+    const pic = Number.isFinite(got) ? Math.max(0, (stop - got) / 1000) : 0;
+    return { line, pic, bill: pic > 0 ? pic : line };
+  }
+  // A row older than the modality column is a picture call: that is all the app could dial then,
+  // and history must not vanish from the list just because it predates the column.
+  const kindOf = (r) => r.modality || "video";
+
   function renderCalls() {
     const box = $("fcBody");
+    const meta = CALL_KIND_META[CALL_KIND];
+    // Which of the three lists this is, said before any figure, so the number below it can never
+    // be read as a call of another kind.
+    const door = \`<p class="muted" style="margin:12px 0 0;font-size:12px">\${meta.door}</p>\`;
     CALL_LIST_SHOWN = false;
     if (CALL_WHY) {
-      box.innerHTML = \`<div class="alert" style="margin-top:12px">This list could not be read: \${esc(CALL_WHY)}</div>\`;
+      box.innerHTML = door + \`<div class="alert" style="margin-top:12px">This list could not be read: \${esc(CALL_WHY)}</div>\`;
       paintFold();
       return;
     }
-    if (!CALL_ROWS.length) {
-      // Three different nothings, said three different ways, because "the card is empty"
-      // used to cover all of them and told you which one to chase.
-      box.innerHTML = \`<p class="muted" style="margin:12px 0 0">\${!CALL_TOTAL
+    const mine = CALL_ROWS.filter((r) => kindOf(r) === CALL_KIND);
+    const onMachine = CALL_KINDS[CALL_KIND] || 0;
+    if (!mine.length) {
+      // Four different nothings, said four different ways, because "the card is empty" used to
+      // cover all of them and told you which one to chase.
+      box.innerHTML = door + \`<p class="muted" style="margin:12px 0 0">\${!CALL_TOTAL
         ? "Nothing has been booked on the video service at all — no call is recorded. If someone is on air while you read this, that call was never written down, and the fault is in the gateway, not on this page."
         : !CALL_FAL
           ? \`No call has run on the paid video service. \${CALL_TOTAL} call(s) are on record: \${CALL_SKIPPED} on the trial machine, which is not listed here.\`
-          : \`\${CALL_FAL} call(s) ran on the paid video service and none reached this list.\`}</p>\`;
+          : !onMachine
+            ? \`No \${meta.name} has run on the paid video service. Its \${CALL_FAL} call(s) split \${CALL_KINDS.video} natural-voice, \${CALL_KINDS.video_audio} picture-and-voice, \${CALL_KINDS.audio} Voice Clone Only\${CALL_SKIPPED ? \`, with \${CALL_SKIPPED} more on the trial machine\` : ""}.\`
+            : \`\${onMachine} \${meta.name}(s) ran on the paid video service and none reached this newest list.\`}</p>\`;
       paintFold();
       return;
     }
     if (!CALL_RATE) {
-      box.innerHTML = \`<p class="muted" style="margin:12px 0 0">\${CALL_FAL} call(s) are on the paid video service, but there is no price per second on the Prices tab, so none of them can be costed.</p>\`;
+      box.innerHTML = door + \`<p class="muted" style="margin:12px 0 0">\${onMachine} \${meta.name}(s) are on the paid video service, but there is no price per second on the Prices tab, so none of them can be costed.</p>\`;
+      paintFold();
+      return;
+    }
+    // A voice list costed without the voice key's price would read as a profit, so the figure has
+    // to be there before the rows are priced at all.
+    if (meta.voice && !CALL_VOICE_RATE) {
+      box.innerHTML = door + \`<p class="muted" style="margin:12px 0 0">\${onMachine} \${meta.name}(s) are on the paid video service, but the voice key has no price per second on the Prices tab, so what they cost cannot be worked out.</p>\`;
       paintFold();
       return;
     }
     // A price table in any other shape is a fault in this page, not in his data, and it
     // used to be the one failure that showed as a completely blank card.
     if (!(CALL_RATE.forUser instanceof Map)) {
-      box.innerHTML = \`<div class="alert" style="margin-top:12px">This list could not be read: the price figures reached the ledger in the wrong form (\${esc(typeof CALL_RATE)}).</div>\`;
+      box.innerHTML = door + \`<div class="alert" style="margin-top:12px">This list could not be read: the price figures reached the ledger in the wrong form (\${esc(typeof CALL_RATE)}).</div>\`;
       paintFold();
       return;
     }
     if (CALL_RATE.forUser.size === 0 && CALL_RATE.shelf == null) {
-      box.innerHTML = '<p class="muted" style="margin:12px 0 0">None of your packages carries both a price and minutes, so a minute has no price to be sold at. Set that on the Plans tab.</p>';
+      box.innerHTML = door + '<p class="muted" style="margin:12px 0 0">None of your packages carries both a price and minutes, so a minute has no price to be sold at. Set that on the Plans tab.</p>';
       paintFold();
       return;
     }
     const now = Date.now();
     const rate = CALL_RATE;
+    // What one second of this kind of call costs: the video price, the voice price, or both. The
+    // minutes it sells are priced the same way on all three lists, because all three draw one pool.
+    const perSecond = (meta.picture ? rate.perSecond : 0) + (meta.voice ? CALL_VOICE_RATE : 0);
+    const rateText = meta.picture && meta.voice
+      ? \`\${usd(rate.perSecond)} a second of picture plus \${usd(CALL_VOICE_RATE)} a second of voice\`
+      : meta.picture
+        ? \`\${usd(rate.perSecond)} a second, \${usd(rate.perSecond * 60)} a minute\`
+        : \`\${usd(CALL_VOICE_RATE)} a second, \${usd(CALL_VOICE_RATE * 60)} a minute\`;
     // What a minute sold for is his own Plans tab figure for that account's package. An account
     // on a package with no price written on it is said so on the row rather than guessed at; an
     // account with no package row at all falls to the average of his priced ones.
@@ -3207,19 +3309,13 @@ export const ADMIN_HTML = `<!doctype html>
         ? { perMinute: rate.shelf, plan: "average of your priced packages" }
         : { perMinute: 0, plan: "no price set" };
     };
-    const rows = CALL_ROWS.map((r) => {
-      const began = Date.parse(r.started_at);
-      // A lease nobody renewed stopped at its expiry even while the row waits to be
-      // closed, so counting past that instant would invent a burn fal never charged.
-      const stop = r.ended_at ? Date.parse(r.ended_at) : Math.min(now, r.lease_expires_at ? Date.parse(r.lease_expires_at) : now);
-      const line = Number.isFinite(began) ? Math.max(0, (stop - began) / 1000) : 0;
-      const frame = r.media_started_at ? Date.parse(r.media_started_at) : NaN;
-      const pic = Number.isFinite(frame) ? Math.max(0, (stop - frame) / 1000) : 0;
+    const rows = mine.map((r) => {
+      const { line, pic, bill } = callSeconds(r, now);
       const billed = N(r.billed_minutes);
       const rp = rateOf(r.user_id);
       return {
         r, line, pic, billed,
-        cost: (pic > 0 ? pic : line) * rate.perSecond,
+        cost: bill * perSecond,
         sell: rp.perMinute,
         plan: rp.plan,
         noOrder: !rate.paidBy.has(String(r.user_id || "")),
@@ -3230,27 +3326,41 @@ export const ADMIN_HTML = `<!doctype html>
       line: a.line + x.line, pic: a.pic + x.pic, billed: a.billed + x.billed,
       cost: a.cost + x.cost, paid: a.paid + x.paid,
     }), { line: 0, pic: 0, billed: 0, cost: 0, paid: 0 });
-    const t = FAL_BAL && FAL_BAL.today ? FAL_BAL.today : null;
-    const gap = t ? t.cost - sum.cost : null;
     const money = (v) => \`<td class="mono" style="text-align:right">\${usd(v)}</td>\`;
     const red = rows.filter((x) => x.paid - x.cost < 0.005).length;
-    // Folded, this one line is the whole card: what these calls cost, what they paid,
+    // Folded, this one line is the whole list: what these calls cost, what they paid,
     // how many lost. The figures never blank - only the list does.
-    const brief = \`<p class="muted" style="margin:10px 0 0">These <b>\${rows.length}</b> calls on the paid video service cost <b>\${usd(sum.cost)}</b> and paid <b>\${usd(sum.paid)}</b> — that is <b>\${sum.paid - sum.cost >= 0 ? "+" : ""}\${usd(sum.paid - sum.cost)}</b>, over <b>\${mins2(sum.billed)}</b> minutes you charged\${red ? \`, with <b style="color:#fb7185">\${red}</b> of them costing more than they paid\` : ""}\${CALL_SKIPPED ? \`, plus <b>\${CALL_SKIPPED}</b> trial call(s) that are not listed\` : ""}.</p>\`;
+    const brief = \`<p class="muted" style="margin:10px 0 0">These <b>\${rows.length}</b> \${meta.name}(s) on the paid video service cost <b>\${usd(sum.cost)}</b> and paid <b>\${usd(sum.paid)}</b> — that is <b>\${sum.paid - sum.cost >= 0 ? "+" : ""}\${usd(sum.paid - sum.cost)}</b>, over <b>\${mins2(sum.billed)}</b> minutes you charged\${red ? \`, with <b style="color:#fb7185">\${red}</b> of them costing more than they paid\` : ""}\${CALL_SKIPPED && CALL_KIND === "video" ? \`, plus <b>\${CALL_SKIPPED}</b> trial call(s) that are not listed\` : ""}.</p>\`;
+    // fal.ai bills the picture, so its own daily reading is set against every picture call on
+    // record — both the natural-voice and the picture-and-voice lists — not against the one
+    // this card happens to be showing. On the voice list there is nothing to compare it with.
+    const t = FAL_BAL && FAL_BAL.today ? FAL_BAL.today : null;
+    const picBill = CALL_ROWS
+      .filter((r) => { const k = kindOf(r); return k === "video" || k === "video_audio"; })
+      .reduce((a, r) => a + callSeconds(r, now).bill, 0);
+    const picRows = CALL_ROWS.filter((r) => { const k = kindOf(r); return k === "video" || k === "video_audio"; }).length;
+    const picCost = picBill * rate.perSecond;
+    const gap = t ? t.cost - picCost : null;
+    const gapNote = !meta.picture
+      ? \`fal.ai's own bill is set against the two lists that use a picture, not this one: a Voice Clone Only call never touches the video key.\`
+      : t
+        ? \`fal.ai says today's whole account bill is <b>\${usd(t.cost)}</b> for \${mins(t.seconds / 60)} minutes of compute. All \${picRows} newest picture calls across both picture lists add up to <b>\${usd(picCost)}</b> — a difference of \${usd(Math.abs(gap))} is \${gap >= 0.005 ? "calls older than these lists, or spending by a key that is not in the pool" : "within reading distance"}.\`
+        : "No fal.ai reading yet, so today's bill cannot be set against these rows.";
     const list = \`
-      <p class="muted" style="margin:10px 0 0">One line per call, newest first, for every call run on the paid video service\${CALL_SKIPPED ? \` - the <b>\${CALL_SKIPPED}</b> trial call(s) are not here\` : ""}. fal.ai bills by the second, so
-        <b>what it cost</b> is the price on your Prices tab (\${usd(rate.perSecond)} a second, \${usd(rate.perSecond * 60)} a minute) times
+      <p class="muted" style="margin:10px 0 0">One line per call, newest first, for every \${meta.name} run on the paid video service\${CALL_SKIPPED ? \` - the <b>\${CALL_SKIPPED}</b> trial call(s) are not here\` : ""}. The services bill by the second, so
+        <b>what it cost</b> is the price on your Prices tab (\${rateText}) times
         the seconds this call held - that is money leaving you, whatever you charge. <b>What it paid</b> is the minutes you charged times
-        the price you set on that account's package on your Plans tab, which each row prints under the minutes. These prices are read fresh
+        the price you set on that account's package on your Plans tab, which each row prints under the minutes. One pool of minutes funds all three
+        kinds of call, so that selling price is the same figure on all three lists. These prices are read fresh
         every time the card loads, so a package you re-price shows up on the next refresh.</p>
       <div style="overflow:auto;margin-top:10px">
         <table id="callsTable">
-          <thead><tr><th>Account</th><th>Started</th><th>Line held</th><th>Picture</th><th>What it cost</th><th>You charged</th><th>What it paid</th><th>Difference</th></tr></thead>
+          <thead><tr><th>Account</th><th>Started</th><th>Line held</th><th>\${meta.picName}</th><th>What it cost</th><th>You charged</th><th>What it paid</th><th>Difference</th></tr></thead>
           <tbody>\${rows.map((x) => \`<tr>
             <td><b>\${esc(EMAIL_OF[x.r.user_id] || shortId(x.r.user_id))}</b></td>
             <td class="muted">\${when(x.r.started_at)}\${x.r.ended_at ? "" : ' <span class="pill warn">on air</span>'}\${x.r.settled ? "" : " · not settled"}</td>
             <td class="mono" style="text-align:right">\${clock(x.line / 60)}</td>
-            <td class="mono" style="text-align:right">\${x.pic > 0 ? clock(x.pic / 60) : '<span class="pill warn">no picture</span>'}</td>
+            <td class="mono" style="text-align:right">\${x.pic > 0 ? clock(x.pic / 60) : \`<span class="pill warn">\${meta.noneName}</span>\`}</td>
             \${money(x.cost)}
             <td class="mono" style="text-align:right">\${mins2(x.billed)} min<div class="muted" style="font-size:11px">\${usd(x.sell)} a minute · \${esc(x.plan)}\${x.noOrder ? " · never paid you" : ""}</div></td>
             \${money(x.paid)}
@@ -3267,37 +3377,45 @@ export const ADMIN_HTML = `<!doctype html>
           </tr></tfoot>
         </table>
       </div>
-      <p class="muted" style="margin:10px 0 0">\${t
-        ? \`fal.ai says today's whole account bill is <b>\${usd(t.cost)}</b> for \${mins(t.seconds / 60)} minutes of compute. These \${rows.length} newest calls add up to <b>\${usd(sum.cost)}</b> — a difference of \${usd(Math.abs(gap))} is \${gap >= 0.005 ? "calls older than this list, or spending by a key that is not in the pool" : "within reading distance"}.\`
-        : "No fal.ai reading yet, so today's bill cannot be set against these rows."} A row in red cost more than it paid — that is a call you ran and did not sell.</p>\`;
+      <p class="muted" style="margin:10px 0 0">\${gapNote} A row in red cost more than it paid — that is a call you ran and did not sell.</p>\`;
     // Where the gateway's count and his own sign-in's count disagree is the answer to
     // "where did my history go", so it is printed whether the list is open or folded.
     const gapSeen = CALL_SEEN >= 0 && CALL_SEEN !== CALL_FAL
       ? \`<p class="muted" style="margin:8px 0 0">Read with your own sign-in this card reaches <b>\${CALL_SEEN}</b> of the \${CALL_FAL} call(s) on the paid service; the figures above are counted by the gateway, so the list is complete whatever that number says.</p>\`
       : "";
     CALL_LIST_SHOWN = true;
-    box.innerHTML = brief + gapSeen + (CALLS_FOLD ? "" : list);
+    box.innerHTML = door + brief + gapSeen + (CALLS_FOLD[CALL_KIND] ? "" : list);
     paintFold();
   }
 
-  // The sign tells you what the press does: + opens the list, - folds it back away. It
+  // The sign tells you what the press does: + opens this kind's list, - folds it back away. It
   // only appears once a list is actually on this card, so a card that never loaded can
   // no longer look like a card with nothing in it.
   function paintFold() {
     const b = $("foldCalls");
     if (!b) return;
     b.style.display = CALL_LIST_SHOWN ? "" : "none";
-    b.textContent = CALLS_FOLD ? "+" : "−";
+    b.textContent = CALLS_FOLD[CALL_KIND] ? "+" : "−";
   }
 
   $("refreshCalls").onclick = () => loadCalls();
   // Folding is a re-render of rows already in memory, not a new read: pressing it costs
-  // nothing and cannot flicker the figures.
+  // nothing and cannot flicker the figures. It folds THIS kind's list only, so opening the
+  // voice history leaves the video list exactly as he left it.
   $("foldCalls").onclick = () => {
-    CALLS_FOLD = !CALLS_FOLD;
-    try { localStorage.setItem(FOLD_KEY, CALLS_FOLD ? "1" : "0"); } catch { }
+    CALLS_FOLD[CALL_KIND] = !CALLS_FOLD[CALL_KIND];
+    try { localStorage.setItem(foldKey(CALL_KIND), CALLS_FOLD[CALL_KIND] ? "1" : "0"); } catch { }
     renderCalls();
   };
+  // The three lists are one read, not three: the rows are already in memory, so a tab press
+  // re-paints rather than asks the gateway again.
+  document.querySelectorAll("#fcTabs button").forEach((b) => {
+    b.onclick = () => {
+      CALL_KIND = b.dataset.kind;
+      document.querySelectorAll("#fcTabs button").forEach((x) => x.classList.toggle("on", x === b));
+      renderCalls();
+    };
+  });
 
   async function loadKeys() {
     const base = "id, label, enabled, priority, daily_minute_cap, minutes_today, usage_day, last_error, last_error_at, is_default, created_at, video_key_tail, voice_key_tail, recent_failures";
@@ -3733,6 +3851,9 @@ export const ADMIN_HTML = `<!doctype html>
 
   // ══ BURN RATES ══════════════════════════════════════════════════════════
   let RATE_ROWS = [];
+  let RATE_READ_OK = false;
+  // Whether the history behind the Burn rate column was actually read. A column that answers
+  // 1x because the read failed is a figure he would act on, so it says it was not read instead.
 
   function effectiveRates() {
     const nowMs = serverNowMs();
@@ -3787,6 +3908,7 @@ export const ADMIN_HTML = `<!doctype html>
     const { data, error } = await sb.from("burn_rates").select("id, modality, multiplier, effective_from, retired_at, note, created_by").order("effective_from", { ascending: false });
     if (error) return msg("rateMsg", error.message);
     RATE_ROWS = data || [];
+    RATE_READ_OK = true;
     renderRates();
   }
   $("rateRefresh").onclick = loadRates;
@@ -4170,7 +4292,7 @@ export const ADMIN_HTML = `<!doctype html>
     setCloneDoor("cfgCloningMode", globalMode ?? "voice_video");
     $("cfgCloningNow").innerHTML = !hasCloneModeCfg
       ? (hasCloningCfg
-        ? "This database only has the old two-position switch, so this box can close everything or open voice + video — the middle position needs the migration, and saving here leaves a voice-only choice closed."
+        ? "This database only has the old two-position switch, so this box can close everything or open voice + video — the middle position needs the migration, and saving here leaves a Voice Clone Only choice closed."
         : "The database has no cloning column yet — run the migrations, then reload this page. Nothing here has been changed.")
       : "";
 
@@ -4208,7 +4330,7 @@ export const ADMIN_HTML = `<!doctype html>
       row.cloning_mode = globalCloneMode;
       CLONING_MODE = globalCloneMode;
     } else if (hasCloningCfg) {
-      // Only the two positions this database has ever had. A voice-only choice is written as
+      // Only the two positions this database has ever had. A Voice Clone Only choice is written as
       // closed — the wider answer would be a door he did not ask for, and it cannot be priced.
       row.cloning_enabled = globalCloneMode === "voice_video";
       CLONING_MODE = row.cloning_enabled ? "voice_video" : "off";
@@ -4216,16 +4338,16 @@ export const ADMIN_HTML = `<!doctype html>
     const { error } = await sb.from("app_config").update(row).eq("id", 1);
     if (error) return msg("cfgMsg", error.message);
     // Paint what actually landed, not what was clicked: on a database without the middle position a
-    // voice-only click lands as closed, and rows still showing the click would be a second lie.
+    // Voice Clone Only click lands as closed, and rows still showing the click would be a second lie.
     setCloneDoor("cfgCloningMode", hasCloneModeCfg ? globalCloneMode : CLONING_MODE);
     const landed = !hasCloneModeCfg && hasCloningCfg && globalCloneMode === "voice_only"
       ? " (this database has no middle position, so it landed as closed)" : "";
     msg("cfgMsg", "Gateway config saved — voice cloning across the whole software is now "
       + CLONE_LABEL[hasCloneModeCfg ? globalCloneMode : CLONING_MODE] + " " + landed
       + (CLONING_MODE === "off"
-        ? ". It lands on the next read each app makes, so a Video + Audio tab that is open on someone's screen — voice-and-picture call or voice-only call — goes dead at their next Start, and a call already running closes at its next voice ask."
+        ? ". It lands on the next read each app makes, so a Video + Audio tab that is open on someone's screen — voice-and-picture call or Voice Clone Only call — goes dead at their next Start, and a call already running closes at its next voice ask."
         : CLONING_MODE === "voice_only"
-          ? ". The picture half of the Video + Audio tab is dead for everyone now; a voice-only call is still open to the accounts whose own line allows it."
+          ? ". The picture half of the Video + Audio tab is dead for everyone now; a Voice Clone Only call is still open to the accounts whose own line allows it."
           : " — applies to the next call, and each account is back to its own line."), "ok");
   };
 
@@ -4266,7 +4388,7 @@ export const ADMIN_HTML = `<!doctype html>
     $("poolTable").querySelector("tbody").innerHTML = POCKET_BUCKETS
       .filter((m) => m === "video" || byMod[m].accounts.size > 0)
       .map((m) => \`<tr>
-      <td>\${MOD_LABEL[m]}\${m === "video" ? \` <span class="muted">· both call tabs\${hasStray ? " (incl. the retired Video + Audio figures)" : ""}</span>\` : ' <span class="muted">· the voice-only call is metered here but paid from the pool, so anything standing here is a figure the fold has not moved yet</span>'}</td>
+      <td>\${MOD_LABEL[m]}\${m === "video" ? \` <span class="muted">· all three call tabs\${hasStray ? " (incl. the retired Video + Audio figures)" : ""}</span>\` : ' <span class="muted">· the Voice Clone Only call is metered here but paid from the pool, so anything standing here is a figure the fold has not moved yet</span>'}</td>
       <td class="mono" style="text-align:right">\${clock(byMod[m].outstanding)}\${byMod[m].unlimited ? ' <span class="pill yes">' + byMod[m].unlimited + " unlimited</span>" : ""}</td>
       <td class="mono" style="text-align:right">\${mins1(byMod[m].credited)}</td>
       <td class="mono" style="text-align:right">\${mins1(byMod[m].spent)}</td>
@@ -4369,7 +4491,7 @@ export const ADMIN_HTML = `<!doctype html>
             // packages, which is why nothing had to be copied into his catalogue for it.
             : \`<br><span class="dirty">Nothing is priced for users outside Ghana yet, so that list shows your \${gh.length} Ghana package\${gh.length === 1 ? "" : "s"} at the Ghana price — printed in dollars, paid by card. Press “Send abroad” on a package and type your own figure to change that.</span>\`)
         + (bare.length ? \`<br><span class="dirty">\${bare.length} has no minutes attached, so anyone who pays gets nothing: \${bare.map((p) => esc(p.name || p.id)).join(", ")}</span>\` : "")
-        + (deadAudio.length ? \`<br><span class="muted">\${deadAudio.length} package\${deadAudio.length === 1 ? " still carries" : "s still carry"} Audio Call minutes, which no call in the app can spend, so “Credit this package” leaves them out: \${deadAudio.map((p) => esc(p.name || p.id)).join(", ")}</span>\` : "")
+        + (deadAudio.length ? \`<br><span class="muted">\${deadAudio.length} package\${deadAudio.length === 1 ? " still carries" : "s still carry"} Audio Call minutes, which no call in the app draws — every tab pays from the one video pool — so “Credit this package” leaves them out: \${deadAudio.map((p) => esc(p.name || p.id)).join(", ")}</span>\` : "")
         + (under.length ? \`<br><span class="dirty">\${under.length} priced under what it costs you: \${under.map((p) => esc(p.name || p.id)).join(", ")}</span>\` : "");
   }
 
@@ -4450,11 +4572,11 @@ export const ADMIN_HTML = `<!doctype html>
       <p class="phint" style="margin-top:6px">The buyer chooses his own list by tapping it in the app; nothing here guesses where he is. A package on the outside-Ghana list is offered to him with the card door only, and a Ghana package with mobile money only — so the price you type here is the price that shelf charges.</p>
       <label>Minutes this package sells — this is what lands on the buyer's account when you credit them</label>
       <div class="grid2">
-        <div><label style="margin-top:0">\${MOD_LABEL.video} <span class="muted">· both call tabs</span></label><input data-f="min_video" type="number" min="0" step="1" value="\${v.min_video}" /></div>
+        <div><label style="margin-top:0">\${MOD_LABEL.video} <span class="muted">· all three call tabs</span></label><input data-f="min_video" type="number" min="0" step="1" value="\${v.min_video}" /></div>
       </div>
       <input type="hidden" data-f="min_video_audio" value="\${v.min_video_audio}" />
       \${v.min_video_audio > 0 ? \`<p class="phint" style="margin-top:6px">This package still holds \${mins(v.min_video_audio)} on the retired Video + Audio line, from when that tab drew from a bucket of its own. There is one pool now, so a buyer who pays this gets \${mins(v.min_video + v.min_video_audio)} min to spend on either call tab — the figure stays on the record, and no box here can change it.</p>\` : ""}
-      \${v.min_audio > 0 ? \`<p class="phint" style="margin-top:6px">This package also holds \${mins(v.min_audio)} of Audio Call minutes from when the app had an audio-only tab. There is no such call now, so they are kept on the record and left out when the package is credited — no box here can change them.</p>\` : ""}
+      \${v.min_audio > 0 ? \`<p class="phint" style="margin-top:6px">This package also holds \${mins(v.min_audio)} of Audio Call minutes from when the app kept a separate audio bucket. Every call now, the Voice Clone Only one included, pays from the one video pool, so they are kept on the record and left out when the package is credited — no box here can change them.</p>\` : ""}
       <input type="hidden" data-f="min_audio" value="\${v.min_audio}" />
       <label>One-line pitch — your own note; the buyer's card no longer prints it</label>
       <input data-f="blurb" value="\${esc(v.blurb)}" placeholder="For streamers who go live on camera" />
@@ -4462,7 +4584,7 @@ export const ADMIN_HTML = `<!doctype html>
       <textarea data-f="includes" placeholder="300 Video Call minutes&#10;Two devices at a time">\${esc(v.includes)}</textarea>
       <label>What it unlocks</label>
       <div>\${FEATURES.map((f) => \`<label class="feat" style="margin:0 14px 6px 0"><input type="checkbox" data-f="feat_\${f}" \${v.feats.includes(f) ? "checked" : ""} /> \${FEATURE_LABEL[f]}</label>\`).join("")}</div>
-      <p class="phint">Those two boxes decide which call tabs a buyer holding this package may use — the app has a Video + Audio call and a Video-only call, and nothing else. The minutes are one pool: both of those tabs spend from that single number, each at its own rate on the Burn rates tab, so there is no second figure to sell. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” puts the whole of it into the one pool both call tabs spend from, in one click.</p>\`;
+      <p class="phint">Those two boxes decide which call tabs a buyer holding this package may use — the app has three: Video Call, Video + Audio and Voice Clone Only. The minutes are one pool: all three spend from that single number, each at its own rate on the Burn rates tab, so there is no second figure to sell. Typing a number here <b>does not credit anybody</b> — granting minutes is done on the Accounts tab, where “Credit this package” puts the whole of it into the one pool all three call tabs spend from, in one click.</p>\`;
   }
 
   function planEditor(p) {
@@ -4806,7 +4928,7 @@ export const ADMIN_HTML = `<!doctype html>
   // gets pool minutes, not a second bucket: the tab spends the same figure at its own rate, and
   // the database now refuses to leave a figure on the retired line at all.
   const PG_MINCOL = { video: "video_minutes", audio: "audio_minutes", video_audio: "video_minutes" };
-  const PG_SHOP_LABEL = { video: "Video only", audio: "Voice only", video_audio: "Video + voice" };
+  const PG_SHOP_LABEL = { video: "Video only", audio: "Voice Clone Only", video_audio: "Video + voice" };
   const PG_QUICK = [15, 30, 60, 120, 300, 600];
   const PG_PLURAL = (n) => (N(n) === 1 ? "" : "s");
 

@@ -51,7 +51,7 @@ export type Wallet = {
 
 export type CallTicket = {
   sessionId: string;
-  /** Video token for this lease — null on the Audio Call tab, which needs no video pipeline. */
+  /** Video token for this lease — null on the Voice Only tab, which needs no video pipeline. */
   token: string | null;
   /**
    * Which video pipeline the gateway put this lease on. Internal plumbing only:
@@ -625,12 +625,17 @@ export class StreamLiveClient {
    * Throws GatewayError with reason out_of_minutes / concurrent_limit / device_* /
    * modality_disabled / update_required / maintenance.
    *
-   * `voiceOnly` is the cloning side of the Video + Audio tab running by itself: the tab is still
-   * the tab, but the call carries no picture, so the gateway meters it as the audio line at the
-   * audio rate and mints no video key. It stays on the tab because that is where the voice lives —
-   * the call records and the panel read the MODALITY for what kind of call it was.
+   * The tab is the whole answer about what kind of call this is: `audio-only` is the cloned
+   * voice with no picture, so the gateway meters it as the audio line at the audio rate and
+   * mints no video key. Builds older than the three-tab app sent that as a `voiceOnly` flag
+   * beside the Video + Audio tab instead; the gateway still reads it, and new builds never
+   * have to say it twice.
+   *
+   * `voiceId` is the cloned voice the call will speak with, and only a cloning tab has one to
+   * name. Sent, it lets the gateway refuse a cloning dial that picked no voice; left out, as an
+   * older build leaves it, the call is metered exactly as before.
    */
-  async startCall(tab: TabName, deviceId?: string, voiceOnly = false): Promise<CallTicket> {
+  async startCall(tab: TabName, deviceId?: string, voiceId?: string): Promise<CallTicket> {
     // A Stop whose hand-back never landed leaves this id behind. Send it again now:
     // it cannot disturb the call about to open (ending an already-closed session is a
     // no-op server-side), and it returns the minutes the abandoned lease is holding.
@@ -640,7 +645,7 @@ export class StreamLiveClient {
     const res = await this.invoke("start-session", {
       appId: this.cfg.falAppId,
       tab,
-      voiceOnly,
+      voice: voiceId,
       deviceId,
       appVersion: this.cfg.appVersion,
     });

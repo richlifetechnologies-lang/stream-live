@@ -298,10 +298,14 @@ async function liveBurn(perSecond: number | null, since: string): Promise<FalLiv
  */
 async function noFrame(monthStart: string): Promise<FalNoFrame | null> {
   const db = adminClient();
+  // Picture calls only. A voice-only session has no frame by design, so counting it here
+  // would read as a video that failed to arrive; a row older than the modality column is
+  // kept, because every call from that era sent a picture.
   const { data, error } = await db
     .from("usage_sessions")
     .select("started_at, lease_expires_at, ended_at")
     .eq("engine", "fal")
+    .or("modality.is.null,modality.in.(video,video_audio)")
     .is("media_started_at", null)
     .gte("started_at", monthStart)
     .limit(5000);

@@ -2,7 +2,7 @@ import type { Modality } from "@stream-live/client";
 
 export const MOD_LABELS: Record<Modality, string> = {
   video: "Video Call",
-  audio: "Audio Call",
+  audio: "Voice Clone Only",
   video_audio: "Video + Audio",
 };
 

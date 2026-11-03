@@ -32,7 +32,11 @@ import { t } from "../lib/i18n";
 const APP = "Stream Live";
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
-type TabId = "video-audio" | "video-only";
+// Three tabs, three kinds of call, one pool of minutes behind all three. Each tab holds exactly
+// one Start press, so nothing on a tab can contradict the tab: the picture-and-voice call and the
+// voice-alone call used to share one screen and one switch, and the switch only ever governed one
+// of the two presses.
+type TabId = "video-audio" | "video-only" | "audio-only";
 const TABS: { id: TabId; label: string; sub: string; Icon: typeof Video; color: string; glow: string }[] = [
   {
     id: "video-audio",
@@ -50,35 +54,42 @@ const TABS: { id: TabId; label: string; sub: string; Icon: typeof Video; color: 
     color: "hsl(35 100% 55%)",        // amber/orange
     glow:  "hsl(35 100% 55% / 0.25)",
   },
+  {
+    id: "audio-only",
+    label: "Voice Clone Only",
+    sub: "Cloned voice, no picture",
+    Icon: Headphones,
+    color: "hsl(265 90% 65%)",        // the cloning violet the panel already wears
+    glow:  "hsl(265 90% 65% / 0.25)",
+  },
 ];
 
 // ─── Which tab the page opens on ───────────────────────────────────────────────
 // A tab the customer chose himself is remembered on this machine and opened next time.
-// Until he chooses, the natural-voice tab is the opening tab: the cloning tab is shut to an
-// account the seller has not opened it for, and one pool of minutes means a balance can no
-// longer tell the two tabs apart, so the money cannot be the clue any more.
+// Until he chooses, the natural-voice tab is the opening tab: the two cloning tabs are shut to an
+// account the seller has not opened them for, and one pool of minutes means a balance can no
+// longer tell the tabs apart, so the money cannot be the clue any more.
 const TAB_STORAGE = "ss_open_tab";
 function savedTab(): TabId | null {
   try {
     const v = localStorage.getItem(TAB_STORAGE);
-    return v === "video-audio" || v === "video-only" ? v : null;
+    return v === "video-audio" || v === "video-only" || v === "audio-only" ? v : null;
   } catch { return null; }
 }
 
-/** Remember a tab he chose himself. A shut door is never remembered: keeping the cloning tab
- *  for an account that cannot use it would open the app on it every time this machine starts. */
-function rememberTabPick(tab: TabId, mayClone: boolean) {
-  if (tab === "video-audio" && !mayClone) return;
+/** Remember a tab he chose himself. A shut door is never remembered: keeping a cloning tab for an
+ *  account that cannot use it would open the app on it every time this machine starts. */
+function rememberTabPick(tab: TabId, mayUse: boolean) {
+  if (tab !== "video-only" && !mayUse) return;
   try { localStorage.setItem(TAB_STORAGE, tab); } catch { /* remembering is a convenience */ }
 }
 
 // ─── Per-tab isolated state ────────────────────────────────────────────────────
-// Each tab (Video + Audio / Video Call) is an independent workspace:
-// its own selected camera & mic, style, prompt, reference image and voice-clone
-// settings. This hook stores a separate value per TabId but exposes the SAME
+// Each tab is an independent workspace: its own selected camera & mic, style, prompt, reference
+// image and chosen voice. This hook stores a separate value per TabId but exposes the SAME
 // [value, setValue] shape as useState, so call sites are unchanged and switching
 // tabs never leaks one tab's inputs/uploads into another.
-const TAB_IDS: TabId[] = ["video-audio", "video-only"];
+const TAB_IDS: TabId[] = ["video-audio", "video-only", "audio-only"];
 function usePerTabState<T>(activeTab: TabId, initial: T): [T, (v: T | ((prev: T) => T)) => void] {
   const [store, setStore] = useState<Record<TabId, T>>(() => {
     const base = {} as Record<TabId, T>;
@@ -235,7 +246,6 @@ class AudioSyncPipeline {
   private timer:      ReturnType<typeof setInterval> | null = null;
   private videoEl:    HTMLVideoElement | null = null;
   private micStream:  MediaStream | null = null;
-
   // One self-calibrating figure - this room's silence and this customer's own loudness -
   // drives the meter, the gate and the speech detector. Nothing here needs a switch, and
   // nothing here depends on anyone understanding what a switch does.
@@ -254,7 +264,9 @@ class AudioSyncPipeline {
   // `mic` is a microphone this page already asked for and proved. Handing it in keeps a
   // call from opening a second one — two asks of the same device is how a pre-flight
   // check used to cost the customer the input he had just been shown working.
-  async start(videoEl: HTMLVideoElement, micDeviceId?: string, mic: MediaStream | null = null):
+  // `videoEl` is null on the Voice Only tab, which mounts no picture at all: the meters and
+  // the noise gate still run there, only the lip-sync figure has nothing to compare against.
+  async start(videoEl: HTMLVideoElement | null, micDeviceId?: string, mic: MediaStream | null = null):
     Promise<{ engine: MediaStream; cable: MediaStream } | null> {
     this.videoEl = videoEl;
     try {
@@ -334,7 +346,9 @@ class AudioSyncPipeline {
   }
 
   private _tick() {
-    if (!this.analyser || !this.videoEl) return;
+    // No picture is not no meter: a Voice Only call has no element to watch, and its meters,
+    // its gate and its cable levels are measured from the microphone exactly as a picture's are.
+    if (!this.analyser) return;
     this.analyser.getByteFrequencyData(this.freqData);
     // Only the band a voice lives in. Room noise is broadband, and mixing it with the
     // voice leaves almost nothing to tell your words apart from an empty room.
@@ -1013,9 +1027,6 @@ export default function StreamPage() {
   // ── Stream state ───────────────────────────────────────────────────────────
   const [connStatus, setConnStatus]   = useState<"idle"|"connecting"|"connected"|"reconnecting">("idle");
   const [isStreaming, setIsStreaming] = useState(false);
-  // The call in flight is the voice-only one: it changes what the bar offers, what the chips
-  // are called, and what the stage says while it runs.
-  const [isVoiceOnly, setIsVoiceOnly] = useState(false);
   const [isStarting, setIsStarting]  = useState(false);
   const [isClosing, setIsClosing]    = useState(false);
   const [connStep, setConnStep]       = useState<"mic"|"auth"|"engine"|"voice"|"retry"|null>(null);
@@ -1102,13 +1113,16 @@ export default function StreamPage() {
   // understand it and never turn it on, so the app now works out this room's silence
   // and this person's own loudness by itself and holds the microphone to that.
 
-  // ── Voice cloning ─────────────────────────────────────────────────────────
-  // Per-tab: voice-clone toggle/voice chosen in the Audio Call tab must not leak
-  // into the Video+Audio tab's audio section (and vice versa).
-  const [vcEnabled, setVcEnabled]         = usePerTabState<boolean>(activeTab, false);
+  // ── Voice cloning ───────────────────────────────────────────────────────────
+  // Per-tab: the voice chosen on the picture-and-voice tab must not leak into the voice-only
+  // tab (and vice versa) — they are two calls a customer may want to sound different on.
+  // There is no on/off switch any more: the tab he is standing on is the switch.
   const [vcActive, setVcActive]           = useState(false);
   const [vcVu, setVcVu]                   = useState(0);
-  const [vcVoiceId, setVcVoiceId]         = usePerTabState<string>(activeTab, BUILTIN_VOICES[0].id);
+  // Empty on purpose. A preset picked for him would put a voice on his line that he never
+  // chose, and the call would bill before he noticed — so the list opens on "Choose a voice"
+  // and no cloning call starts until he answers it.
+  const [vcVoiceId, setVcVoiceId]         = usePerTabState<string>(activeTab, "");
   const [savedVoices, setSavedVoices]     = useState<SavedVoice[]>(() => getSavedVoices());
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [uploadVoiceName, setUploadVoiceName] = useState("");
@@ -1224,49 +1238,49 @@ export default function StreamPage() {
   const holdMsgRef = useRef<string | null>(null);
 
   const credsMissing = !account.signedIn || !hasMinutes(account, modalityForTab(activeTab));
-  const voiceKeySet  = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
+  // Asked of an account already known to be signed in, where the empty bucket is the only way
+  // this reads as no. The cloning card says "ask your administrator for minutes" rather than
+  // walking him off to the sign-in page.
+  const voiceKeySet = account.signedIn && hasMinutes(account, modalityForTab(activeTab));
 
   // ─── Who may clone a voice ───────────────────────────────────────────────────
-  // One tab does it, and two separate things can say no: the administrator's tick on the
-  // account, and this page's own switch. A free trial minute buys a picture, never a cloned
-  // voice — every answer from the cloning service costs the seller real money — so a trial
-  // account reads the tab but cannot open it.
-  const cloneTab = activeTab === "video-audio";
+  // Two of the three tabs clone a voice, and two separate things can say no: the administrator's
+  // door on the account, and whether this account has ever paid. There is no third say — the page
+  // used to carry its own switch, and that switch governed only one of the two Start presses that
+  // shared the tab, so a call the customer believed was off ran and billed. One tab, one press,
+  // one door now. A free trial minute buys a picture, never a cloned voice: every answer from the
+  // cloning service costs the seller real money.
+  const comboTab = activeTab === "video-audio";
+  const voiceTab = activeTab === "audio-only";
+  // A cloning tab of either kind: it needs a voice, and it stands behind a cloning door.
+  const cloneTab = comboTab || voiceTab;
   const mayClone = account.signedIn && account.paid && cloneOpen(account);
-  const cloneLocked = cloneTab && !cloneOpen(account);
+  const mayVoice = account.signedIn && account.paid && voiceCloneOpen(account);
+  // The picture-and-voice call needs the wider door; the voice-alone call only needs the voice
+  // one open, and that is his middle position — the video-with-voice tab stays shut under it.
+  // The Video Call tab belongs to nobody's switch: it clones nothing.
+  const mayUseTab = (id: TabId) => id === "video-audio" ? mayClone : id === "audio-only" ? mayVoice : true;
+  const cloneLocked = cloneTab && !mayUseTab(activeTab);
   const cloneNeedsPaid = cloneTab && account.signedIn && !account.paid;
   // The tab stays readable and every control in it is shown — greyed, and answering to
   // nothing. A customer who cannot see what he is missing has no reason to ask for it.
   const cloneDead = cloneLocked || cloneNeedsPaid;
 
-  // The wider of this account's two cloning doors: how far he may clone a voice at all. Open
-  // while the door above is shut is his "voice only" setting — no picture-and-voice call
-  // starts on this tab, and the cloned voice on the cable still does. Shut, nothing in this
-  // panel runs, and the card says so instead of moving controls that answer to nothing.
-  const mayVoice = account.signedIn && account.paid && voiceCloneOpen(account);
-  const voiceLocked = cloneTab && !voiceCloneOpen(account);
-  const voiceNeedsPaid = cloneTab && account.signedIn && !account.paid;
-  const voiceDead = voiceLocked || voiceNeedsPaid;
+  // Whether the call this tab dials is built on a cloned voice. It is what the press proves
+  // before it asks for a lease: his microphone reaching the app, and the voice service
+  // answering at all. The Video Call tab needs neither, because it sends his own voice.
+  const needsVoice = cloneTab;
 
-  // The same pool pays for this call as for the picture one, so an account with nothing in it
-  // cannot start it either. Both Start buttons have to say that in the same voice: one that
-  // looks pressable and then walks off to the prices page is the confusion this panel is
-  // supposed to remove.
-  const voiceCredsMissing = !account.signedIn || !hasMinutes(account, "audio");
-
-  // ─── The voice-only call, and what stands in its way ────────────────────────
-  // One cable carries sound out of this app, so the two Start buttons are the two ends of a
-  // switch: a picture call on air greys the voice-only button, and a voice-only call on air
-  // turns the picture button into the one press that takes its place. The camera decides
-  // which of the two he means — a live camera or a chosen photo is a picture he intends to
-  // send, so the voice-only button stands down rather than open a call he will never look at.
-  const videoOnAir = isStreaming && !isVoiceOnly;
-  const cameraInUse = cameraReady || refImagePreview !== null;
-  const voiceStartBlocked =
-    voiceLocked ? endReasonMessage("clone_closed")
-      : voiceNeedsPaid ? endReasonMessage("clone_needs_paid_minutes")
-      : videoOnAir ? t("You are on a video call. Stop it first, then start the voice-only one.")
-      : cameraInUse ? t("Your camera or photo is on, so this tab is making a video call. Turn the camera off to go out with the cloned voice alone.")
+  // ─── What stands between this tab and a call ────────────────────────────────
+  // One press per tab, so one short list of reasons — and the first thing on it is the voice
+  // itself. A cloning call with no voice chosen would go out with a preset the customer never
+  // picked, which is his voice on somebody else's mouth; the gateway refuses the dial too, so
+  // no metered lease can open on an empty choice.
+  const noVoiceChosen = cloneTab && !vcVoiceId;
+  const startBlocked =
+    cloneLocked ? endReasonMessage("clone_closed")
+      : cloneNeedsPaid ? endReasonMessage("clone_needs_paid_minutes")
+      : noVoiceChosen ? t("Choose a voice first, or upload your own. This call goes out with a cloned voice, and none is picked yet.")
       : null;
 
   // The free minute is the one thing in the app that cannot be lost, and the one thing
@@ -1298,31 +1312,28 @@ export default function StreamPage() {
   const videoWallet = bucketFor(account, "video");
   const videoLeft = !videoWallet || videoWallet.unlimited ? null : videoWallet.balance;
 
-  // A new account holds one thing: the free video minute. Dropping it on the video+audio tab
-  // opens the app on a call it can never make — a free trial buys a picture, never a cloned
-  // voice — and since the one pool its video balance reads as plenty on that tab too, so the
-  // balance alone can no longer say which of the two video tabs this account belongs on. What
-  // says it is whether cloning is open to him at all. It re-checks on every balance read rather
-  // than once, because a trial that lands a beat after sign-in must still route him, and it
-  // stands down the moment he picks a tab himself.
+  // Which tab this account belongs on is not something the balances can say any more: one pool
+  // feeds all three calls, so the minutes read identically everywhere. What says it is which
+  // doors the administrator left open. A trial holds only the free video minute and both cloning
+  // doors shut, so it stays on the video tab it can actually dial; an account with the
+  // picture-and-voice door opens on that call, and one set to voice only opens on the voice tab
+  // rather than on a screen it may not use. It re-checks on every balance read rather than once,
+  // because a door that opens a beat after sign-in must still route him, and it stands down the
+  // moment he picks a tab himself.
   const tabChosen = useRef(false);
   useEffect(() => {
     if (tabChosen.current || account.loading || !account.signedIn || account.wallets.length === 0) return;
     if (account.live) return;
-    // The walk-through moves between the two tabs itself; a router that follows the account
+    // The walk-through moves between the tabs itself; a router that follows the account
     // would pull the page back under the stop being explained.
     if (tourOpen) return;
-    // Either half of the cloning door keeps him on this tab: an account set to voice only has
-    // no picture call to make, but the voice he clones with lives here.
-    if (activeTab === "video-audio" && !mayClone && !mayVoice) { setActiveTab("video-only"); return; }
-    // An account with cloning opened goes back to the tab he is paying for, but only while he
-    // has never chosen one — a choice of his own is what savedTab remembers.
-    if (activeTab === "video-only" && (mayClone || mayVoice) && savedTab() === null) { setActiveTab("video-audio"); return; }
-    const here = modalityForTab(activeTab);
-    if (hasMinutes(account, here)) return;
-    const elsewhere = TABS.filter(tab => tab.id !== activeTab && hasMinutes(account, modalityForTab(tab.id)));
-    if (elsewhere.length === 1) setActiveTab(elsewhere[0].id);
-  }, [account, activeTab, tourOpen, mayClone, mayVoice]);
+    // A locked tab moves him to the cloning call that IS open, or off cloning altogether.
+    if (comboTab && !mayClone) { setActiveTab(mayVoice ? "audio-only" : "video-only"); return; }
+    if (voiceTab && !mayVoice) { setActiveTab(mayClone ? "video-audio" : "video-only"); return; }
+    if (activeTab === "video-only" && (mayClone || mayVoice) && savedTab() === null) {
+      setActiveTab(mayClone ? "video-audio" : "audio-only");
+    }
+  }, [account, activeTab, comboTab, voiceTab, tourOpen, mayClone, mayVoice]);
 
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
@@ -1893,7 +1904,6 @@ export default function StreamPage() {
       });
       setIsStreaming(false); streamingRef.current = false;
       setConnStatus("idle"); setConnStep(null); setElapsed(0);
-      setIsVoiceOnly(false);
       setAudioActive(false); setSyncDelay(FALLBACK_HOLD); setSyncMeasured(false); setSyncLive(false); setSyncReason("waiting");
       paintMic(0, "silent");
       paintCable(0);
@@ -2016,16 +2026,18 @@ export default function StreamPage() {
   /**
    * One ask for a call: open the metered lease, then the pipelines.
    *
-   * `voiceOnly` asks for the cloning call with no picture in it. The gateway meters it as an
-   * audio session and hands back no video key, so this branch opens the microphone, the cable
-   * and the clone and stops there — no WebRTC, no frame, nothing for the stage to show.
+   * The tab he is standing on is the call he wants, and it is the only thing that decides it:
+   * `audio-only` asks for the cloning call with no picture in it. The gateway meters that one as
+   * an audio session and hands back no video key, so this branch opens the microphone, the cable
+   * and the clone and stops there — no WebRTC, no frame, nothing for a stage to show.
    *
    * Returns null when the call is on air, and a StartFailure when anything refused it.
    * Nothing in here speaks to the customer — the caller decides whether to ask the
    * engine again first, so the sentence he ends up reading matches the number of tries
    * already spent on his behalf.
    */
-  const attemptStart = useCallback(async (tabName: TabName, needsVoice: boolean, voiceOnly = false): Promise<StartFailure | null> => {
+  const attemptStart = useCallback(async (tabName: TabName, needsVoice: boolean): Promise<StartFailure | null> => {
+    const voiceOnly = tabName === "audio-only";
     // The gateway owns this from the moment startCall answers, and teardownStream()
     // clears the page's copy of it before the failure reaches the caller — so it is
     // held here too, for the record of what the video service answered.
@@ -2052,7 +2064,7 @@ export default function StreamPage() {
       setConnStep("auth");
       // Open the metered lease first: nothing touches WebRTC until the gateway
       // confirms this account and bucket can pay for the call.
-      const ticket = await gateway.startCall(tabName, await deviceId(), voiceOnly);
+      const ticket = await gateway.startCall(tabName, await deviceId(), needsVoice ? vcVoiceId : undefined);
       sessionId = ticket.sessionId;
       engine = ticket.engine ?? null;
       sessionIdRef.current = ticket.sessionId;
@@ -2086,10 +2098,11 @@ export default function StreamPage() {
         // cloned voice up with, so the hold the estimator would learn here has no use.
         if (!voiceOnly) clonerRef.current?.setVideoDelay(delay);
       };
-      // The camera is sampled from its own always-present sink rather than from the
+      // The AI picture is sampled from the stage's own element rather than from the
       // picture-in-picture box, which portrait hides - a timing rule that only works in one
-      // orientation is a rule that reports "not measured" to half the customers.
-      const streams = await pipe.start(remoteVideoRef.current!, selectedMicId || undefined, mic);
+      // orientation is a rule that reports "not measured" to half the customers. A Voice Only
+      // call hands in nothing at all, and the estimator then simply never has a mouth to watch.
+      const streams = await pipe.start(remoteVideoRef.current, selectedMicId || undefined, mic);
       micHandedOff = true;
       syncPipeRef.current = pipe;
       if (streams) {
@@ -2190,11 +2203,10 @@ export default function StreamPage() {
         }
       }
 
-      // The voice-only call is open the moment its pipelines are running: there is no WebRTC
+      // The Voice Only call is open the moment its pipelines are running: there is no WebRTC
       // hand to wait for, and the cable re-attach that a picture used to signal is owed here
       // instead — the cloned voice has to reach the software microphone with nothing on screen.
       if (voiceOnly) {
-        setIsVoiceOnly(true);
         setConnStep(null);
         setConnStatus("connected");
       }
@@ -2270,7 +2282,7 @@ export default function StreamPage() {
   }), []);
 
   /**
-   * The ladder every Start button shares: ask for a call, and when the line accepts it and
+   * The ladder the Start button runs: ask for a call, and when the line accepts it and
    * then dies — which is what happens to a call started right after another one closed —
    * wait and ask again before anyone is told anything.
    *
@@ -2279,7 +2291,7 @@ export default function StreamPage() {
    * the customer's back: he was just told to wait, and a call that opens itself five seconds
    * later contradicts the only sentence this screen has.
    */
-  const runStartLadder = useCallback(async (tabName: TabName, needsVoice: boolean, voiceOnly: boolean) => {
+  const runStartLadder = useCallback(async (tabName: TabName, needsVoice: boolean) => {
     // This machine is holding its wait. The buttons are disabled and show the count, so the
     // only press that reaches here is the OBS cable asking for a call on its own.
     if (holdUntilRef.current !== null) {
@@ -2292,7 +2304,7 @@ export default function StreamPage() {
       let last: StartFailure | null = null;
       let tries = START_TRIES;
       for (let i = 0; i < tries; i++) {
-        const failure = await attemptStart(tabName, needsVoice, voiceOnly);
+        const failure = await attemptStart(tabName, needsVoice);
         if (!failure) return;
         last = failure;
         // Which line the gateway put this call on decides how many more asks it is worth.
@@ -2329,73 +2341,36 @@ export default function StreamPage() {
   }, [attemptStart, toast, setLocation, countedWait, armHold]);
 
   /**
-   * Press of the Start call button — the one that puts a picture on the line. The answers this
-   * page gives before it asks for a call each cost the customer less than a call that cannot do
-   * what the tab promises: the administrator's tick, a trial minute, this page's own cloning
-   * switch, and a camera that is not running.
+   * Press of the one Start button on this page. Which call it dials is decided by the tab he is
+   * standing on, and by nothing else: Video Call sends his own voice with the picture, Video +
+   * Audio sends the picture with a cloned voice, Voice Only sends the cloned voice with no
+   * picture at all. The answers this page gives before it asks for a call each cost the customer
+   * less than a call that cannot do what its own tab promises: the administrator's tick, a trial
+   * minute, no voice picked, and — on the two tabs that show one — a camera that is not running.
    */
-  const handleStartStream = useCallback(async () => {
+  const handleStart = useCallback(async () => {
     if (isStartingRef.current || closingRef.current || streamingRef.current) return;
     // The card's listening check holds the microphone for a few seconds; a call must never
     // start while it has the device.
     micCheckRef.current?.stop();
-    const needsVoice = activeTab !== "video-only" && vcEnabled;
 
-    if (cloneLocked) {
-      toast({ title: t("Cannot start"), description: endReasonMessage("clone_closed"), variant: "destructive", withContact: true }); return;
-    }
-    if (cloneNeedsPaid) {
-      toast({ title: t("Cannot start"), description: endReasonMessage("clone_needs_paid_minutes"), variant: "destructive" }); return;
-    }
-    if (cloneTab && !vcEnabled) {
-      toast({ title: t("Cannot start"), description: t("Turn voice cloning on before starting. A call without it has no cloned voice to send, and that is the Video Call tab."), variant: "destructive" }); return;
+    if (startBlocked !== null) {
+      toast({ title: t("Cannot start"), description: startBlocked,
+        variant: "destructive", withContact: cloneLocked }); return;
     }
 
     if (credsMissing) { setLocation(account.signedIn ? "/minutes" : "/account"); return; }
-    if (!cameraReady || !localStreamRef.current) {
+    // The Voice Only tab never asks for a camera: nothing it sends is a picture, and making him
+    // enable one to go out with his voice alone is the mistake this split was made to remove.
+    if (!voiceTab && (!cameraReady || !localStreamRef.current)) {
       toast({ title: t("Camera not ready"), description: t("Enable your camera first."), variant: "destructive" }); return;
     }
-    await runStartLadder(activeTab, needsVoice, false);
-  }, [isStreaming, credsMissing, cameraReady, activeTab, cloneTab, cloneLocked, cloneNeedsPaid,
-      vcEnabled, attemptStart, toast, setLocation, account, runStartLadder]);
-
-  /**
-   * Press of "Start voice cloning only (no video)": his voice, cloned, on the calling app's
-   * line and no picture anywhere. The camera gate above is what keeps the two calls from
-   * being mistaken for each other — a live camera or a chosen photo means he means the video.
-   */
-  const handleStartVoiceOnly = useCallback(async () => {
-    if (isStartingRef.current || closingRef.current || streamingRef.current) return;
-    micCheckRef.current?.stop();
-    if (voiceStartBlocked !== null) {
-      toast({ title: t("Cannot start"), description: voiceStartBlocked,
-        variant: "destructive", withContact: voiceLocked }); return;
-    }
-    if (!account.signedIn) { setLocation("/account"); return; }
-    // The same pool pays for this call as for the picture one, at the voice-only price the
-    // administrator sets — so the ask is whether that pool can fund a lease at all.
-    if (!hasMinutes(account, "audio")) { setLocation("/minutes"); return; }
-    // This call exists to put the cloned voice on the software microphone, so the cable is
-    // switched on for it rather than left for him to find under the broadcast panel.
-    if (!audioRouteOn) { setAudioRouteOn(true); await applyAudioRoute(true); }
-    await runStartLadder("video-audio", true, true);
-  }, [account, voiceStartBlocked, voiceLocked, audioRouteOn, applyAudioRoute, runStartLadder, toast, setLocation]);
-
-  /**
-   * The one press that moves him from the voice-only call to the picture call. The cable
-   * carries one thing at a time, so the voice call has to close before the video one opens —
-   * and asking him to work out that order himself, with two buttons and a black screen
-   * between them, is the confusion this button was added to remove.
-   */
-  const handleVoiceSwap = useCallback(async () => {
-    if (isStartingRef.current || closingRef.current) return;
-    if (!cameraReady || !localStreamRef.current) {
-      toast({ title: t("Camera not ready"), description: t("Enable your camera first, then switch to the video call."), variant: "destructive" }); return;
-    }
-    micCheckRef.current?.stop();
-    await teardownStream();
-    await runStartLadder("video-audio", true, false);
-  }, [cameraReady, teardownStream, runStartLadder, toast]);
+    // A voice-only call exists to put the cloned voice on the software microphone, so the cable
+    // is switched on for it rather than left for him to find under the broadcast panel.
+    if (voiceTab && !audioRouteOn) { setAudioRouteOn(true); await applyAudioRoute(true); }
+    await runStartLadder(activeTab, needsVoice);
+  }, [credsMissing, cameraReady, voiceTab, audioRouteOn, activeTab, startBlocked, cloneLocked, needsVoice,
+      applyAudioRoute, toast, setLocation, account, runStartLadder]);
 
   const handleStop = useCallback(() => teardownStream(), [teardownStream]);
 
@@ -2485,17 +2460,16 @@ export default function StreamPage() {
     const h = (e: MessageEvent) => {
       if (e.data === "stream-live-stop") teardownStream();
       else if (e.data === "stream-live-reconnect") {
-        // The cable came back and asked for its call. It gets the same kind of call back:
-        // a voice-only caller has no picture to be reconnecting to, and a picture caller
-        // needs his camera before anything is dialed.
-        const voice = isVoiceOnly;
-        if (voice ? voiceStartBlocked !== null : !cameraReady) return;
+        // The cable came back and asked for its call. It gets the same kind of call back, which
+        // is the one this tab dials — and a picture call needs his camera running first.
+        if (startBlocked !== null) return;
+        if (!voiceTab && !cameraReady) return;
         teardownStream();
-        setTimeout(() => { void (voice ? handleStartVoiceOnly() : handleStartStream()); }, 300);
+        setTimeout(() => { void handleStart(); }, 300);
       }
     };
     window.addEventListener("message", h); return () => window.removeEventListener("message", h);
-  }, [teardownStream, cameraReady, isVoiceOnly, voiceStartBlocked, handleStartStream, handleStartVoiceOnly]);
+  }, [teardownStream, cameraReady, voiceTab, startBlocked, handleStart]);
 
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
@@ -2512,7 +2486,6 @@ export default function StreamPage() {
 
   const curStyle = STYLES.find(s => s.id === selectedStyle)!;
   const selectSt: React.CSSProperties = { width: "100%", appearance: "none", padding: "8px 32px 8px 12px", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", borderRadius: 8, color: "hsl(190 80% 96%)", fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", opacity: isStreaming ? 0.5 : 1 };
-  const needsVoice = activeTab !== "video-only";
 
   // ─── Video output panel (portrait & landscape) ────────────────────────────
   // Portrait mode = 9:16 ratio, clean output, no overlay chrome.
@@ -2573,25 +2546,6 @@ export default function StreamPage() {
             <p style={{ fontSize: 13, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "center", padding: "0 20px" }}>
               {isPortrait ? t("Portrait mode active") : t("Enable camera and click Start")}
             </p>
-          </div>
-        )}
-
-        {/* A voice-only call on air paints nothing on purpose, so the dark rectangle is
-            explained rather than left to read as a call that failed to start. The customer's
-            eye goes here first; the answer has to be here too. */}
-        {isVoiceOnly && (
-          <div style={{ position: "absolute", inset: 0, zIndex: 2, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 13, background: "radial-gradient(ellipse at center, hsl(265 60% 7%) 0%, hsl(222 47% 3%) 100%)" }}>
-            <Headphones style={{ width: 32, height: 32, color: VC }} />
-            <p style={{ fontFamily: "'Orbitron',monospace", fontSize: 13, fontWeight: 700, color: "hsl(265 80% 88%)", letterSpacing: "0.04em" }}>{t("Voice only — no picture")}</p>
-            <p style={{ fontSize: 12.5, color: "hsl(222 25% 60%)", fontFamily: "'Rajdhani',sans-serif", textAlign: "center", padding: "0 22px", lineHeight: 1.5 }}>
-              {t("Your cloned voice is on the calling app's line. This stays dark the whole call because nothing is sent as video.")}
-            </p>
-            {connStatus === "connected" && (
-              <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(0 85% 70%)", fontFamily: "'Orbitron',monospace" }}>{t("LIVE · {time}", { time: formatTime(elapsed) })}</p>
-            )}
-            <div style={{ width: "70%", maxWidth: 260 }}>
-              <Waveform analyser={vcAnalyser} color={VC} height={44} />
-            </div>
           </div>
         )}
 
@@ -2681,15 +2635,9 @@ export default function StreamPage() {
           These three spans are written by the interval above, so updating them
           never re-renders this page. */}
       <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, fontSize: 11, fontFamily: "'Rajdhani',sans-serif", color: "hsl(222 25% 45%)" }}>
-        {isVoiceOnly ? (
-          <span>{t("This call sends no picture, so there are no frame counts to show.")}</span>
-        ) : (
-          <>
-            <span ref={fpsCamRef}>{t("Camera —")}</span>
-            <span>·</span>
-            <span ref={fpsAiRef}>{t("AI picture —")}</span>
-          </>
-        )}
+        <span ref={fpsCamRef}>{t("Camera —")}</span>
+        <span>·</span>
+        <span ref={fpsAiRef}>{t("AI picture —")}</span>
         <span ref={fpsHintRef} style={{ color: "hsl(38 95% 55%)", display: "none" }}>{t("The AI is sending fewer pictures than your camera.")}</span>
       </div>
 
@@ -2736,15 +2684,18 @@ export default function StreamPage() {
   // (VU + delay + lease updates re-render this page). A button torn down between
   // mousedown and mouseup never fires onClick -- that is why Stop needed several
   // clicks. They hold no hooks, so inlining them is safe and keeps DOM identity.
-  // ─── Stream button ─────────────────────────────────────────────────────────
-  // Design 2's single big control: it lives in the foot bar beside the gear chips, so the
-  // one thing a customer presses is next to the things he checks before pressing it.
-  const canStart = !credsMissing && cameraReady && !cloneLocked && !cloneNeedsPaid;
+  // ─── The one Start button ──────────────────────────────────────────────────
+  // Design 2's single big control, and still the only one: it lives in the foot bar beside the
+  // gear chips, and the tab he is standing on is what says which call it dials. The cloning tab
+  // used to hold a second press beside this one — for the same voice, on the same cable — and
+  // the two of them together are why this page was split into three tabs.
+  const canStart = !credsMissing && !startBlocked && (voiceTab || cameraReady);
   const armed = canStart && !isStarting && !isClosing && holdSeconds === null;
   const StreamBtn = () => (
     <button data-tour="start"
-      onClick={isStreaming ? handleStop : credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStartStream}
+      onClick={isStreaming ? handleStop : credsMissing ? () => setLocation(account.signedIn ? "/minutes" : "/account") : handleStart}
       disabled={!isStreaming && !armed}
+      title={armed || isStreaming ? undefined : (startBlocked ?? undefined)}
       style={{
         flexShrink: 0, height: 52, padding: "0 30px", borderRadius: 999,
         background: isStreaming ? "hsl(0 85% 40% / 0.3)" : armed ? `linear-gradient(135deg, ${C} 0%, hsl(200 100% 45%) 100%)` : "hsl(222 40% 11%)",
@@ -2757,65 +2708,16 @@ export default function StreamPage() {
       }}
       onMouseEnter={e => { if (isStreaming) (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.5)"; else if (armed) (e.currentTarget as HTMLElement).style.filter = "brightness(1.1)"; }}
       onMouseLeave={e => { if (isStreaming) (e.currentTarget as HTMLElement).style.background = "hsl(0 85% 40% / 0.3)"; (e.currentTarget as HTMLElement).style.filter = "none"; }}>
-      {isStreaming ? <><Square style={{ width: 17, height: 17 }} /> {isVoiceOnly ? t("Stop voice call") : t("Stop")}</>
+      {isStreaming ? <><Square style={{ width: 17, height: 17 }} /> {voiceTab ? t("Stop voice call") : t("Stop")}</>
         : holdSeconds !== null ? <><Clock style={{ width: 17, height: 17 }} /> {t("Wait")} {formatTime(holdSeconds)}</>
         : isStarting ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Starting…")}</>
         : isClosing ? <><Loader2 style={{ width: 17, height: 17, animation: "spin 1s linear infinite" }} /> {t("Ending call…")}</>
         : credsMissing ? <><Settings style={{ width: 17, height: 17 }} /> {t("Request credits")}</>
         : cloneLocked ? <><Lock style={{ width: 17, height: 17 }} /> {t("Cloning closed")}</>
         : cloneNeedsPaid ? <><Lock style={{ width: 17, height: 17 }} /> {t("Paid minutes needed")}</>
-        : !cameraReady ? <><Camera style={{ width: 17, height: 17 }} /> {t("Enable Camera")}</>
-        : <><Play style={{ width: 17, height: 17 }} /> {t("Start call")}</>}
-    </button>
-  );
-
-  // ─── The two ends of the cloning tab ────────────────────────────────────────
-  // His words for this button, kept exactly as he asked for them on screen: the voice cloning
-  // he can start by itself, with "(no video)" in the label so no customer can read it as the
-  // picture call. It wears the cloning colour rather than the Start colour, because the two
-  // buttons in one bar must be tellable apart at a glance.
-  const voiceArmed = voiceStartBlocked === null && !voiceCredsMissing && !isStarting && !isClosing && !isStreaming && holdSeconds === null;
-  const VoiceOnlyBtn = () => (
-    <button onClick={handleStartVoiceOnly} disabled={!voiceArmed}
-      title={voiceStartBlocked ?? (voiceCredsMissing ? endReasonMessage("out_of_minutes")
-        : t("Go out with only your cloned voice on the calling app's line. No picture, no camera."))}
-      style={{
-        flexShrink: 0, height: 52, padding: "0 22px", borderRadius: 999,
-        background: voiceArmed ? "hsl(265 90% 65% / 0.18)" : "hsl(222 40% 11%)",
-        border: `1px solid ${voiceArmed ? "hsl(265 90% 65% / 0.55)" : "hsl(222 40% 14%)"}`,
-        cursor: voiceArmed ? "pointer" : "not-allowed",
-        color: voiceArmed ? "hsl(265 80% 88%)" : "hsl(222 25% 40%)",
-        fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 11.5, letterSpacing: "0.06em", textTransform: "uppercase",
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        boxShadow: voiceArmed ? "0 0 24px hsl(265 90% 65% / 0.22)" : "none",
-      }}
-      onMouseEnter={e => { if (voiceArmed) (e.currentTarget as HTMLElement).style.filter = "brightness(1.12)"; }}
-      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.filter = "none"; }}>
-      {holdSeconds !== null ? <><Clock style={{ width: 15, height: 15 }} /> {t("Wait")} {formatTime(holdSeconds)}</>
-        : voiceLocked ? <><Lock style={{ width: 15, height: 15 }} /> {t("Cloning closed")}</>
-        : voiceNeedsPaid ? <><Lock style={{ width: 15, height: 15 }} /> {t("Paid minutes needed")}</>
-        : voiceCredsMissing ? <><Settings style={{ width: 15, height: 15 }} /> {t("Request credits")}</>
-        : videoOnAir ? <><Lock style={{ width: 15, height: 15 }} /> {t("Video call on air")}</>
-        : cameraInUse ? <><Camera style={{ width: 15, height: 15 }} /> {t("Camera is on")}</>
-        : <><Headphones style={{ width: 15, height: 15 }} /> {t("Start voice cloning only (no video)")}</>}
-    </button>
-  );
-
-  // One press takes him out of the voice-only call and into the picture call, because the two
-  // cannot share the cable: gold, and worded as the swap it is, so nobody has to work out that
-  // Stop comes first.
-  const VoiceSwapBtn = () => (
-    <button onClick={handleVoiceSwap} disabled={isStarting || isClosing}
-      title={t("Closes the voice-only call and starts the video call with the same cloned voice.")}
-      style={{
-        flexShrink: 0, height: 52, padding: "0 22px", borderRadius: 999,
-        background: "hsl(40 100% 52% / 0.14)", border: "1px solid hsl(40 100% 52% / 0.45)",
-        cursor: isStarting || isClosing ? "not-allowed" : "pointer",
-        color: "hsl(40 100% 78%)", opacity: isStarting || isClosing ? 0.5 : 1,
-        fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 11.5, letterSpacing: "0.06em", textTransform: "uppercase",
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-      }}>
-      <><VideoIcon style={{ width: 15, height: 15 }} /> {t("Stop voice and start video call")}</>
+        : noVoiceChosen ? <><Lock style={{ width: 17, height: 17 }} /> {t("Choose a voice first")}</>
+        : !voiceTab && !cameraReady ? <><Camera style={{ width: 17, height: 17 }} /> {t("Enable Camera")}</>
+        : <>{voiceTab ? <Headphones style={{ width: 17, height: 17 }} /> : <Play style={{ width: 17, height: 17 }} />} {voiceTab ? t("Start voice call") : t("Start call")}</>}
     </button>
   );
 
@@ -2968,49 +2870,39 @@ export default function StreamPage() {
   );
 
 
-  // ─── Voice cloning panel (shared between tabs) ─────────────────────────────
+  // ─── Voice cloning panel ───────────────────────────────────────────────────
+  // The card his cloned voice is chosen on, on both of the tabs that send one. It carries no
+  // switch: the tab he is standing on is the choice of whether a call clones his voice, and a
+  // second say on the same screen — one that governed only one of two Start presses — is the
+  // confusion this page was rebuilt to end.
   const VoicePanel = () => (
-    <div data-tour="voice" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(187 100% 52% / 0.24)"}`, borderRadius: 14, padding: 16 }}>
+    <div data-tour="voice" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${cloneDead ? "hsl(187 100% 52% / 0.16)" : "hsl(265 90% 65% / 0.4)"}`, borderRadius: 14, padding: 16 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <p style={{ fontSize: 10, fontWeight: 700, color: VC, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace" }}>{t("Voice Cloning")}</p>
           {vcActive && <span style={{ fontSize: 8, fontWeight: 700, color: "#fff", background: VC, padding: "2px 6px", borderRadius: 10, fontFamily: "'Orbitron',monospace" }}>{t("LIVE")}</span>}
         </div>
-        {/* Toggle */}
-        <button onClick={() => {
-          if (voiceDead) return;
-          if (!voiceKeySet && !vcEnabled) { toast({ title: t("Out of minutes"), description: t("Ask your administrator to add minutes before using voice cloning."), variant: "destructive", withContact: true }); return; }
-          setVcEnabled(v => !v);
-        }}
-          style={{ width: 40, height: 22, borderRadius: 11, border: "none", cursor: voiceDead ? "not-allowed" : "pointer", background: vcEnabled && !voiceDead ? VC : "hsl(222 40% 14%)", position: "relative", transition: "background 0.2s", flexShrink: 0, opacity: voiceDead ? 0.42 : 1 }}>
-          <span style={{ position: "absolute", top: 3, left: vcEnabled && !voiceDead ? 21 : 3, width: 16, height: 16, borderRadius: "50%", background: "#fff", transition: "left 0.2s" }} />
-        </button>
-      </div>
-
-      {/* What the switch itself decides, in the first thing he reads on the card. */}
-      <div style={{ padding: "9px 11px", borderRadius: 9, background: "hsl(265 90% 65% / 0.09)", border: "1px solid hsl(265 90% 65% / 0.28)", marginBottom: 11 }}>
-        <p style={{ fontSize: 11.5, color: "hsl(265 60% 82%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-          {t("With this switch off, this tab will not start a call. Use the Video tab to go out with your own voice.")}{" "}
-          {t("This switch is for the call with a picture in it. The button underneath starts the cloned voice by itself, with nothing on screen.")}
+        <p style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, maxWidth: 190, textAlign: "right", lineHeight: 1.45 }}>
+          {voiceTab ? t("The voice you pick here is the only thing this call sends.")
+                    : t("The voice you pick here goes out beside the picture.")}
         </p>
       </div>
 
-      {/* The middle position of his administrator's switch, said where it is felt: the picture
-          call is closed and the voice is not. */}
-      {cloneLocked && !voiceDead && (
+      {cloneLocked && (
         <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(265 90% 65% / 0.08)", border: "1px solid hsl(265 90% 65% / 0.25)", marginBottom: 10 }}>
-          <p style={{ fontSize: 11, color: "hsl(265 60% 78%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-            {t("Your account is set to voice only. The video call with a cloned voice stays closed, and the button below sends your cloned voice on its own.")}
+          <p style={{ fontSize: 11, color: "hsl(265 60% 78%)", fontFamily: "'Rajdhani',sans-serif", display: "flex", alignItems: "center", gap: 8 }}>
+            <Lock style={{ width: 13, height: 13, flexShrink: 0 }} />
+            {endReasonMessage("clone_closed")}
           </p>
         </div>
       )}
 
-      {voiceDead && (
+      {cloneNeedsPaid && (
         <div style={{ padding: "8px 12px", borderRadius: 8, background: "hsl(265 90% 65% / 0.08)", border: "1px solid hsl(265 90% 65% / 0.25)", marginBottom: 10 }}>
           <p style={{ fontSize: 11, color: "hsl(265 60% 78%)", fontFamily: "'Rajdhani',sans-serif", display: "flex", alignItems: "center", gap: 8 }}>
             <Lock style={{ width: 13, height: 13, flexShrink: 0 }} />
-            {voiceLocked ? endReasonMessage("clone_closed") : endReasonMessage("clone_needs_paid_minutes")}
+            {endReasonMessage("clone_needs_paid_minutes")}
           </p>
         </div>
       )}
@@ -3023,22 +2915,14 @@ export default function StreamPage() {
         </div>
       )}
 
-      {/* His own press of the voice-only call, inside the panel that belongs to it — the card
-          says what the switch decides, and the button underneath does the other thing. Hidden
-          while that call is already on air, where the readout below takes its place. */}
-      {!isVoiceOnly && (
-        <div style={{ marginBottom: 11 }}>
-          <VoiceOnlyBtn />
-        </div>
-      )}
-
       {/* The two doors of one panel, side by side: the voice he goes out with, and the
           way to add his own right beside it. Nothing to hunt for under the fold. */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "stretch", opacity: voiceDead ? 0.42 : 1, pointerEvents: voiceDead ? "none" : undefined, filter: voiceDead ? "grayscale(0.9)" : undefined }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "stretch", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
       <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", minWidth: 0 }}>
         <label style={{ display: "block", fontSize: 9.5, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", marginBottom: 6, lineHeight: 1.45 }}>{t("Clone Voice")}</label>
         <div style={{ position: "relative" }}>
-          <select value={vcVoiceId} onChange={e => setVcVoiceId(e.target.value)} disabled={isStreaming} style={{ ...selectSt, borderColor: vcEnabled ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)" }}>
+          <select value={vcVoiceId} onChange={e => setVcVoiceId(e.target.value)} disabled={isStreaming} style={{ ...selectSt, borderColor: vcVoiceId ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)" }}>
+            <option value="" disabled hidden>{t("Choose a voice")}</option>
             {savedVoices.length > 0 && (
               <optgroup label={t("── Your Voices ──")}>
                 {savedVoices.map(v => <option key={v.id} value={v.id}>★ {v.name}</option>)}
@@ -3130,7 +3014,7 @@ export default function StreamPage() {
             </div>
             <p style={{ marginTop: 8, fontSize: 10, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
               {t("Last answer arrived in {ms} ms.", { ms: String(voiceRead.lastMs) })}{" "}
-              {isVoiceOnly || audioRouteOn
+              {voiceTab || audioRouteOn
                 ? t("It goes to your software microphone, so the calling app hears this voice and nothing else.")
                 : t("Device routing is off, so it stays in your own speakers.")}
             </p>
@@ -3183,6 +3067,37 @@ export default function StreamPage() {
           style={{ flexShrink: 0, background: "hsl(187 100% 52% / 0.12)", border: "1px solid hsl(187 100% 52% / 0.35)", borderRadius: 8, padding: "7px 10px", cursor: micChecking ? "default" : "pointer", color: C, fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
           {micChecking ? t("Listening…") : t("Check my microphone")}
         </button>
+      )}
+    </div>
+  );
+
+  // ─── Microphone input selector ─────────────────────────────────────────────
+  // The Voice Only tab has no picture to point at, so the microphone he talks into is the
+  // whole input. It gets its own panel here instead of only the chip in the bar, because on
+  // this call picking the wrong one is the only way to ruin it. An empty pick is a real pick:
+  // it means whatever the computer itself has set as the microphone.
+  const MicInputCard = () => (
+    <div data-tour="micinput" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(265 90% 65% / 0.3)", borderRadius: 14, padding: 16 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+        <div style={{ width: 28, height: 28, borderRadius: 8, background: "hsl(265 90% 65% / 0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Mic style={{ width: 14, height: 14, color: VC }} />
+        </div>
+        <p style={{ fontSize: 17, fontWeight: 800, color: VC, textTransform: "uppercase", letterSpacing: "0.10em", fontFamily: "'Orbitron',monospace" }}>{t("Microphone")}</p>
+      </div>
+      <p style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, marginBottom: 10 }}>
+        {t("Pick which microphone this call listens to.")}
+      </p>
+      {mics.length === 0 ? (
+        <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(0 70% 65%)", fontFamily: "'Rajdhani',sans-serif" }}>{t("No microphones found.")}</p>
+      ) : (
+        <select value={selectedMicId} onChange={e => chooseMic(e.target.value)} disabled={isStreaming}
+          title={isStreaming ? t("Stop the call first — the device is locked while you are on air.") : t("Pick your {label}", { label: t("Microphone").toLowerCase() })}
+          style={{ width: "100%", background: "hsl(222 40% 8%)", color: "hsl(190 80% 90%)", border: "1px solid hsl(222 40% 16%)", borderRadius: 8, padding: "8px 10px", fontSize: 12.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", cursor: isStreaming ? "not-allowed" : "pointer", outline: "none" }}>
+          <option value="" style={{ background: "hsl(222 44% 8%)" }}>{t("System default microphone")}</option>
+          {mics.map((d, i) => (
+            <option key={d.deviceId} value={d.deviceId} style={{ background: "hsl(222 44% 8%)" }}>{d.label || t("Microphone {n}", { n: i + 1 })}</option>
+          ))}
+        </select>
       )}
     </div>
   );
@@ -3319,7 +3234,7 @@ export default function StreamPage() {
         <div style={{ display: "flex", alignItems: "center", gap: 5, padding: "3px 9px", borderRadius: 20, background: audioActive ? "hsl(187 100% 52% / 0.12)" : "hsl(222 40% 9%)", border: `1px solid ${audioActive ? "hsl(187 100% 52% / 0.35)" : "hsl(222 40% 14%)"}` }}>
           {audioActive ? <Wifi style={{ width: 10, height: 10, color: C }} /> : <WifiOff style={{ width: 10, height: 10, color: "hsl(222 25% 40%)" }} />}
           <span style={{ fontSize: 9, fontWeight: 700, fontFamily: "'Orbitron',monospace", color: audioActive ? C : "hsl(222 25% 40%)" }}>
-            {!audioActive ? t("IDLE") : isVoiceOnly ? t("Voice only") : t(SYNC_BADGE[syncLive ? "live" : syncReason])}
+            {!audioActive ? t("IDLE") : voiceTab ? t("Voice Clone Only") : t(SYNC_BADGE[syncLive ? "live" : syncReason])}
           </span>
         </div>
       </div>
@@ -3329,9 +3244,9 @@ export default function StreamPage() {
             <Mic style={{ width: 11, height: 11, color: C }} />
             <span style={{ fontSize: 11, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>{mics.find(m => m.deviceId === selectedMicId)?.label || "Microphone"}</span>
           </div>
-          {/* A voice-only call has no picture to line up with, so the delay figure is not merely
+          {/* A Voice Only call has no picture to line up with, so the delay figure is not merely
               unknown here — it does not apply. Showing "not measured" would read as a fault. */}
-          {!isVoiceOnly && (
+          {!voiceTab && (
             <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 10px", borderRadius: 8, background: "hsl(222 40% 8%)", border: "1px solid hsl(222 40% 12%)" }}>
               <span style={{ fontSize: 12, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif" }}>{t("Lip-sync delay")}</span>
               <span style={{ fontSize: 13, fontWeight: 700, color: syncMeasured || syncLive ? C : "hsl(222 25% 45%)", fontFamily: "'Orbitron',monospace" }}>
@@ -3352,7 +3267,7 @@ export default function StreamPage() {
             </div>
           </div>
           <p style={{ fontSize: 11, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 }}>
-            {isVoiceOnly
+            {voiceTab
               ? t("There is no picture to line your voice up with, so nothing is held back — your cloned voice goes out the moment it is made.")
               : t(SYNC_WORDS[syncLive ? "live" : syncReason])}
           </p>
@@ -3465,20 +3380,39 @@ export default function StreamPage() {
                 {TABS.map(tab => (
                   <Pill key={tab.id} active={activeTab === tab.id} label={tab.label} sub={tab.sub}
                     Icon={tab.Icon} color={tab.color}
-                    onClick={() => { rememberTabPick(tab.id, mayClone); switchTab(tab.id); }} />
+                    onClick={() => { rememberTabPick(tab.id, mayUseTab(tab.id)); switchTab(tab.id); }} />
                 ))}
               </PillRow>
             }
-            card={<MinuteMeter modality={modalityForTab(activeTab)} note={cloneTab && !voiceDead
-              ? mayClone
-                // The picture call is open here, so its speed is the one to state; the slower
-                // voice-only speed belongs beside it only when that door is open too.
-                ? t("A Video + Audio call runs your minutes down faster than the Video tab, because your cloned voice is generated alongside the picture.")
-                  + (mayVoice ? " " + t("The voice-only call spends them more slowly, because there is no picture to generate.") : "")
-                : t("This tab runs your cloned voice by itself, with nothing on screen. It spends minutes more slowly, because there is no picture to generate.")
+            card={<MinuteMeter modality={modalityForTab(activeTab)} note={cloneTab && !cloneDead
+              ? voiceTab
+                // The slow call is the one he is standing on, so its own speed is the figure
+                // worth stating; the picture call's is nothing he needs to compare against here.
+                ? t("The Voice Clone Only call spends them more slowly, because there is no picture to generate.")
+                : t("A Video + Audio call runs your minutes down faster than the Video tab, because your cloned voice is generated alongside the picture.")
+                  + (mayVoice ? " " + t("The Voice Clone Only call spends them more slowly, because there is no picture to generate.") : "")
               : undefined} />}
           />
 
+          {voiceTab ? (
+            /* His voice alone. There is no stage here, no shape, no look and no prompt — none of
+               those draw anything, and this call sends nothing to be seen. What the tab holds is
+               the voice he goes out with, the microphone feeding it, and the switches that put
+               the cloned voice on the calling app's line, with the camera switch left out of the
+               broadcast panel because this call has no camera in it. */
+            <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
+              <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
+                {VoicePanel()}
+                {MicInputCard()}
+                {MicGateCard()}
+                {renderVirtualDevices(false)}
+              </div>
+              <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
+                {AudioSyncPanel()}
+              </div>
+            </div>
+          ) : (
+            <>
           {/* The stage: the AI picture takes the room. Under it come the settings he
               reaches for while looking at the frame — the shape, the microphone, his
               look — and in the corner stands the column he reads before pressing Start. */}
@@ -3493,19 +3427,21 @@ export default function StreamPage() {
 
               {/* On the cloning tab the OBS switches stand beside his look; on the
                   natural-voice tab they close the column instead, so both sides end together. */}
-              <div style={{ display: "grid", gridTemplateColumns: cloneTab ? "minmax(0, 0.86fr) minmax(0, 1.14fr)" : "minmax(0, 1fr)", gap: 14, marginTop: 14, alignItems: "stretch" }}>
+              <div style={{ display: "grid", gridTemplateColumns: comboTab ? "minmax(0, 0.86fr) minmax(0, 1.14fr)" : "minmax(0, 1fr)", gap: 14, marginTop: 14, alignItems: "stretch" }}>
                 {StyleCard()}
-                {cloneTab && renderVirtualDevices(true)}
+                {comboTab && renderVirtualDevices(true)}
               </div>
             </div>
 
             <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
-              {needsVoice && VoicePanel()}
+              {comboTab && VoicePanel()}
               {AudioSyncPanel()}
               {PromptCard()}
-              {!cloneTab && renderVirtualDevices(true)}
+              {!comboTab && renderVirtualDevices(true)}
             </div>
           </div>
+            </>
+          )}
 
           {Sheet()}
         </div>
@@ -3523,29 +3459,16 @@ export default function StreamPage() {
           </div>
         )}
 
-        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "center", padding: "10px 12px", borderRadius: 16, background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${isVoiceOnly ? "hsl(265 90% 65% / 0.45)" : `${C}3d`}`, boxShadow: "0 18px 44px hsl(226 80% 2% / 0.6), 0 0 30px hsl(187 100% 52% / 0.1)" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "center", padding: "10px 12px", borderRadius: 16, background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${voiceTab ? "hsl(265 90% 65% / 0.45)" : `${C}3d`}`, boxShadow: "0 18px 44px hsl(226 80% 2% / 0.6), 0 0 30px hsl(187 100% 52% / 0.1)" }}>
           {LiveChip()}
-          {/* A voice-only call has no picture in it, so the two chips that set one come out of
-              the bar for its length and go back the moment it closes — he is not shown a camera
-              he is not using, and the bar he is looking at says which of the two calls is on. */}
-          {!isVoiceOnly && PhotoChip()}
-          {!isVoiceOnly && DeviceChip("camera")}
-          {isVoiceOnly && (
-            <span style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0, padding: "9px 13px", borderRadius: 12, background: "hsl(265 90% 65% / 0.1)", border: "1px solid hsl(265 90% 65% / 0.3)" }}>
-              <Headphones style={{ width: 14, height: 14, color: VC, flexShrink: 0 }} />
-              <span style={{ fontSize: 11.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(265 70% 82%)", whiteSpace: "nowrap" }}>{t("Voice only — no picture")}</span>
-            </span>
-          )}
+          {/* The Voice Only tab sends no picture, so the two chips that set one are not on it at
+              all — nobody is shown a camera he has no use for. */}
+          {!voiceTab && PhotoChip()}
+          {!voiceTab && DeviceChip("camera")}
           {DeviceChip("mic")}
           {BarLevel(t("Your Voice (Input)"), addMicBar)}
           {BarLevel(t("Output level"), addCableBar)}
-          <MinuteMeter modality={isVoiceOnly ? "audio" : modalityForTab(activeTab)}
-            // The voice-only call is metered as audio, and this app has no Audio tab for a
-            // customer to go hunting for — so the pill wears the name of what he is doing.
-            label={isVoiceOnly ? t("Voice only") : undefined} compact />
-          {/* The cloning tab is the only one with two calls to choose between. Whichever is not
-              on air is shown as the way in; the one that is, as the way out. */}
-          {cloneTab && (isStreaming && isVoiceOnly ? (mayClone && VoiceSwapBtn()) : VoiceOnlyBtn())}
+          <MinuteMeter modality={modalityForTab(activeTab)} compact />
           {StreamBtn()}
         </div>
       </div>

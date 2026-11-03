@@ -193,9 +193,20 @@ Deno.serve(async (req: Request) => {
     const voiceOnly = body.voiceOnly === true;
     const deviceId = typeof body.deviceId === "string" ? body.deviceId.trim() : undefined;
     const appVersion = typeof body.appVersion === "string" ? body.appVersion.trim() : undefined;
+    // The three-tab app names the voice its cloning call is going to speak with. Sending the key at
+    // all is the declaration, so an empty one is a dial that has picked no voice — and that call is
+    // refused rather than left to run on whatever the voice service answers with. Builds older than
+    // the split never send the key, and a call that has declared nothing is found as it was.
+    const declaresVoice = typeof body.voice === "string";
+    const voiceId = declaresVoice ? String(body.voice).trim() : "";
     if (!appId) return fail("appId is required");
 
     const modality = modalityForTab(tab, voiceOnly);
+    if (declaresVoice && modality !== "video" && !voiceId) {
+      return fail("choose a voice before dialling: this call goes out with a cloned voice", 403, {
+        reason: "no_voice_chosen",
+      });
+    }
     const acct = await readAccount(user.id, modality);
 
     if (appVersion && acct.minSupportedVersion && compareVersions(appVersion, acct.minSupportedVersion) < 0) {

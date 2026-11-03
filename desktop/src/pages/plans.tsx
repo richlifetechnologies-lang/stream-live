@@ -352,7 +352,7 @@ export default function PlansPage() {
                 <div style={{ marginTop: 12, padding: "10px 12px", borderRadius: 10, background: "hsl(222 40% 8%)", border: `1px solid ${acc.tint(0.18)}` }}>
                   <p style={{ fontSize: 9.5, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 50%)", margin: "0 0 6px" }}>{t("How these minutes are used")}</p>
                   <p style={{ fontSize: 11.5, color: "hsl(222 25% 62%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, lineHeight: 1.5 }}>
-                    {t("Every minute in this package lands in one pool, and both call tabs spend from it. A Video Call uses them at the normal rate; a Video + Audio call, which clones your voice, uses them faster because cloning costs more to run.")}
+                    {t("Every minute in this package lands in one pool, and all three call tabs spend from it. A Video Call uses them at the normal rate; the tabs that clone your voice use them at their own rates, because cloning costs more to run.")}
                   </p>
                 </div>
 
