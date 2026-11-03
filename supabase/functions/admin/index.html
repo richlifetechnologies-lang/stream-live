@@ -220,9 +220,9 @@
             <div>
               <label style="margin-top:0">Voice cloning for this account</label>
               <select id="acctClone" style="display:none">
-                <option value="off">Closed</option>
-                <option value="voice_only">Voice Clone Only</option>
-                <option value="voice_video">Voice + video</option>
+                <option value="off">Closed — neither cloning tab dials</option>
+                <option value="voice_only">Voice Clone Only only (no picture)</option>
+                <option value="voice_video">Both — Video + Audio and Voice Clone Only</option>
               </select>
               <div id="acctCloneBox"></div>
               <div class="muted" id="acctCloneNow" style="margin-top:6px"></div>
@@ -236,7 +236,7 @@
             </div>
           </div>
           <div class="btns" style="margin-top:12px"><button id="detSaveSwitches" class="primary">Save what it may use</button></div>
-          <div class="muted" style="margin-top:8px">This line can only close further than the Gateway tab's line, never open it. A free trial is refused cloning whatever is set here.</div>
+          <div class="muted" style="margin-top:8px">His screen has three call tabs. This line decides two of them — <b>Video + Audio</b> and <b>Voice Clone Only</b>. The third, <b>Video Call</b>, carries no cloned voice, so this line never touches it; the <b>Video Call</b> box beside it is what decides that one. This line can only close further than the Gateway tab's line, never open it. A free trial is refused cloning whatever is set here.</div>
 
           <div style="border-top:1px solid #1d2733;margin-top:12px;padding-top:12px">
             <div class="row" style="align-items:center">
@@ -285,7 +285,7 @@
           <button id="acctSearchBtn">Search</button>
           <button id="acctRefresh">Refresh</button>
         </div>
-        <p class="muted" style="margin:8px 0 12px">Minutes sit in <b>one pool</b> and never expire: all three call tabs spend from it, a Video + Audio call and a Voice Clone Only call each at its own rate because a cloned voice costs more to run. <b>Video</b> is what is left in that pool; <b>cloning</b> is the door to the two cloning tabs, and off it both of those tabs go dead on his screen — see the tick inside the account. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
+        <p class="muted" style="margin:8px 0 12px">Minutes sit in <b>one pool</b> and never expire: all three call tabs spend from it, a Video + Audio call and a Voice Clone Only call each at its own rate because a cloned voice costs more to run. <b>Video</b> is what is left in that pool; <b>cloning</b> is the door to two of the three tabs — <b>Video + Audio</b> and <b>Voice Clone Only</b> — and off it both of those tabs go dead on his screen, see the tick inside the account. The third tab, <b>Video Call</b>, carries no cloned voice and is never behind that door. Only <span class="pill active">active</span> accounts can place calls. <b>Video service</b> says which of your two suppliers answers that account's calls; the customer never sees it. Anyone who has ever been credited minutes is on the paid side for good.</p>
         <div style="overflow:auto">
           <table id="acctTable">
             <thead><tr><th>User</th><th>Plan</th><th>Status</th><th>Video service</th><th>Video pool</th><th>Voice cloning</th><th>Lifetime</th><th></th></tr></thead>
@@ -897,12 +897,12 @@
           <div style="border:1px solid #1d2733;border-radius:10px;padding:10px">
             <label style="margin-top:0">Voice cloning across the whole software</label>
             <select id="cfgCloningMode" style="display:none">
-              <option value="off">Closed</option>
-              <option value="voice_only">Voice Clone Only</option>
-              <option value="voice_video">Voice + video</option>
+              <option value="off">Closed — neither cloning tab dials</option>
+              <option value="voice_only">Voice Clone Only only (no picture)</option>
+              <option value="voice_video">Both — Video + Audio and Voice Clone Only</option>
             </select>
             <div id="cfgCloningBox"></div>
-            <div class="muted" style="margin-top:6px">Click the choice you want, then press <b>Save gateway config</b>. This is a ceiling over every account: it can close what an account's own line has opened, and it can never open what an account has closed. It lands on the next read each app makes — there is nothing to restart on anybody's machine.</div>
+            <div class="muted" style="margin-top:6px">His screen has three call tabs, and this line decides two of them — <b>Video + Audio</b> and <b>Voice Clone Only</b>. <b>Video Call</b> carries no cloned voice, so it is never closed from here. Click the choice you want, then press <b>Save gateway config</b>. This is a ceiling over every account: it can close what an account's own line has opened, and it can never open what an account has closed. It lands on the next read each app makes — there is nothing to restart on anybody's machine.</div>
             <div class="muted" id="cfgCloningNow" style="margin-top:6px"></div>
           </div>
         </div>
@@ -1120,9 +1120,9 @@
   // tells the owner a lie about his own switch.
   const CLONE_MODES = ["off", "voice_only", "voice_video"];
   const CLONE_LABEL = {
-    off: "closed",
-    voice_only: "Voice Clone Only (no picture)",
-    voice_video: "voice + video",
+    off: "closed — neither the Video + Audio tab nor the Voice Clone Only tab dials",
+    voice_only: "open on the Voice Clone Only tab only (no picture); his Video + Audio tab is shut",
+    voice_video: "open on both cloning tabs — Video + Audio and Voice Clone Only",
   };
   // The account's own line, off one row as the database reads it. A subscription row that does
   // not exist has been promised nothing, which is the same answer sl_cloning_mode gives.
@@ -1146,14 +1146,14 @@
     const own = acctCloneMode(s);
     const eff = cloneFold(CLONING_MODE, own);
     if (eff === "off" && CLONING_MODE === "off") {
-      return '<span class="pill no" title="the gateway-wide line is closed, so nothing that clones is open for anyone whatever this account says">cloning off (gateway line)</span>';
+      return '<span class="pill no" title="the gateway-wide line is closed, so neither the Video + Audio tab nor the Voice Clone Only tab dials for anyone, whatever this account says; his Video Call tab is untouched">cloning off (gateway line)</span>';
     }
-    if (eff === "off") return '<span class="pill no" title="voice cloning is closed on this account">cloning off</span>';
+    if (eff === "off") return '<span class="pill no" title="his Video + Audio tab and his Voice Clone Only tab are both shut; his Video Call tab is untouched">cloning off</span>';
     if (eff === "voice_only") {
       const why = own === "voice_only" ? "this account's own line" : "the gateway-wide line";
-      return `<span class="pill past_due" title="his Voice Clone Only tab dials, his Video + Audio tab does not — closed by ${why}">voice clone only</span>`;
+      return `<span class="pill past_due" title="his Voice Clone Only tab dials, with no picture; his Video + Audio tab is shut — closed by ${why}. His Video Call tab is untouched.">voice clone only</span>`;
     }
-    return '<span class="pill yes">cloning on (voice + video)</span>';
+    return '<span class="pill yes" title="his Video + Audio tab and his Voice Clone Only tab each dial with their own Start; his Video Call tab is untouched by this door">cloning on (both tabs)</span>';
   };
   // The door, shown as three named choices you click instead of a dropdown you have to open and
   // guess at. A dropdown hides what each position does until it is already picked, which is how an
@@ -1161,14 +1161,14 @@
   // on the customer's own screen, not an internal name.
   const CLONE_ROWS = {
     gateway: [
-      ["off", "Closed — no cloning anywhere", "Every customer's two cloning tabs go dead: no picture-and-voice call and no Voice Clone Only call. Nothing to restart on their machines; it lands on their next read."],
-      ["voice_only", "Voice Clone Only — for every customer", "The Video + Audio tab is shut for everyone, so no call pairs a picture with a cloned voice. Their Voice Clone Only tab still dials, for the accounts whose own line allows voice."],
-      ["voice_video", "Open — each account decides for itself", "Nothing is closed from here. Who may clone is set per account on the Accounts tab."],
+      ["off", "Closed — no cloning anywhere", "Every customer's Video + Audio tab and Voice Clone Only tab go dead together: no call pairs a picture with a cloned voice, and no call sends a cloned voice alone. Their Video Call tab is untouched, because it carries no cloned voice. Nothing to restart on their machines; it lands on their next read."],
+      ["voice_only", "Voice Clone Only — for every customer", "Every customer's Video + Audio tab is shut, so no call pairs a picture with a cloned voice. Their Voice Clone Only tab still dials, for the accounts whose own line allows voice. Their Video Call tabs keep working."],
+      ["voice_video", "Open — each account decides for itself", "Nothing is closed from here: each customer's Video + Audio tab and Voice Clone Only tab are set account by account on the Accounts tab. Video Call is never decided by this line."],
     ],
     account: [
-      ["off", "Closed for him", "His two cloning tabs do nothing. He still sees them, every control in each greys, and Start refuses him."],
-      ["voice_only", "Voice Clone Only for him", "His Voice Clone Only tab sends his cloned voice with no picture. His Video + Audio tab stays grey."],
-      ["voice_video", "Voice + video for him", "Both cloning tabs dial, each with its own Start: one sends a picture with the cloned voice beside it, the other sends the cloned voice alone. Two calls, one pool of minutes."],
+      ["off", "Closed for him", "His Video + Audio tab and his Voice Clone Only tab do nothing: he still sees both, every control in each greys, and Start refuses him. His Video Call tab is untouched and still dials on the same pool of minutes."],
+      ["voice_only", "Voice Clone Only for him", "His Voice Clone Only tab sends his cloned voice with no picture. His Video + Audio tab stays grey and Start refuses him there. His Video Call tab is untouched."],
+      ["voice_video", "Both cloning tabs for him", "His Video + Audio and Voice Clone Only tabs each dial with their own Start: one sends a picture with the cloned voice beside it, the other sends the cloned voice alone. His Video Call tab sends a picture with the service's own voice, which is not cloning. Three tabs, one pool of minutes."],
     ],
   };
   const CLONE_UI = {};
@@ -1945,7 +1945,7 @@
     $("acctClone").disabled = !hasCloneModeSub;
     setCloneDoor("acctClone", ownCloneMode);
     $("acctCloneNow").innerHTML = !hasCloneModeSub
-      ? "The cloning line has not reached this database yet — run the migration, then reload this page. Until it has, this account can only ever be fully open or fully closed."
+      ? "The cloning line has not reached this database yet — run the migration, then reload this page. Until it has, this account can only ever have both its Video + Audio and Voice Clone Only tabs open, or both of them closed."
       : `${bought === false ? "He is refused cloning at the dial whatever is set here, because a free trial does not clone. " : ""}On his screen right now: <b>${CLONE_LABEL[effCloneMode]}</b>${effCloneMode !== ownCloneMode
           ? ` — this account is set to ${CLONE_LABEL[ownCloneMode]}, but the gateway-wide line is ${CLONE_LABEL[globalCloneMode]}, and that can only close further, never open.`
           : ""}`;
@@ -2102,7 +2102,7 @@
     // The line is what this door is made of now, and the database's own trigger stamps the older
     // booleans from it. A database that has not run that migration has no middle position, so the
     // one boolean it does have is written — closed for a voice-only choice rather than quietly
-    // opened into voice + video, because nothing here may give a man a door the panel cannot price.
+    // opened into both cloning tabs, because nothing here may give a man a door the panel cannot price.
     if (hasCloneModeSub) patch.cloning_mode = mode;
     else patch.video_audio_enabled = mode === "voice_video";
     const { data: saved, error } = await sb.from("subscriptions").update(patch)
@@ -2110,10 +2110,10 @@
     if (error) return msg("detMsg", error.message);
     if (!saved || !saved.length) return msg("detMsg", "That account has no subscription row yet — create one below first, then the switches will stick.");
     msg("detMsg", "Saved. This account may now use: " + [
-      $("swVideo").checked ? "Video calls" : "no video calls",
+      $("swVideo").checked ? "Video Call" : "no Video Call tab",
       hasCloneModeSub
         ? `voice cloning ${CLONE_LABEL[mode]}`
-        : `voice cloning ${mode === "voice_video" ? "open (voice + video)" : "closed"}`
+        : `voice cloning ${mode === "voice_video" ? "open on both cloning tabs — Video + Audio and Voice Clone Only" : "closed — neither the Video + Audio tab nor the Voice Clone Only tab dials"}`
           + " — this database has no middle position yet, so " + (mode === "voice_only" ? "a Voice Clone Only choice could only be written as closed" : "it holds the two positions it always had"),
     ].join(", and ") + ".", "ok");
     await openAccount(CUR.user_id);
@@ -4322,7 +4322,7 @@
     setCloneDoor("cfgCloningMode", globalMode ?? "voice_video");
     $("cfgCloningNow").innerHTML = !hasCloneModeCfg
       ? (hasCloningCfg
-        ? "This database only has the old two-position switch, so this box can close everything or open voice + video — the middle position needs the migration, and saving here leaves a Voice Clone Only choice closed."
+        ? "This database only has the old two-position switch, so this box can close both cloning tabs or open both of them (Video + Audio and Voice Clone Only) — the middle position needs the migration, and saving here leaves a Voice Clone Only choice closed."
         : "The database has no cloning column yet — run the migrations, then reload this page. Nothing here has been changed.")
       : "";
 
@@ -4375,10 +4375,10 @@
     msg("cfgMsg", "Gateway config saved — voice cloning across the whole software is now "
       + CLONE_LABEL[hasCloneModeCfg ? globalCloneMode : CLONING_MODE] + " " + landed
       + (CLONING_MODE === "off"
-        ? ". It lands on the next read each app makes, so a Video + Audio tab that is open on someone's screen — voice-and-picture call or Voice Clone Only call — goes dead at their next Start, and a call already running closes at its next voice ask."
+        ? ". It lands on the next read each app makes, so a Video + Audio tab or a Voice Clone Only tab that is open on someone's screen goes dead at their next Start, and a call already running closes at its next voice ask. Nobody's Video Call tab is touched."
         : CLONING_MODE === "voice_only"
-          ? ". The picture half of the Video + Audio tab is dead for everyone now; a Voice Clone Only call is still open to the accounts whose own line allows it."
-          : " — applies to the next call, and each account is back to its own line."), "ok");
+          ? ". The Video + Audio tab is shut for everyone now, so no call pairs a picture with a cloned voice; the Voice Clone Only tab is still open to the accounts whose own line allows it, and every Video Call tab keeps working."
+          : " — applies to the next call, and each account is back to its own line for its Video + Audio and Voice Clone Only tabs. Video Call is never decided from here."), "ok");
   };
 
   async function loadPool() {
