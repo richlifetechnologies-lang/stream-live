@@ -44,6 +44,35 @@ export type FalKeyRow = {
   known: boolean;
   today: FalSpend | null;
   month: FalSpend | null;
+  /** Which stored account this key was found on, so its figure is fal's, not a guess. */
+  account_id: string | null;
+};
+
+/**
+ * One stored fal.ai account, read on its own.
+ *
+ * The balance belongs to the account, not to the key, so this is the unit the card
+ * counts in: a second billing key from the SAME account would print the same balance
+ * twice and lie about the money, which is why the table now refuses a duplicate key.
+ */
+export type FalAccountRow = {
+  id: string;
+  label: string;
+  tail: string;
+  keyId: string;
+  /** fal's own preset for this key — BILLING reads, API can spend. Empty when fal's
+   *  key list could not be read, which is not the same as an unknown preset. */
+  preset: string;
+  /** false when fal refused this account, so its nulls are a read failure, not a zero. */
+  ok: boolean;
+  balance: number | null;
+  currency: string;
+  today: FalSpend | null;
+  month: FalSpend | null;
+  warn_below: number | null;
+  alert_below: number | null;
+  minutes_left: number | null;
+  detail: string;
 };
 
 export type FalLiveKey = {
@@ -157,6 +186,17 @@ export type FalBalancePayload = {
   checked_at: string;
   from_cache: boolean;
   detail: string;
+  /**
+   * Every stored account, each with fal's own figures for that account. The four
+   * fields above are the sum of these, taken over the one window named here — never
+   * one account's bill standing in for all of them, which is what a second key used
+   * to do silently.
+   */
+  accounts: FalAccountRow[];
+  /** The instantances every summed figure in this payload was measured between. */
+  window: { start: string; month_start: string; end: string };
+  /** The lowest an account has fallen: red beats amber, and the card names which. */
+  alert: { level: "red" | "amber" | null; account: string };
 };
 
 async function ask(key: string, path: string): Promise<{ res: Response; json: any } | { err: string; status: number | null }> {
@@ -429,8 +469,58 @@ async function noFrame(monthStart: string): Promise<FalNoFrame | null> {
 }
 
 /**
- * The whole card in one call: balance, what fal charged since UTC midnight and since
- * the first of the month, and the same two figures per stored key.
+ * One stored account, asked in the same breath as every other one.
+ *
+ * Four calls, all of them reads: the balance, today's spend, this month's spend and
+ * fal's own key list. The key list is what makes a pool key's figure honest when
+ * several accounts are stored — it says which account that key actually lives on, so
+ * the spend is narrowed by the right secret instead of guessed at from the first one.
+ */
+async function readAccount(
+  stored: { id: string; label: string; key: string; warn_below: number | null; alert_below: number | null },
+  day: string,
+  monthStart: string,
+  end: string,
+): Promise<{ row: FalAccountRow; keyIds: Set<string> }> {
+  const [bal, today, month, known] = await Promise.all([
+    falAccountBalance(stored.key),
+    falSpend(stored.key, day, end),
+    falSpend(stored.key, monthStart, end),
+    falKeyList(stored.key),
+  ]);
+  const t = "err" in today ? null : today;
+  const m = "err" in month ? null : month;
+  const failed = "err" in bal ? bal.err : "err" in today ? today.err : "err" in month ? month.err : "";
+  const perSec = m?.unitPrice ?? t?.unitPrice ?? null;
+  return {
+    row: {
+      id: stored.id,
+      label: stored.label,
+      tail: tail(stored.key),
+      keyId: stored.key.split(":")[0] ?? "",
+      preset: "err" in known ? "" : (known.keys.find((k) => k.id === stored.key.split(":")[0])?.preset ?? ""),
+      ok: !failed,
+      balance: "err" in bal ? null : bal.balance,
+      currency: "err" in bal ? "USD" : bal.currency,
+      today: t,
+      month: m,
+      warn_below: stored.warn_below,
+      alert_below: stored.alert_below,
+      minutes_left: perSecondMinutes("err" in bal ? null : bal.balance, perSec),
+      detail: failed || "read from fal.ai.",
+    },
+    keyIds: "err" in known ? new Set<string>() : new Set(known.keys.map((k) => k.id)),
+  };
+}
+
+function perSecondMinutes(balance: number | null, perSecond: number | null): number | null {
+  if (balance === null || !perSecond || perSecond <= 0) return null;
+  return Math.floor(balance / perSecond / 60);
+}
+
+/**
+ * The whole card in one call: every stored account's balance and spend, the same two
+ * figures per stored key, and the totals the card prints above them.
  */
 export async function falBalance(): Promise<FalBalancePayload> {
   // fal's balance is held for a minute; the meter is not. A reading served from cache
@@ -444,21 +534,42 @@ export async function falBalance(): Promise<FalBalancePayload> {
   }
 
   const db = adminClient();
-  const { data: row } = await db
+  const { data: stored, error: storedErr } = await db
     .from("fal_watch")
-    .select("label, billing_key, warn_below, alert_below")
-    .limit(1)
-    .maybeSingle();
+    .select("id, label, billing_key, warn_below, alert_below")
+    .order("created_at", { ascending: true });
   const envKey = normalizeSecret(Deno.env.get("FAL_BILLING_KEY") ?? "");
-  const secret = normalizeSecret(String(row?.billing_key ?? "")) || envKey;
+  const wanted = (stored ?? [])
+    .map((r) => ({
+      id: String(r.id),
+      label: String(r.label ?? ""),
+      key: normalizeSecret(String(r.billing_key ?? "")),
+      warn_below: r.warn_below == null ? null : num(r.warn_below),
+      alert_below: r.alert_below == null ? null : num(r.alert_below),
+    }))
+    .filter((r) => r.key);
+  // The env secret is a fallback, never a second account: it is the same credential
+  // the rows carry when no row has been written yet, and counting it beside that row
+  // would add one balance twice.
+  const secrets = wanted.length
+    ? wanted
+    : envKey
+      ? [{ id: "env", label: "the env secret", key: envKey, warn_below: null, alert_below: null }]
+      : [];
+
+  // One set of window edges for the whole reading, fixed before anything is asked, and
+  // handed to the paid-call ledger too, so the two cards can never be comparing a
+  // different day. Every account is measured between them, which is what lets the
+  // summed bill be true.
+  const day = utcDayStart(), monthStart = utcMonthStart(), end = new Date().toISOString();
 
   const base: FalBalancePayload = {
     ok: false,
-    configured: !!secret,
-    tail: secret ? tail(secret) : "",
-    label: String(row?.label ?? (envKey ? "the env secret" : "")),
-    warn_below: row?.warn_below == null ? null : num(row.warn_below),
-    alert_below: row?.alert_below == null ? null : num(row.alert_below),
+    configured: secrets.length > 0,
+    tail: "",
+    label: "",
+    warn_below: null,
+    alert_below: null,
     balance: null,
     currency: "USD",
     today: null,
@@ -469,9 +580,12 @@ export async function falBalance(): Promise<FalBalancePayload> {
     keys: [],
     live: null,
     no_frame: null,
-    checked_at: new Date().toISOString(),
+    checked_at: end,
     from_cache: false,
-    detail: secret
+    accounts: [],
+    window: { start: day, month_start: monthStart, end },
+    alert: { level: null, account: "" },
+    detail: secrets.length
       ? ""
       : "No billing key is stored yet. On fal.ai open dashboard → API Keys and create one with the BILLING preset — it can read a balance and cannot start a call, so it is safe to keep here. Paste it and Save.",
   };
@@ -479,33 +593,47 @@ export async function falBalance(): Promise<FalBalancePayload> {
     cache = { at: Date.now(), ttl: payload.ok ? FRESH_MS : STALE_FAIL_MS, payload };
     return payload;
   };
-  if (!secret) return keep({ ...base, no_frame: await noFrame(utcMonthStart()) });
+  if (!secrets.length) return keep({ ...base, no_frame: await noFrame(monthStart) });
 
-  // One set of window edges for the whole reading, so the per-key figures can never
-  // add up to a different day than the account figure above them.
-  const day = utcDayStart(), monthStart = utcMonthStart(), end = new Date().toISOString();
-  const [bal, today, month, known, cfg, nf] = await Promise.all([
-    falAccountBalance(secret),
-    falSpend(secret, day, end),
-    falSpend(secret, monthStart, end),
-    falKeyList(secret),
+  const [cfg, nf, ...read] = await Promise.all([
     db.from("billing_config").select("lucy_video_per_sec_cost").eq("id", 1).maybeSingle(),
     noFrame(monthStart),
+    ...secrets.map((s) => readAccount(s, day, monthStart, end)),
   ]);
-  if ("err" in bal) return keep({ ...base, detail: `${bal.err}. The key stored ends ${base.tail}.`, no_frame: nf });
+  const accounts: FalAccountRow[] = read.map((r) => r.row);
+  const one = accounts.length === 1 ? accounts[0] : null;
 
-  const t = "err" in today ? null : today;
-  const m = "err" in month ? null : month;
-  const failed = "err" in today ? today.err : "err" in month ? month.err : "";
+  // The figures the card prints in big are sums of the accounts that answered, over
+  // these edges. An account that refused is named in detail, never counted as zero.
+  const answered = accounts.filter((a) => a.balance !== null);
+  const balance = answered.length ? Math.round(answered.reduce((a, x) => a + (x.balance ?? 0), 0) * 100) / 100 : null;
+  const sum = (pick: (a: FalAccountRow) => FalSpend | null): FalSpend | null => {
+    const got = accounts.map(pick).filter((s): s is FalSpend => !!s);
+    if (!got.length) return null;
+    return {
+      cost: Math.round(got.reduce((a, s) => a + s.cost, 0) * 1e4) / 1e4,
+      seconds: Math.round(got.reduce((a, s) => a + s.seconds, 0) * 10) / 10,
+      unitPrice: got.map((s) => s.unitPrice).find((v) => v !== null && v > 0) ?? null,
+      detail: `${got.length} of ${accounts.length} account(s) answered`,
+    };
+  };
+  const today = sum((a) => a.today);
+  const month = sum((a) => a.month);
+  const bad = accounts.filter((a) => !a.ok);
+  const failed = storedErr ? `the stored accounts could not be read: ${storedErr.message}` : bad.length
+    ? bad.map((a) => `${a.label || a.tail}: ${a.detail}`).join("; ")
+    : "";
 
   // His own Prices tab holds the rate he charges against, fal's usage row holds the
   // rate fal actually charges. fal wins when it answers, because the question this
   // number answers is how much CALLING is left, not how much it was sold for.
   const pg = num(cfg?.data?.lucy_video_per_sec_cost);
-  const perSecond = m?.unitPrice ?? t?.unitPrice ?? (pg || null);
-  const source = m?.unitPrice || t?.unitPrice ? "fal" : pg ? "prices tab" : null;
+  const perSecond = month?.unitPrice ?? today?.unitPrice ?? (pg || null);
+  const source = month?.unitPrice || today?.unitPrice ? "fal" : pg ? "prices tab" : null;
 
-  const onAccount = "err" in known ? null : new Set(known.keys.map((k) => k.id));
+  // Which account each pool key actually lives on, off that account's own key list.
+  const where = new Map<string, number>();
+  read.forEach((r, i) => r.keyIds.forEach((id) => { if (!where.has(id)) where.set(id, i); }));
   const pool = await db
     .from("gateway_keys")
     .select("id, label, fal_key")
@@ -515,32 +643,59 @@ export async function falBalance(): Promise<FalBalancePayload> {
   const rows: FalKeyRow[] = await Promise.all(
     (pool.data ?? []).map(async (k) => {
       const keyId = normalizeSecret(String(k.fal_key ?? "")).split(":")[0] ?? "";
-      const [kt, km] = await Promise.all([falSpend(secret, day, end, keyId), falSpend(secret, monthStart, end, keyId)]);
+      const owner = where.get(keyId);
+      // A key no account recognises is still asked about, against the first account, so
+      // the row keeps a figure rather than a blank — and `known:false` says it is not a fact.
+      const src = secrets[owner ?? 0];
+      const [kt, km] = await Promise.all([falSpend(src.key, day, end, keyId), falSpend(src.key, monthStart, end, keyId)]);
       return {
         id: String(k.id),
         label: String(k.label ?? ""),
         keyId,
         tail: tail(String(k.fal_key ?? "")),
-        known: onAccount === null || onAccount.has(keyId),
+        known: owner !== undefined,
+        account_id: owner === undefined ? null : accounts[owner].id,
         today: "err" in kt ? null : kt,
         month: "err" in km ? null : km,
       };
     }),
   );
 
+  // The lowest an account has fallen. The big figure is a total and no account's
+  // threshold describes a total, so the colour comes from the account that is actually
+  // low and the card names it — a warning that colours $213 because $3 of it is low
+  // would be the wrong comfort in the other direction.
+  const low = (a: FalAccountRow) =>
+    a.balance !== null && a.alert_below !== null && a.balance < a.alert_below ? "red"
+      : a.balance !== null && a.warn_below !== null && a.balance < a.warn_below ? "amber"
+      : null;
+  const worst = accounts.reduce<{ level: "red" | "amber" | null, account: string }>((a, x) => {
+    const l = low(x);
+    if (!l) return a;
+    if (a.level === "red") return a;
+    return { level: l, account: x.label || x.tail };
+  }, { level: null, account: "" });
+
   return keep({
     ...base,
     ok: !failed,
-    balance: bal.balance,
-    currency: bal.currency,
-    today: t,
-    month: m,
+    tail: one ? one.tail : "",
+    label: one ? one.label : "",
+    warn_below: one ? one.warn_below : null,
+    alert_below: one ? one.alert_below : null,
+    balance,
+    currency: answered[0]?.currency ?? "USD",
+    today,
+    month,
     per_second: perSecond,
     per_second_source: source,
-    minutes_left: perSecond && perSecond > 0 ? Math.floor(bal.balance / perSecond / 60) : null,
+    minutes_left: perSecondMinutes(balance, perSecond),
     keys: rows,
+    accounts,
+    alert: worst,
     live: await liveBurn(perSecond, base.checked_at),
     no_frame: nf,
     detail: failed || "All figures read from fal.ai.",
   });
 }
+

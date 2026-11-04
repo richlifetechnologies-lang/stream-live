@@ -12,11 +12,13 @@
 //   delete_account{ userId, reason? }        -- remove the account for good
 //   set_engine    { userId, engine: 'fal'|'decart'|null } -- pin/unpin the service
 //   test_key      { provider, key? , keyId? } -- prove a key works, no inference billed
-//   fal_balance   { }                   -- the account balance and today's spend, live from fal.ai
-//   fal_balance_test { key }            -- ask fal.ai what one pasted billing key can see, save nothing
-//   fal_balance_save { key?, label?, warnBelow?, alertBelow?, remove? }
+//   fal_balance   { }                   -- every stored fal.ai account's balance and spend, totalled
+//   fal_balance_test { key?, id? }      -- ask fal.ai what one pasted billing key can see, save nothing;
+//                                         a blank key re-checks the stored row named by id
+//   fal_balance_save { id?, add?, key?, label?, warnBelow?, alertBelow?, remove? }
 //   paystack_reconcile { reference? }  -- ask Paystack about unpaid orders, credit what it confirms
-//   calls              { }             -- the paid-call ledger, read unfiltered
+//   calls              { }             -- the PAID-call ledger: only sessions the paid service ran,
+//                                         plus fal.ai's own bill summed over the same window
 //   paystack_webhook   { set? }        -- read the call-back address, or register this gateway's
 // Resp: { ok:true, ...result } or { error, status }
 import { preflight, json, fail } from "../_shared/cors.ts";
@@ -222,10 +224,11 @@ Deno.serve(async (req: Request) => {
       }
 
       // ── The money side: what is left to spend on calls ────────────────────────
-      // Read-only, and the reading is the important half: fal reports the balance for
-      // the whole account, so one stored billing key answers for every pool key. The
-      // per-key figures ride along in the same payload because the panel paints its
-      // key table from it and a second request would show a different instant.
+      // Read-only, and the reading is the important half: fal reports the balance per
+      // ACCOUNT, so every stored account is asked on its own and the figures added up.
+      // A pool key's share rides along in the same payload, asked with the secret of the
+      // account whose key list actually carries it — the panel paints its key table from
+      // this one answer, because a second request would show a different instant.
       //
       // ok:true means this function did its job. Whether fal answered is a separate
       // matter the card reads off balance/detail, so a fal outage must not arrive as
@@ -233,13 +236,23 @@ Deno.serve(async (req: Request) => {
       case "fal_balance":
         return json({ ...(await falBalance()), ok: true });
 
-      // { key }  -- what does this key see? Saves nothing, spends nothing. A blank key
-      // re-checks the stored one, which is what the pool's Verify button means.
+      // { key?, id? }  -- what does this key see? Saves nothing, spends nothing. A blank key
+      // re-checks a stored one, which is what the pool's Verify button means. With several
+      // accounts stored, the blank asks the row named by id — asking "the stored key" would
+      // be a guess about which account he is standing over.
       case "fal_balance_test": {
         let key = normalizeSecret(String(body.key ?? ""));
         if (!key) {
-          const { data } = await adminClient().from("fal_watch").select("billing_key").limit(1).maybeSingle();
-          key = normalizeSecret(String(data?.billing_key ?? ""));
+          const db = adminClient();
+          const wanted = typeof body.id === "string" && body.id ? String(body.id) : "";
+          const { data, error } = wanted
+            ? await db.from("fal_watch").select("billing_key, label").eq("id", wanted).maybeSingle()
+            : await db.from("fal_watch").select("billing_key, label").limit(2);
+          if (error) return fail(`could not read the stored key: ${error.message}`);
+          const rows = wanted ? (data ? [data] : []) : (data ?? []);
+          if (!rows.length) return fail(wanted ? "That account is no longer stored, so there is nothing to check." : "Paste a key first — there is no stored billing key to check either.");
+          if (rows.length > 1) return fail("Several accounts are stored, so press Check on the one you mean.");
+          key = normalizeSecret(String(rows[0].billing_key ?? ""));
         }
         if (!key) return fail("Paste a key first — there is no stored billing key to check either.");
         const bal = await falAccountBalance(key);
@@ -264,21 +277,34 @@ Deno.serve(async (req: Request) => {
         });
       }
 
-      // { key?, label?, warnBelow?, alertBelow?, remove? }  -- write the stored key
-      // Blank key keeps what is already there, so editing the amounts never needs the
-      // secret again. A pasted key is proven against fal BEFORE it is saved: a typo
-      // kept silently would leave the card showing yesterday's number forever.
+      // { id?, add?, key?, label?, warnBelow?, alertBelow?, remove? }  -- write ONE account
+      //
+      // A row is named by id, so editing the second account can never overwrite the first —
+      // that overwrite was the whole fault this action used to have. `add:true` is the only
+      // press that creates a row, and it refuses a key already stored, because two rows on the
+      // same fal account would add one balance twice. Blank key keeps what that row already
+      // holds, so editing the amounts never needs the secret again. A pasted key is proven
+      // against fal BEFORE it is saved: a typo kept silently would leave the card showing
+      // yesterday's number forever.
       case "fal_balance_save": {
         const db = adminClient();
-        const { data: existing } = await db.from("fal_watch").select("id").limit(1).maybeSingle();
+        const id = typeof body.id === "string" && body.id ? String(body.id) : "";
+        const adding = body.add === true;
+        const { data: all } = await db.from("fal_watch").select("id, label, billing_key").order("created_at", { ascending: true });
+        const stored = all ?? [];
+        const target = id ? stored.find((r) => String(r.id) === id) : stored.length === 1 ? stored[0] : null;
 
         if (body.remove === true) {
-          if (!existing) return fail("There is no billing key stored, so there is nothing to forget.");
-          const { error } = await db.from("fal_watch").delete().eq("id", existing.id);
+          if (!stored.length) return fail("There is no billing key stored, so there is nothing to forget.");
+          if (!target) return fail("Several accounts are stored, so press Forget on the one you mean — nothing was removed.");
+          const { error } = await db.from("fal_watch").delete().eq("id", target.id);
           if (error) return fail(`could not forget the key: ${error.message}`);
           forgetFalBalance();
-          return json({ ok: true, removed: true });
+          return json({ ...(await falBalance()), ok: true, removed: true });
         }
+
+        if (id && !target) return fail("That account is no longer stored, so nothing was changed.");
+        if (!id && !adding && stored.length > 1) return fail("Several accounts are stored, so name the one you mean — nothing was changed.");
 
         const amount = (v: unknown): number | null => {
           if (v === null || v === undefined || String(v).trim() === "") return null;
@@ -293,12 +319,16 @@ Deno.serve(async (req: Request) => {
         }
 
         let secret = normalizeSecret(String(body.key ?? ""));
-        if (!secret && existing) {
-          const { data } = await db.from("fal_watch").select("billing_key").eq("id", existing.id).maybeSingle();
+        if (!secret && target) {
+          const { data } = await db.from("fal_watch").select("billing_key").eq("id", target.id).maybeSingle();
           secret = normalizeSecret(String(data?.billing_key ?? ""));
         }
         if (!secret) {
           return fail("Nothing to save — paste a fal.ai billing key, or leave it blank and change the amounts on the stored one.");
+        }
+        const same = stored.find((r) => normalizeSecret(String(r.billing_key ?? "")) === secret && String(r.id) !== String(target?.id ?? ""));
+        if (same) {
+          return fail(`That key is already stored as "${String(same.label ?? "")}". Checking it twice would count the same money twice, so nothing was saved.`);
         }
         const bal = await falAccountBalance(secret);
         if ("err" in bal) return json({ ok: true, saved: false, verified: false, detail: `${bal.err}. Nothing was saved.` });
@@ -309,10 +339,10 @@ Deno.serve(async (req: Request) => {
 
         const label = typeof body.label === "string" && body.label.trim()
           ? body.label.trim().slice(0, 60)
-          : "fal balance key";
+          : (target ? String(target.label ?? "") : "fal balance key");
         const row = { label, billing_key: secret, warn_below: warn, alert_below: alert, updated_at: new Date().toISOString() };
-        const { error } = existing
-          ? await db.from("fal_watch").update(row).eq("id", existing.id)
+        const { error } = target
+          ? await db.from("fal_watch").update(row).eq("id", target.id)
           : await db.from("fal_watch").insert(row);
         if (error) return fail(`could not save: ${error.message}`);
         forgetFalBalance();
@@ -383,10 +413,55 @@ Deno.serve(async (req: Request) => {
         const [rows, falCount, trialCount, allCount, videoCount, audioCount, comboCount, cfg, ac, plans, subs, paid] = reads;
         const ids = [...new Set((rows.data || []).map((r) => r.user_id).filter(Boolean))];
         const names = ids.length ? await db.from("profiles").select("id, email").in("id", ids) : { data: [] };
+
+        // The card sets fal's own bill against these rows, so it needs the bill over the
+        // window the rows are counted over, and the bill it needs is the SUM of every
+        // stored account — one account's bill against every account's calls is the error a
+        // second billing key used to introduce silently. The reading is held for a minute,
+        // so this asks fal nothing when the balance card read first.
+        const bal = await falBalance();
+        const bill = bal.today && bal.balance !== null
+          ? {
+            cost: bal.today.cost,
+            seconds: bal.today.seconds,
+            start: bal.window.start,
+            end: bal.window.end,
+            accounts: bal.accounts.length,
+            read: bal.ok,
+            // Each account's own share of the day's bill, so the ledger can name which
+            // one is burning without making him open the card above and add it up.
+            parts: bal.accounts.filter((a) => a.ok && a.today).map((a) => ({ label: a.label, cost: a.today!.cost })),
+            detail: bal.detail,
+          }
+          : null;
+
+        // The list above is the NEWEST 150 calls, not today's calls. When those 150 do not
+        // reach back to the start of the billing day, today's cost cannot be added up from
+        // them without missing rows, so the day is read on its own and sent alongside.
+        let todayRows = rows.data || [];
+        let todayCapped = false;
+        if (bill) {
+          const list = rows.data || [];
+          const oldest = list.length ? Date.parse(String(list[list.length - 1].started_at)) : NaN;
+          const covers = !list.length || (Number.isFinite(oldest) && oldest <= Date.parse(bill.start));
+          if (!covers) {
+            const day = await db.from("usage_sessions")
+              .select("id, user_id, modality, started_at, media_started_at, ended_at, lease_expires_at, billed_minutes, pending_debit, multiplier, settled")
+              .eq("engine", "fal").gte("started_at", bill.start).order("started_at", { ascending: false }).limit(2000);
+            if (!day.error) {
+              todayRows = day.data || [];
+              todayCapped = todayRows.length === 2000;
+            }
+          }
+        }
+
         return json({
           ok: true,
           rows: rows.data || [],
           names: names.data || [],
+          bill,
+          todayRows,
+          todayCapped,
           paidUsers: (paid.data || []).map((p) => p.user_id),
           perSecond: cfg.data?.lucy_video_per_sec_cost ?? null,
           // What a second of cloned voice costs the voice key. A voice-only call is costed with
