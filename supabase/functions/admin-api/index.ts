@@ -292,7 +292,14 @@ Deno.serve(async (req: Request) => {
         const adding = body.add === true;
         const { data: all } = await db.from("fal_watch").select("id, label, billing_key").order("created_at", { ascending: true });
         const stored = all ?? [];
-        const target = id ? stored.find((r) => String(r.id) === id) : stored.length === 1 ? stored[0] : null;
+        // Adding is its own case, decided BEFORE the row to write is guessed at. With one
+        // account stored and no id in the ask, the older reading of "the row he means" was the
+        // stored one — so a press of Add wrote the new key over it and his other account
+        // vanished from the card. That is the very fault this table change exists to end.
+        const target = adding ? null
+          : id ? stored.find((r) => String(r.id) === id)
+          : stored.length === 1 ? stored[0]
+          : null;
 
         if (body.remove === true) {
           if (!stored.length) return fail("There is no billing key stored, so there is nothing to forget.");
@@ -336,6 +343,23 @@ Deno.serve(async (req: Request) => {
         const list = await falKeyList(secret);
         const mine = "err" in list ? null : list.keys.find((k) => k.id === secret.split(":")[0]);
         const spendable = mine ? !/^(BILLING|READONLY)$/.test(mine.preset) : null;
+
+        // Two keys on the SAME fal.ai account would add that account's balance twice into the
+        // total this card prints, which is the one error it exists to avoid. A key only ever lists
+        // the keys of the account that owns it, so an id shared with an account already stored
+        // means the same account under a second name — refused here instead of summed.
+        if (!("err" in list)) {
+          const ids = new Set(list.keys.map((k) => k.id).filter((x) => x));
+          for (const r of stored) {
+            if (!ids.size) break;
+            if (String(r.id) === String(target?.id ?? "")) continue;
+            const other = await falKeyList(normalizeSecret(String(r.billing_key ?? "")));
+            if ("err" in other) continue;
+            if (other.keys.some((k) => k.id && ids.has(k.id))) {
+              return fail(`That key belongs to "${String(r.label ?? "")}", which is already stored — one account's money would be counted twice in the total. Press Edit on that account to change its amounts, or use a key from the other account. Nothing was saved.`);
+            }
+          }
+        }
 
         const label = typeof body.label === "string" && body.label.trim()
           ? body.label.trim().slice(0, 60)
