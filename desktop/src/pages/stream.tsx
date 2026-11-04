@@ -1163,22 +1163,33 @@ export default function StreamPage() {
   const [obsPortraitInstructions, setObsPortraitInstructions] = useState(false);
 
   // ── Virtual devices (Stream Live Camera / Microphone) ───────────────────
-  // Both come back on their own, remembered on this machine the way his pinned audio
-  // output is: a customer who broadcast once should not have to find the switches again
-  // every time the app opens. The button is the only thing that writes these two records,
-  // so a computer with no driver or no cable cannot lose his setting by failing.
-  const [vcamEnabled, setVcamEnabled]     = useState<boolean>(() => {
-    try { return localStorage.getItem("ss_vcam_on") !== "0"; } catch { return true; }
-  });
+  // Off until the tab he is standing on opens a call of its own, and back off when that call ends.
+  // The machine holds ONE fake camera and ONE cable, so a switch may only be lit for a call that is
+  // really using them - which is why these two records are kept per tab, the same way each tab keeps
+  // its own camera, microphone, prompt and look. Nothing is remembered between visits: a switch that
+  // is off until a call starts has nothing to remember.
+  const [camOnTab, setCamOnTab] = useState<Record<TabId, boolean>>(
+    { "video-audio": false, "video-only": false, "audio-only": false });
+  const [micOnTab, setMicOnTab] = useState<Record<TabId, boolean>>(
+    { "video-audio": false, "video-only": false, "audio-only": false });
+  const vcamEnabled  = camOnTab[activeTab];
+  const audioRouteOn = micOnTab[activeTab];
+  // The tab whose call is holding the two devices right now. The dial writes it, and the call ending
+  // clears that tab alone - whichever tab he happens to be looking at by then.
+  const broadcastOwnerRef = useRef<TabId>(activeTab);
+  // Both writers name the tab they mean and close over nothing, so their identity never changes. A
+  // tab change must not rebuild the functions that hold a running call.
+  const setCamFor = useCallback((tab: TabId, on: boolean) => setCamOnTab(p => ({ ...p, [tab]: on })), []);
+  const setMicFor = useCallback((tab: TabId, on: boolean) => setMicOnTab(p => ({ ...p, [tab]: on })), []);
+  // teardownStream has to keep ONE stable identity: the unmount effect below runs the whole call-down
+  // whenever its dependency changes, so a release that moves with the device list would tear down a
+  // live call every time a webcam was plugged in. The release is reached through this ref instead.
+  const releaseBroadcastRef = useRef<(tab: TabId) => void>(() => {});
   const [vcamSupported, setVcamSupported] = useState(true);
   const [vcamReady, setVcamReady]         = useState(false);
-  const [audioRouteOn, setAudioRouteOn]   = useState<boolean>(() => {
-    try { return localStorage.getItem("ss_mic_route_on") !== "0"; } catch { return true; }
-  });
-  // Why a switch he never touched is showing Off. Only the automatic pass sets it, so a
+  // Why a switch the dial tried to light is showing Off. Only the silent passes set it, so a
   // deliberate press off stays the plain "Off" line he already knows.
   const [broadcastBlocked, setBroadcastBlocked] = useState<"" | "no-cable" | "no-sink">("");
-  const broadcastAutoRef = useRef(false);
   const [cableSinkLabel, setCableSinkLabel] = useState("");
   // Manual override for the audio sink: the VB-Cable endpoint can appear with a
   // hidden label (permissions/runtime), so name-matching alone is unreliable.
@@ -1433,6 +1444,10 @@ export default function StreamPage() {
     if (isStreaming || isStarting) {
       teardownStream();
       toast({ title: t("Stream stopped"), description: t("Switching modes.") });
+    } else {
+      // Walking off a tab that holds no call puts its switches back too, so the only lit pair on
+      // this screen is the tab whose call is actually running.
+      releaseBroadcastRef.current(activeTab);
     }
     setActiveTab(tab);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1583,7 +1598,7 @@ export default function StreamPage() {
 
   // Put the picture out, or take it back in. `auto` is the pass that runs when this page opens:
   // it says nothing in a popup, because the line under the switch already carries the truth.
-  const runVCam = useCallback(async (on: boolean, auto: boolean): Promise<void> => {
+  const runVCam = useCallback(async (on: boolean, auto: boolean, tab: TabId): Promise<void> => {
     const api = getElectronAPI();
     if (!api?.vcamStart || !api?.vcamStop) {
       setVcamSupported(false);
@@ -1595,30 +1610,29 @@ export default function StreamPage() {
       setVcamSupported(r.supported);
       if (!r.supported) {
         if (!auto) toast({ title: t("Virtual camera unavailable"), description: r.error || t("The native driver layer could not load."), variant: "destructive", withContact: true });
-        setVcamEnabled(false);
+        setCamFor(tab, false);
         return;
       }
-      setVcamEnabled(true);
+      setCamFor(tab, true);
       vcamOnRef.current = true;
       vcamTick();
       if (!auto) toast({ title: t("Stream Live Camera ON"), description: t("Select “Stream Live Camera” in Zoom/Teams/Chrome. It shows the AI output while streaming.") });
     } else {
       stopVCamPump();
       await api.vcamStop();
-      setVcamEnabled(false);
+      setCamFor(tab, false);
       setVcamReady(false);
     }
-  }, [vcamTick, stopVCamPump, toast]);
+  }, [vcamTick, stopVCamPump, toast, setCamFor]);
 
   const toggleVCam = useCallback(async () => {
-    const next = !vcamEnabled;
-    try { localStorage.setItem("ss_vcam_on", next ? "1" : "0"); } catch { /**/ }
-    await runVCam(next, false);
-  }, [vcamEnabled, runVCam]);
+    await runVCam(!vcamEnabled, false, activeTab);
+  }, [vcamEnabled, activeTab, runVCam]);
 
-  // Poll native readiness (true once a calling app has opened the camera).
+  // Poll native readiness (true once a calling app has opened the camera). A tab with no call of its
+  // own has no camera to be ready, so its line must not keep the last tab's word.
   useEffect(() => {
-    if (!vcamEnabled) return;
+    if (!vcamEnabled) { setVcamReady(false); return; }
     let alive = true;
     const iv = setInterval(async () => {
       const st = await getElectronAPI()?.vcamStatus?.();
@@ -1698,7 +1712,7 @@ export default function StreamPage() {
     } catch { return null; }
   }, [ensureMediaPermission]);
 
-  const applyAudioRoute = useCallback(async (on: boolean, auto = false) => {
+  const applyAudioRoute = useCallback(async (on: boolean, auto: boolean, tab: TabId) => {
     type SinkEl = HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
     // The cable carries sound the app holds itself: the microphone, or the cloned
     // voice. Never whatever the video engine returns — the model is video-to-video
@@ -1721,7 +1735,7 @@ export default function StreamPage() {
     if (!on) { for (const el of els) { try { await el.setSinkId?.(""); } catch { /* ignore */ } } setCableSinkLabel(""); setBroadcastBlocked(""); return; }
     if (els.some(el => typeof el.setSinkId !== "function")) {
       if (!auto) toast({ title: t("Audio routing unsupported"), description: t("This runtime can't select an output device."), variant: "destructive", withContact: true });
-      setAudioRouteOn(false); setBroadcastBlocked("no-sink"); return;
+      setMicFor(tab, false); setBroadcastBlocked("no-sink"); return;
     }
     // 1) User-pinned output device (works even when labels are hidden).
     if (manualSinkId) {
@@ -1760,44 +1774,37 @@ export default function StreamPage() {
         : t("The VB-Audio cable output device isn't visible.{diag} Pick it manually from the “Audio out” dropdown in the Broadcast panel (choose the unlabeled / VB-Cable entry), or set “Speakers (VB-Audio Virtual Cable)” as your Windows default playback device.", { diag }),
       variant: "destructive", withContact: true,
     });
-    setAudioRouteOn(false); setBroadcastBlocked("no-cable"); return;
-  }, [findCableSink, toast, manualSinkId, audioOutputs, chooseManualSink]);
+    setMicFor(tab, false); setBroadcastBlocked("no-cable"); return;
+  }, [findCableSink, toast, manualSinkId, audioOutputs, chooseManualSink, setMicFor]);
 
   const toggleAudioRoute = useCallback(async () => {
     const next = !audioRouteOn;
-    setAudioRouteOn(next);
-    // His press is the only thing that remembers a position. The pass below that runs when the
-    // page opens never writes here, so a machine that cannot do it cannot switch him off.
-    try { localStorage.setItem("ss_mic_route_on", next ? "1" : "0"); } catch { /**/ }
+    setMicFor(activeTab, next);
     if (!next) setBroadcastBlocked("");
-    await applyAudioRoute(next);
+    await applyAudioRoute(next, false, activeTab);
     if (next && voiceMonitor && clonerRef.current) {
       toast({ title: t("Local monitor is on"), description: t("Your cloned voice also plays in your speakers. Use headphones — loudspeakers let your mic feed it back into the call.") });
     }
-  }, [audioRouteOn, applyAudioRoute, voiceMonitor, toast]);
+  }, [audioRouteOn, activeTab, applyAudioRoute, setMicFor, voiceMonitor, toast]);
 
-  // The panel comes back on its own the first time this page opens: the picture goes out and the
-  // voice goes to the cable without him hunting for either switch. Both read what the machine
-  // really did — if the driver is missing or no cable is visible, the switch shows Off and the
-  // line under it says why, instead of staying lit on a thing that is not happening.
-  useEffect(() => {
-    if (broadcastAutoRef.current) return;
-    broadcastAutoRef.current = true;
-    let on = false;
-    let route = false;
-    try {
-      on = localStorage.getItem("ss_vcam_on") !== "0";
-      route = localStorage.getItem("ss_mic_route_on") !== "0";
-    } catch { on = true; route = true; }
-    if (on) void runVCam(true, true);
-    if (route) void applyAudioRoute(true, true);
-  }, [runVCam, applyAudioRoute]);
+  // Put both of this tab's fake devices back. Called when the tab's own call ends and when he
+  // walks off a tab that holds no call, so a lit switch always means "this tab is using it".
+  const releaseBroadcast = useCallback((tab: TabId): void => {
+    stopVCamPump();
+    void getElectronAPI()?.vcamStop?.();
+    setVcamReady(false);
+    setCamFor(tab, false);
+    setMicFor(tab, false);
+    void applyAudioRoute(false, true, tab);
+  }, [stopVCamPump, applyAudioRoute, setCamFor, setMicFor]);
+
+  useEffect(() => { releaseBroadcastRef.current = releaseBroadcast; }, [releaseBroadcast]);
 
   // Re-apply routing when the AI output (re)connects, since srcObject changes,
   // and when the cloned voice stream starts (its audio element mounts then).
   useEffect(() => {
-    if (audioRouteOn && connStatus === "connected") applyAudioRoute(true);
-  }, [connStatus, audioRouteOn, applyAudioRoute, vcActive]);
+    if (audioRouteOn && connStatus === "connected") void applyAudioRoute(true, true, activeTab);
+  }, [connStatus, audioRouteOn, activeTab, applyAudioRoute, vcActive]);
 
   // The AI element is a picture source and nothing more. The engine is video-to-video,
   // so any audio that ever comes back on it is at best a delayed copy of the microphone
@@ -1986,6 +1993,9 @@ export default function StreamPage() {
       // never starts with two voices on it.
       if (micRouteRef.current) { try { micRouteRef.current.pause(); } catch { /**/ } micRouteRef.current.srcObject = null; }
       micRouteStreamRef.current = null;
+      // The call is over, so the two switches that call lit go back off — on the tab that dialled,
+      // which is the tab he was standing on when it opened.
+      releaseBroadcastRef.current(broadcastOwnerRef.current);
       syncPipeRef.current?.stop(); syncPipeRef.current = null;
       if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
       remoteStreamRef.current = null; window.__slRemoteStream = null;
@@ -2371,6 +2381,18 @@ export default function StreamPage() {
         }
       }, 45_000);
 
+      // The call is open: NOW this tab's switches light, and only this tab's. Before this line the
+      // machine's one fake camera and one cable belonged to nothing, which is how a build ended up
+      // pumping a black picture into Zoom with no call running. Voice Only sends no picture, so it
+      // lights the microphone alone - the same reason that tab draws no camera row.
+      broadcastOwnerRef.current = activeTab;
+      const genAtOpen = sessionGenRef.current;
+      if (!voiceOnly && !camOnTab[activeTab]) await runVCam(true, true, activeTab);
+      if (!micOnTab[activeTab]) { setMicFor(activeTab, true); await applyAudioRoute(true, true, activeTab); }
+      // He cancelled, or the line died, while the devices were being handed over. A switch must not
+      // outlive the call that lit it.
+      if (startCancelRef.current || sessionGenRef.current !== genAtOpen) releaseBroadcastRef.current(activeTab);
+
       const t0 = Date.now();
       timerRef.current = setInterval(() => { setElapsed(Math.floor((Date.now() - t0) / 1000)); }, 1000);
       setIsStreaming(true); streamingRef.current = true;
@@ -2412,7 +2434,8 @@ export default function StreamPage() {
       // nothing, and Windows shows a recording light while it is open.
       if (!micHandedOff && mic) mic.getTracks().forEach(t => t.stop());
     }
-  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold, blindReadout]);
+  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold, blindReadout,
+      activeTab, camOnTab, micOnTab, runVCam, applyAudioRoute, setMicFor]);
 
   /**
    * Sleep, counting the seconds on screen. A wait the server announced for this exact
@@ -2531,12 +2554,12 @@ export default function StreamPage() {
     if (!voiceTab && (!cameraReady || !localStreamRef.current)) {
       toast({ title: t("Camera not ready"), description: t("Enable your camera first."), variant: "destructive" }); return;
     }
-    // A voice-only call exists to put the cloned voice on the software microphone, so the cable
-    // is switched on for it rather than left for him to find under the broadcast panel.
-    if (voiceTab && !audioRouteOn) { setAudioRouteOn(true); await applyAudioRoute(true); }
+    // A voice-only call exists to put the cloned voice on the software microphone, and a picture
+    // call exists to put the picture on the fake camera. Both are handed over by the call itself,
+    // at the moment the line accepts it - see the switches lighting in attemptStart.
     await runStartLadder(activeTab, needsVoice);
-  }, [credsMissing, cameraReady, voiceTab, audioRouteOn, activeTab, startBlocked, cloneLocked, needsVoice,
-      applyAudioRoute, toast, setLocation, account, runStartLadder]);
+  }, [credsMissing, cameraReady, voiceTab, activeTab, startBlocked, cloneLocked, needsVoice,
+      toast, setLocation, account, runStartLadder]);
 
   const handleStop = useCallback(() => teardownStream(), [teardownStream]);
 

@@ -109,7 +109,7 @@ export const TOUR_STOPS: TourStop[] = [
     tab: TOUR_TAB, anchor: "broadcast", title: "How the picture gets into your call",
     body: IS_MAC
       ? "In your call app choose {cam} as the camera, and leave its microphone on your own device — this tab sends your real voice, so there is nothing to route. Settings has these steps with the free helper to install."
-      : "Turn this panel's camera switch on, then in your call app choose {cam} as the camera and leave its microphone on your own device. Nothing else in the call app needs changing.",
+      : "Your call switches this panel's camera on by itself, so the only thing you set is in your call app: choose {cam} as the camera and leave its microphone on your own device. Nothing else in the call app needs changing.",
   },
   {
     tab: TOUR_TAB, anchor: "start", title: "Start, then join your call",

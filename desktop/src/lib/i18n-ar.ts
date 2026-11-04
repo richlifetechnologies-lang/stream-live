@@ -426,7 +426,7 @@ export const ar: Record<string, string> = {
   "Listening for your voice in the avatar's mouth. It needs about twenty seconds of talking before it holds your voice back, and until then the voice stays level with the picture.": "نستمع لصوتك من خلال فم الصورة الافتراضية. تحتاج نحو عشرين ثانية من الحديث قبل أن يبدأ تأخير صوتك، وحتى ذلك الحين يبقى الصوت مساويًا للصورة.",
   "you@example.com": "you@example.com",
 "In your call app choose {cam} as the camera, and leave its microphone on your own device — this tab sends your real voice, so there is nothing to route. Settings has these steps with the free helper to install.": "في تطبيق الاتصال لديك اختر {cam} ككاميرا، واترك الميكروفون على جهازك أنت. هذا التبويب يرسل صوتك الحقيقي، لذلك لا يوجد شيء لتوجيهه. صفحة الإعدادات فيها هذه الخطوات مع الأداة المجانية لتركيبها.",
-"Turn this panel's camera switch on, then in your call app choose {cam} as the camera and leave its microphone on your own device. Nothing else in the call app needs changing.": "شغّل مفتاح الكاميرا في هذه اللوحة، ثم اختر {cam} ككاميرا في تطبيق الاتصال لديك واترك الميكروفون على جهازك أنت. لا يحتاج أي شيء آخر في تطبيق الاتصال إلى تغيير.",
+"Your call switches this panel's camera on by itself, so the only thing you set is in your call app: choose {cam} as the camera and leave its microphone on your own device. Nothing else in the call app needs changing.": "اتصالك يشغّل مفتاح الكاميرا في هذه اللوحة بنفسه، لذا التعديل الوحيد يكون في تطبيق الاتصال لديك: اختر {cam} ككاميرا واترك الميكروفون على جهازك أنت. لا يحتاج أي شيء آخر في تطبيق الاتصال إلى تغيير.",
   "Start call": "بدء المكالمة",
   "Wait": "انتظر",
   "How you will look": "كيف ستبدو",
