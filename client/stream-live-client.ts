@@ -867,6 +867,26 @@ export class StreamLiveClient {
     return Number(res.checked ?? 0);
   }
 
+  /**
+   * Ask which language this account's own country suggests, once the account is signed in.
+   *
+   * The country has been read for the seller's panel, but only when the customer pressed Start or
+   * opened the payment page — so a fresh sign-in had nothing to go on. This asks at sign-in, and
+   * the server answers from the address its own runtime saw, never from anything this app claims.
+   * It is a suggestion only: the desktop side ignores the answer completely for an account whose
+   * customer has used the language button, and nothing about money is read from a country.
+   *
+   * A null answer means "no suggestion", which is not an error and leaves the language alone.
+   */
+  async accountLanguage(): Promise<{ country: string | null; lang: string | null }> {
+    const res = await this.invoke("account-language", {}) as unknown as
+      { country?: string | null; lang?: string | null };
+    return {
+      country: typeof res.country === "string" && res.country ? res.country : null,
+      lang: typeof res.lang === "string" && res.lang ? res.lang : null,
+    };
+  }
+
   // ── Internals ──────────────────────────────────────────────────────────────
   private async invoke(fn: string, body: Record<string, unknown>): Promise<Record<string, never>> {
     const token = await this.token();

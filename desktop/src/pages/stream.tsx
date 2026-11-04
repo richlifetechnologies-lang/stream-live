@@ -1163,10 +1163,22 @@ export default function StreamPage() {
   const [obsPortraitInstructions, setObsPortraitInstructions] = useState(false);
 
   // ── Virtual devices (Stream Live Camera / Microphone) ───────────────────
-  const [vcamEnabled, setVcamEnabled]     = useState(false);
+  // Both come back on their own, remembered on this machine the way his pinned audio
+  // output is: a customer who broadcast once should not have to find the switches again
+  // every time the app opens. The button is the only thing that writes these two records,
+  // so a computer with no driver or no cable cannot lose his setting by failing.
+  const [vcamEnabled, setVcamEnabled]     = useState<boolean>(() => {
+    try { return localStorage.getItem("ss_vcam_on") !== "0"; } catch { return true; }
+  });
   const [vcamSupported, setVcamSupported] = useState(true);
   const [vcamReady, setVcamReady]         = useState(false);
-  const [audioRouteOn, setAudioRouteOn]   = useState(false);
+  const [audioRouteOn, setAudioRouteOn]   = useState<boolean>(() => {
+    try { return localStorage.getItem("ss_mic_route_on") !== "0"; } catch { return true; }
+  });
+  // Why a switch he never touched is showing Off. Only the automatic pass sets it, so a
+  // deliberate press off stays the plain "Off" line he already knows.
+  const [broadcastBlocked, setBroadcastBlocked] = useState<"" | "no-cable" | "no-sink">("");
+  const broadcastAutoRef = useRef(false);
   const [cableSinkLabel, setCableSinkLabel] = useState("");
   // Manual override for the audio sink: the VB-Cable endpoint can appear with a
   // hidden label (permissions/runtime), so name-matching alone is unreliable.
@@ -1569,31 +1581,40 @@ export default function StreamPage() {
     if (vcamTimerRef.current) { clearTimeout(vcamTimerRef.current); vcamTimerRef.current = null; }
   }, []);
 
-  const toggleVCam = useCallback(async () => {
+  // Put the picture out, or take it back in. `auto` is the pass that runs when this page opens:
+  // it says nothing in a popup, because the line under the switch already carries the truth.
+  const runVCam = useCallback(async (on: boolean, auto: boolean): Promise<void> => {
     const api = getElectronAPI();
     if (!api?.vcamStart || !api?.vcamStop) {
       setVcamSupported(false);
-      toast({ title: t("Virtual camera unavailable"), description: t("Run in the Stream Live desktop app on Windows, and install the Stream Live Camera driver."), variant: "destructive", withContact: true });
+      if (!auto) toast({ title: t("Virtual camera unavailable"), description: t("Run in the Stream Live desktop app on Windows, and install the Stream Live Camera driver."), variant: "destructive", withContact: true });
       return;
     }
-    if (!vcamEnabled) {
+    if (on) {
       const r = await api.vcamStart();
       setVcamSupported(r.supported);
       if (!r.supported) {
-        toast({ title: t("Virtual camera unavailable"), description: r.error || t("The native driver layer could not load."), variant: "destructive", withContact: true });
+        if (!auto) toast({ title: t("Virtual camera unavailable"), description: r.error || t("The native driver layer could not load."), variant: "destructive", withContact: true });
+        setVcamEnabled(false);
         return;
       }
       setVcamEnabled(true);
       vcamOnRef.current = true;
       vcamTick();
-      toast({ title: t("Stream Live Camera ON"), description: t("Select “Stream Live Camera” in Zoom/Teams/Chrome. It shows the AI output while streaming.") });
+      if (!auto) toast({ title: t("Stream Live Camera ON"), description: t("Select “Stream Live Camera” in Zoom/Teams/Chrome. It shows the AI output while streaming.") });
     } else {
       stopVCamPump();
       await api.vcamStop();
       setVcamEnabled(false);
       setVcamReady(false);
     }
-  }, [vcamEnabled, vcamTick, stopVCamPump, toast]);
+  }, [vcamTick, stopVCamPump, toast]);
+
+  const toggleVCam = useCallback(async () => {
+    const next = !vcamEnabled;
+    try { localStorage.setItem("ss_vcam_on", next ? "1" : "0"); } catch { /**/ }
+    await runVCam(next, false);
+  }, [vcamEnabled, runVCam]);
 
   // Poll native readiness (true once a calling app has opened the camera).
   useEffect(() => {
@@ -1677,7 +1698,7 @@ export default function StreamPage() {
     } catch { return null; }
   }, [ensureMediaPermission]);
 
-  const applyAudioRoute = useCallback(async (on: boolean) => {
+  const applyAudioRoute = useCallback(async (on: boolean, auto = false) => {
     type SinkEl = HTMLMediaElement & { setSinkId?: (id: string) => Promise<void> };
     // The cable carries sound the app holds itself: the microphone, or the cloned
     // voice. Never whatever the video engine returns — the model is video-to-video
@@ -1697,10 +1718,10 @@ export default function StreamPage() {
     const els = [micEl, cloneAudioRef.current].filter(Boolean) as SinkEl[];
     if (!els.length) return;
     const setSinks = async (id: string) => { for (const el of els) await el.setSinkId!(id); };
-    if (!on) { for (const el of els) { try { await el.setSinkId?.(""); } catch { /* ignore */ } } setCableSinkLabel(""); return; }
+    if (!on) { for (const el of els) { try { await el.setSinkId?.(""); } catch { /* ignore */ } } setCableSinkLabel(""); setBroadcastBlocked(""); return; }
     if (els.some(el => typeof el.setSinkId !== "function")) {
-      toast({ title: t("Audio routing unsupported"), description: t("This runtime can't select an output device."), variant: "destructive", withContact: true });
-      setAudioRouteOn(false); return;
+      if (!auto) toast({ title: t("Audio routing unsupported"), description: t("This runtime can't select an output device."), variant: "destructive", withContact: true });
+      setAudioRouteOn(false); setBroadcastBlocked("no-sink"); return;
     }
     // 1) User-pinned output device (works even when labels are hidden).
     if (manualSinkId) {
@@ -1708,6 +1729,7 @@ export default function StreamPage() {
         await setSinks(manualSinkId);
         const lbl = audioOutputs.find(d => d.deviceId === manualSinkId)?.label;
         setCableSinkLabel(lbl || t("Pinned output"));
+        setBroadcastBlocked("");
         return;
       } catch { /* pinned device gone; fall through to auto-detect */ }
     }
@@ -1716,6 +1738,7 @@ export default function StreamPage() {
       try {
         await setSinks(cable.id);
         setCableSinkLabel(cable.label);
+        setBroadcastBlocked("");
         // Pin it so reconnects and re-toggles reuse the same (hidden-label) sink.
         chooseManualSink(cable.id);
         return;
@@ -1730,24 +1753,45 @@ export default function StreamPage() {
         ? t(" Outputs seen: {list}.", { list: outs.map(d => d.label || "(hidden)").join(", ") })
         : t(" No audio output devices enumerated at all.");
     } catch { diag = t(" Could not enumerate devices."); }
-    toast({
+    if (!auto) toast({
       title: t("Virtual microphone not detected"),
       description: IS_MAC
         ? t("{cable} isn't visible to Stream Live.{diag} Install it from existential.audio/blackhole, log out and back in, then pick it in the “Audio out” dropdown. Steps: Settings → Mac Setup.", { cable: CABLE_NAME, diag })
         : t("The VB-Audio cable output device isn't visible.{diag} Pick it manually from the “Audio out” dropdown in the Broadcast panel (choose the unlabeled / VB-Cable entry), or set “Speakers (VB-Audio Virtual Cable)” as your Windows default playback device.", { diag }),
       variant: "destructive", withContact: true,
     });
-    setAudioRouteOn(false); return;
+    setAudioRouteOn(false); setBroadcastBlocked("no-cable"); return;
   }, [findCableSink, toast, manualSinkId, audioOutputs, chooseManualSink]);
 
   const toggleAudioRoute = useCallback(async () => {
     const next = !audioRouteOn;
     setAudioRouteOn(next);
+    // His press is the only thing that remembers a position. The pass below that runs when the
+    // page opens never writes here, so a machine that cannot do it cannot switch him off.
+    try { localStorage.setItem("ss_mic_route_on", next ? "1" : "0"); } catch { /**/ }
+    if (!next) setBroadcastBlocked("");
     await applyAudioRoute(next);
     if (next && voiceMonitor && clonerRef.current) {
       toast({ title: t("Local monitor is on"), description: t("Your cloned voice also plays in your speakers. Use headphones — loudspeakers let your mic feed it back into the call.") });
     }
   }, [audioRouteOn, applyAudioRoute, voiceMonitor, toast]);
+
+  // The panel comes back on its own the first time this page opens: the picture goes out and the
+  // voice goes to the cable without him hunting for either switch. Both read what the machine
+  // really did — if the driver is missing or no cable is visible, the switch shows Off and the
+  // line under it says why, instead of staying lit on a thing that is not happening.
+  useEffect(() => {
+    if (broadcastAutoRef.current) return;
+    broadcastAutoRef.current = true;
+    let on = false;
+    let route = false;
+    try {
+      on = localStorage.getItem("ss_vcam_on") !== "0";
+      route = localStorage.getItem("ss_mic_route_on") !== "0";
+    } catch { on = true; route = true; }
+    if (on) void runVCam(true, true);
+    if (route) void applyAudioRoute(true, true);
+  }, [runVCam, applyAudioRoute]);
 
   // Re-apply routing when the AI output (re)connects, since srcObject changes,
   // and when the cloned voice stream starts (its audio element mounts then).
@@ -3397,7 +3441,10 @@ export default function StreamPage() {
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif" }}>Stream Live Microphone</p>
               <p style={{ fontSize: 12, color: audioRouteOn ? VC : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {audioRouteOn ? (cableSinkLabel ? t("Routing → {label}", { label: cableSinkLabel }) : t("Routing your voice to cable")) : t("Off — nothing reaches the cable")}
+                {audioRouteOn ? (cableSinkLabel ? t("Routing → {label}", { label: cableSinkLabel }) : t("Routing your voice to cable"))
+                  : broadcastBlocked === "no-cable" ? t("Virtual microphone not detected")
+                  : broadcastBlocked === "no-sink" ? t("This runtime can't select an output device.")
+                  : t("Off — nothing reaches the cable")}
               </p>
             </div>
             {toggleBtn(audioRouteOn, toggleAudioRoute, false, "Toggle Stream Live Microphone")}

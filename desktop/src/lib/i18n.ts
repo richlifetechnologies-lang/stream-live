@@ -26,6 +26,17 @@ export const LANGS: { code: LangCode; native: string; english: string }[] = [
 
 const DICTS: Record<LangCode, Record<string, string>> = { en: {}, es, pt, fr, ar };
 const STORE_KEY = "streamlive.lang";
+/**
+ * The record that says a person chose for himself, and the only reason the automatic pick can be
+ * told apart from his.
+ *
+ * It is written by the language button and by nothing else. Without it there is one number on this
+ * machine and no way to know who set it, so a customer who deliberately reads his app in Spanish
+ * would lose that the next time he signs in from a country the server reads differently. With it,
+ * the automatic suggestion is obeyed once, on a machine he has never made a choice on, and never
+ * again.
+ */
+const CHOSEN_KEY = "streamlive.lang_chosen";
 
 function detect(): LangCode {
   try {
@@ -56,6 +67,31 @@ export function getLang(): LangCode {
 }
 
 export function setLang(next: LangCode) {
+  // The flag is written even when the language is already the one on screen: pressing the button
+  // on the language he is already reading is still him deciding, and a decision that quietly
+  // failed to stick is worse than no decision at all.
+  try { localStorage.setItem(CHOSEN_KEY, "1"); } catch { /* nothing to remember on; the auto pick may still apply */ }
+  apply(next);
+}
+
+/**
+ * The automatic route, and the only place the server's suggestion is allowed to land.
+ *
+ * It refuses itself once the customer has ever used the button, so the language he picked for
+ * himself cannot be taken back by a reading he never agreed to — and it leaves no "he chose" mark,
+ * so a wrong guess about a VPN is corrected by his own next click, permanently.
+ */
+export function setLangAuto(next: LangCode) {
+  if (hasChosenLang()) return;
+  apply(next);
+}
+
+/** Whether a person has chosen the language on this machine himself. */
+export function hasChosenLang(): boolean {
+  try { return localStorage.getItem(CHOSEN_KEY) === "1"; } catch { return false; }
+}
+
+function apply(next: LangCode) {
   if (next === current) return;
   current = next;
   dict = DICTS[next];

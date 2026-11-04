@@ -12,6 +12,7 @@ import {
 } from "@stream-live/client";
 import { GATEWAY_CONFIG } from "./gateway-config";
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "./clock-sync";
+import { LANGS, hasChosenLang, setLangAuto, type LangCode } from "./i18n";
 import type { LiveLease } from "./minutes";
 import type { AdminContact } from "@stream-live/client";
 
@@ -325,6 +326,35 @@ function reportMeasuredSkew(): void {
   if (skew !== null) noteClockSkew(skew);
 }
 
+/** Whether this account's language has already been asked of the server this session. */
+let langAskedFor: string | null = null;
+
+/**
+ * Let the country the server already reads pick the language, once, for somebody who has
+ * never touched the button himself.
+ *
+ * The server sees a caller's country at dial and at checkout, but a person who has only
+ * just signed in has done neither, so this route asks it on the spot and returns the
+ * language its own table maps that country to. Nothing here decides the language alone:
+ * a customer who has ever used the language button outranks the reading permanently, which
+ * is why the button records his choice and this function checks for it before asking. A
+ * failed look-up is simply no suggestion — the app keeps whatever language is on screen.
+ */
+export async function applySuggestedLanguage(): Promise<void> {
+  const email = state.email;
+  if (!state.signedIn || !email) return;
+  if (hasChosenLang()) return;
+  if (langAskedFor === email) return;
+  langAskedFor = email;
+  try {
+    const { lang } = await gateway.accountLanguage();
+    if (!lang || !LANGS.some(l => l.code === lang)) return;
+    setLangAuto(lang as LangCode);
+  } catch (err) {
+    logAccount(`language reading failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 export async function refreshBalances(): Promise<void> {
   if (!state.signedIn) return;
   try {
@@ -356,6 +386,11 @@ export async function refreshBalances(): Promise<void> {
     setState({ error: plainReadError(err) });
     logAccount(`balance read failed: ${err instanceof Error ? err.message : String(err)}`);
   }
+  // The same moment the account becomes known is the moment its country can be asked about,
+  // so every way of getting signed in — a restored session, a sign-in, a registration, and a
+  // payment that made the app read again — reaches the language suggestion without any of
+  // them having to ask for it.
+  void applySuggestedLanguage();
 }
 
 /**
@@ -422,6 +457,8 @@ export async function signUp(email: string, password: string, displayName?: stri
 export async function signOut(): Promise<void> {
   await gateway.signOut();
   setState({ signedIn: false, email: null, ...BLANK, loading: false, paid: true, live: null });
+  // The next account to sign in on this machine is a different person, in a different country.
+  langAskedFor = null;
 }
 
 export async function requestTopup(input: {

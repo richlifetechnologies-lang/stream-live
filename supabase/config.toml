@@ -53,3 +53,9 @@ verify_jwt = false
 # key and is re-verified against Paystack's API, never a JWT.
 [functions.paystack-webhook]
 verify_jwt = false
+
+# "What language does this account's own country suggest?" It validates the caller's
+# JWT itself, like every other route here, and answers 401 in its own words when there
+# is no signed-in account - so the desktop app can tell a refusal from a transport failure.
+[functions.account-language]
+verify_jwt = false
