@@ -214,11 +214,17 @@ const MIC_CARD_WORDS: Record<GateState, string> = {
 // removes echo and normalises level. Always requested, with no switch - every
 // customer would have had to understand it before turning it on, and most never do.
 // What it used to be switched off for is now done by the gate, which is automatic.
-function micAudioConstraints(deviceId: string | undefined, sampleRate?: number): MediaTrackConstraints {
+// One exception, and it is not a customer-facing switch: a cloned call does not ask for the
+// automatic level. The copier copies the level it is fed, and that level is deliberately
+// never flat - it winds up through silence hunting for a voice, so the first answer after a
+// pause arrives boosted and the line reads it as a bang, and it lifts a quieter voice in the
+// room up to his. On the video tabs nothing is copied, so the normalising stays.
+function micAudioConstraints(deviceId: string | undefined, sampleRate?: number,
+                             cloneInput = false): MediaTrackConstraints {
   const c: MediaTrackConstraints = {
     echoCancellation: true,
     noiseSuppression: true,
-    autoGainControl: true,
+    autoGainControl: !cloneInput,
   };
   if (sampleRate) c.sampleRate = sampleRate;
   if (deviceId) c.deviceId = { exact: deviceId };
@@ -450,9 +456,9 @@ const CLONE_AIR_HARD_MS  = PICTURE_GIVE_UP_MS - 5_000;
  * picture moves, the meter runs, and nobody hears him. This costs no minutes, takes one
  * permission answer, and the stream it returns is the very one the call then uses.
  */
-async function openMicrophone(deviceId: string | undefined): Promise<MediaStream> {
+async function openMicrophone(deviceId: string | undefined, cloneInput = false): Promise<MediaStream> {
   const stream = await navigator.mediaDevices.getUserMedia({
-    audio: micAudioConstraints(deviceId, 48000), video: false,
+    audio: micAudioConstraints(deviceId, 48000, cloneInput), video: false,
   });
   const track = stream.getAudioTracks()[0];
   if (!track || track.readyState !== "live") {
@@ -1723,9 +1729,12 @@ export default function StreamPage() {
     // The cable carries sound the app holds itself: the microphone, or the cloned
     // voice. Never whatever the video engine returns — the model is video-to-video
     // and may hand back no audio at all, which left callers hearing total silence.
+    // While a cloned call is running the clone owns the cable alone. This function is
+    // re-run whenever the output device is re-pinned, and routing the microphone back on
+    // at that moment put his raw voice on the line beside the voice his callers paid for.
     const micEl = micRouteRef.current;
     if (micEl) {
-      if (on) {
+      if (on && !clonerRef.current) {
         if (micRouteStreamRef.current && micEl.srcObject !== micRouteStreamRef.current) {
           micEl.srcObject = micRouteStreamRef.current;
         }
@@ -2191,7 +2200,7 @@ export default function StreamPage() {
     setConnStatus("connecting");
     try {
       if (needsVoice) {
-        try { mic = await openMicrophone(selectedMicId || undefined); }
+        try { mic = await openMicrophone(selectedMicId || undefined, needsVoice); }
         catch { return preflightFailure("mic_not_ready"); }
         // Nothing is metered here: this only asks the voice service to list his saved voices.
         // A service that will not answer at all is known before the lease opens rather than
