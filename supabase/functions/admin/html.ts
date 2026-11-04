@@ -549,7 +549,7 @@ export const ADMIN_HTML = `<!doctype html>
         <p class="muted" style="margin:6px 0 12px">Only the last four characters ever reach this page. <b>Verify</b> re-checks the stored copy against the provider; <span class="pill ok">live</span> means no failure was recorded against it in the last 24 hours.</p>
         <div style="overflow:auto">
           <table id="keysTable">
-            <thead><tr><th>Label</th><th>Video · fal.ai</th><th>Spent on fal.ai today</th><th id="thTrialKey">Trial · DeCart</th><th id="thTrialLeft">Trial left</th><th>Voice · ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
+            <thead><tr><th>Label</th><th>Video · fal.ai</th><th title="Which of your own keys did the burning. fal.ai is asked for this at most every ten minutes, because asking on every glance is what made it refuse to answer; the running-call line under the figure counts forward from that reading.">Spent on fal.ai today</th><th id="thTrialKey">Trial · DeCart</th><th id="thTrialLeft">Trial left</th><th>Voice · ElevenLabs</th><th>Enabled</th><th>Priority</th><th>Today / cap</th><th>Failures 24h</th><th>Last error</th><th></th></tr></thead>
             <tbody></tbody>
           </table>
         </div>
@@ -3051,6 +3051,7 @@ export const ADMIN_HTML = `<!doctype html>
     $("fbCount").textContent = rows.length + (rows.length === 1 ? " account" : " accounts");
     $("fbCount").style.display = rows.length ? "" : "none";
     $("fbWhen").textContent = !p.configured ? ""
+      : p.rate_limited ? "holding fal.ai's last figures"
       : rows.length > 1 ? \`\${answered} of \${rows.length} accounts answered\`
       : answered ? "read from fal.ai" : "fal.ai would not answer that key";
 
@@ -3069,12 +3070,14 @@ export const ADMIN_HTML = `<!doctype html>
       // aged honestly, with this read's failure written under it.
       if (BAL_GOOD) {
         const why = String(p.detail || "fal.ai gave no answer").replace(/\\s+/g, " ").slice(0, 140);
-        renderBalance({ ...BAL_GOOD, detail: "this read failed (" + why + "), so the figure is the balance fal.ai last gave" }, BAL_GOOD_AT);
+        renderBalance({ ...BAL_GOOD, rate_limited: !!p.rate_limited, detail: p.rate_limited
+          ? "fal.ai asked us to slow down, so nothing was asked of it for this reading — the figures are the ones it last gave, and the card reads again on its own in a few minutes. No call of yours failed: this page only reads fal's money, it never opens a call."
+          : "this read failed (" + why + "), so the figure is the balance fal.ai last gave" }, BAL_GOOD_AT);
         return;
       }
       BAL_LIVE = null;
       BAL_PAINTED = null;
-      box.innerHTML = \`<div class="alert" style="margin-top:12px"><b>Nothing read this time.</b> \${esc(p.detail || "")}</div>\`;
+      box.innerHTML = \`<div class="alert" style="margin-top:12px"><b>\${p.rate_limited ? "Slowing down for fal.ai." : "Nothing read this time."}</b> \${esc(p.detail || "")}</div>\`;
       paintFoldBal();
       paintSpendCells();
       return;
@@ -3204,7 +3207,7 @@ export const ADMIN_HTML = `<!doctype html>
       \${chips}
       \${frameLine}
       \${notes}
-      <p class="muted" style="margin:12px 0 0;font-size:12px">checked \${balAgo(Date.now() - at)}\${p.from_cache ? " — the reading is held for a minute so this page never hammers fal.ai" : ""} · \${esc(p.detail || "")}\${BAL_LIVE ? " · the big figure falls between readings, counted off by your own live calls" : ""}</p>\`;
+      <p class="muted" style="margin:12px 0 0;font-size:12px">\${p.rate_limited ? "these are fal.ai's last figures" : \`checked \${balAgo(Date.now() - at)}\`}\${p.from_cache && !p.rate_limited ? " — the reading is held for three minutes so this page never hammers fal.ai" : ""} · \${esc(p.detail || "")}\${BAL_LIVE ? " · the big figure falls between readings, counted off by your own live calls" : ""}</p>\`;
     paintDetail();
     paintFoldBal();
     tickBalance();
@@ -3260,12 +3263,13 @@ export const ADMIN_HTML = `<!doctype html>
 
   // force = the button was pressed. Otherwise a reading younger than a minute is only
   // re-painted, which keeps the "checked 20 seconds ago" line honest without a second
-  // round trip every fifteen seconds.
+  // round trip every fifteen seconds. force also carries through to the gateway, where it
+  // is the one thing allowed to ask fal.ai during a wait it asked for.
   async function loadBalance(force) {
     if (FAL_BAL && !force && Date.now() - BAL_AT < 50_000) { renderBalance(FAL_BAL); return; }
     BAL_AT = Date.now();
     try {
-      FAL_BAL = await api({ action: "fal_balance" });
+      FAL_BAL = await api(force ? { action: "fal_balance", force: true } : { action: "fal_balance" });
       msg("fbMsg", "");
       renderBalance(FAL_BAL);
     } catch (err) {

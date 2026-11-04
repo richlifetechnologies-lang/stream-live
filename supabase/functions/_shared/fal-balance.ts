@@ -19,12 +19,27 @@ import { adminClient } from "./db.ts";
 import { normalizeSecret } from "./keys.ts";
 
 const API = "https://api.fal.ai/v1";
-// fal's own figures settle a little after a call ends, and the panel polls the keys
-// tab every fifteen seconds. Asking fal that often buys nothing and risks a 429 on a
-// read that exists to be glanced at, so one reading is served to everyone for a minute.
-const FRESH_MS = 60_000;
+// fal's own figures settle a little after a call ends, and the panel polls the keys tab every
+// fifteen seconds. Asking fal that often buys nothing, so one reading is served to everyone.
+// It is three minutes and not one because the card does NOT freeze while it waits: between two
+// readings it counts the calls running right now off its own lease rows, so what it shows is
+// fal's last answer plus everything taken since. Holding the answer longer costs no truth and
+// costs fal far fewer requests.
+const FRESH_MS = 180_000;
 // A failed read is not cached as long: the button he presses next should really try.
 const STALE_FAIL_MS = 15_000;
+// A 429 is not a failure to retry, it is fal saying it has had enough requests. Retrying a
+// quarter-minute later is the loop that never lets the window refill: the panel polls on fifteen
+// seconds, so a rate limit of one minute renews itself for as long as the tab is open. Once fal
+// refuses this way the reader goes quiet — for the wait fal names, or five minutes — and serves
+// the figures it last actually got.
+const COOLDOWN_MS = 5 * 60_000;
+const COOLDOWN_MIN_MS = 60_000;
+const COOLDOWN_MAX_MS = 15 * 60_000;
+// The two breakdowns — what each pool key spent, and which keys an account holds — are why one
+// reading used to cost four asks per account plus two per key, all at once. They move when he
+// edits the pool, not between glances, so they are kept apart from the balance and for longer.
+const PARTS_MS = 10 * 60_000;
 
 export type FalSpend = {
   cost: number;
@@ -185,6 +200,14 @@ export type FalBalancePayload = {
   no_frame: FalNoFrame | null;
   checked_at: string;
   from_cache: boolean;
+  /**
+   * fal asked us to slow down, so these figures are the last ones it gave and nothing was
+   * asked of it to make this answer. The card says so rather than blanking a number, because
+   * a rate limit on this read says nothing about a call — the paid video service is reached
+   * through a different door (a minted token and the realtime host), never through these
+   * billing endpoints, so a held figure is never a customer's failed call.
+   */
+  rate_limited: boolean;
   detail: string;
   /**
    * Every stored account, each with fal's own figures for that account. The four
@@ -210,9 +233,21 @@ async function ask(key: string, path: string): Promise<{ res: Response; json: an
     const body = (await res.text().catch(() => "")).slice(0, 180);
     let why = body;
     try { why = String(JSON.parse(body)?.detail ?? body); } catch { /**/ }
+    if (res.status === 429) holdOff(why, res.headers?.get?.("retry-after"));
     return { err: `fal.ai answered ${res.status}${why ? `: ${why}` : ""}`, status: res.status };
   }
   return { res, json: await res.json().catch(() => ({})) };
+}
+
+// The one piece of state a caller must not be able to lose: every path that reaches fal goes
+// through ask(), so a refusal anywhere stops the whole reader, not just the ask that heard it.
+function holdOff(why: string, retryAfter: string | null | undefined) {
+  const named = Number(retryAfter);
+  const wait = Number.isFinite(named) && named > 0
+    ? Math.min(named * 1000, COOLDOWN_MAX_MS)
+    : COOLDOWN_MS;
+  coolUntil = Math.max(coolUntil, Date.now() + Math.max(COOLDOWN_MIN_MS, wait));
+  coolWhy = String(why || "Rate limit exceeded").slice(0, 120);
 }
 
 function num(v: unknown): number {
@@ -279,6 +314,44 @@ export async function falKeyList(secret: string): Promise<{ keys: FalKeyMeta[] }
   };
 }
 
+/**
+ * The card's own copy of fal's key list, held for ten minutes.
+ *
+ * This is not the answer the save path uses: a key he has just pasted is always asked about live,
+ * because "can this key spend money" must be true of the credential in front of us. Only the
+ * card's repeated glances are served from here — and a list that failed is not kept at all, so a
+ * broken key never gets to hide behind the good account's answer.
+ */
+async function cachedKeyList(secret: string): Promise<{ keys: FalKeyMeta[] } | { err: string }> {
+  const id = normalizeSecret(secret);
+  const held = listsBy.get(id);
+  if (held && Date.now() - held.at < PARTS_MS) return { keys: held.list };
+  const got = await falKeyList(id);
+  if ("err" in got) return got;
+  listsBy.set(id, { at: Date.now(), list: got.keys });
+  return got;
+}
+
+/**
+ * One key's spend in this window, held for ten minutes and re-asked when the window itself moves.
+ *
+ * The two figures this feeds are a breakdown under the account total, not the money: they say which
+ * of his pool keys did the burning. Asking for them on every glance is what took the reading from
+ * four requests per account to four plus two per key, all fired in the same instant.
+ */
+async function cachedKeySpend(secret: string, day: string, monthStart: string, end: string, keyId: string) {
+  const held = spendBy.get(keyId);
+  if (held && held.day === day && held.monthStart === monthStart && Date.now() - held.at < PARTS_MS) {
+    return { today: held.today, month: held.month };
+  }
+  const [kt, km] = await Promise.all([falSpend(secret, day, end, keyId), falSpend(secret, monthStart, end, keyId)]);
+  const out = { today: "err" in kt ? null : kt, month: "err" in km ? null : km };
+  if (!("err" in kt) && !("err" in km)) {
+    spendBy.set(keyId, { at: Date.now(), day, monthStart, ...out });
+  }
+  return out;
+}
+
 function utcDayStart(): string {
   return `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
 }
@@ -295,10 +368,33 @@ function tail(secret: string): string {
 export const falKeyTail = tail;
 
 let cache: { at: number; ttl: number; payload: FalBalancePayload } | null = null;
+// Set the moment fal answers 429 anywhere. Until it passes, the reader asks fal nothing at all
+// and serves the last figures it got, saying when they were taken.
+let coolUntil = 0, coolWhy = "";
+// The last reading in which fal actually named a balance. During a wait this is what the card
+// shows — including right after a page load, when the reading that set the wait has already
+// failed and the panel would otherwise have nothing to hold.
+let lastGood: FalBalancePayload | null = null;
+// The per-key spend figures and each account's key list, held apart from the balance because
+// neither moves between glances. `day` and `monthStart` are part of the entry so the figure a
+// new day begins cannot be served as today's spend.
+const spendBy = new Map<string, { at: number; day: string; monthStart: string; today: FalSpend | null; month: FalSpend | null }>();
+const listsBy = new Map<string, { at: number; list: FalKeyMeta[] }>();
 
-/** Drop the served reading: called after the key or the thresholds are written. */
+/**
+ * Drop the served reading: called after the key or the thresholds are written.
+ *
+ * It also ends the wait fal asked for, because the press that writes a key is a person saying
+ * "look again now" — and a card that refused to look for five minutes after he added an account
+ * would read as the fault he reported, not as a rate limit.
+ */
 export function forgetFalBalance(): void {
   cache = null;
+  lastGood = null;
+  coolUntil = 0;
+  coolWhy = "";
+  spendBy.clear();
+  listsBy.clear();
 }
 
 function ms(v: unknown): number | null {
@@ -486,7 +582,7 @@ async function readAccount(
     falAccountBalance(stored.key),
     falSpend(stored.key, day, end),
     falSpend(stored.key, monthStart, end),
-    falKeyList(stored.key),
+    cachedKeyList(stored.key),
   ]);
   const t = "err" in today ? null : today;
   const m = "err" in month ? null : month;
@@ -519,14 +615,96 @@ function perSecondMinutes(balance: number | null, perSecond: number | null): num
 }
 
 /**
+ * The card's shape before any figure exists: every money field null, never a zero. A blank
+ * and a $0.00 are different claims about his account and only one of them is a reading.
+ */
+function skeleton(configured: boolean, day: string, monthStart: string, end: string): FalBalancePayload {
+  return {
+    ok: false,
+    configured,
+    tail: "",
+    label: "",
+    warn_below: null,
+    alert_below: null,
+    balance: null,
+    currency: "USD",
+    today: null,
+    month: null,
+    per_second: null,
+    per_second_source: null,
+    minutes_left: null,
+    keys: [],
+    live: null,
+    no_frame: null,
+    checked_at: end,
+    from_cache: false,
+    rate_limited: false,
+    accounts: [],
+    window: { start: day, month_start: monthStart, end },
+    alert: { level: null, account: "" },
+    detail: configured
+      ? ""
+      : "No billing key is stored yet. On fal.ai open dashboard → API Keys and create one with the BILLING preset — it can read a balance and cannot start a call, so it is safe to keep here. Paste it and Save.",
+  };
+}
+
+/** A sentence that could be mistaken for a customer's failed call has to say it is not one. */
+const NOT_A_CALL = "Nothing of yours failed: the video service is reached with a minted token and the realtime host, never through these billing pages.";
+
+/**
+ * What the card gets while fal's wait is still running: the last figures fal really gave,
+ * counted forward for the calls on the line now, and a sentence naming the wait. Nothing is
+ * asked of fal to make it, which is the point.
+ */
+async function heldDuringWait(held: FalBalancePayload): Promise<FalBalancePayload> {
+  const waitS = Math.ceil((coolUntil - Date.now()) / 1000);
+  const out: FalBalancePayload = {
+    ...held,
+    from_cache: true,
+    rate_limited: true,
+    detail: `fal.ai asked us to slow down (${coolWhy || "it is throttling these reads"}), so nothing was asked of it for this reading — that wait has ${waitS}s left. These are its figures from ${new Date(held.checked_at).toISOString().slice(11, 19)}Z, counted forward for the calls running now. ${NOT_A_CALL}`,
+  };
+  out.live = await liveBurn(out.per_second, out.checked_at);
+  out.no_frame = await noFrame(utcMonthStart());
+  return out;
+}
+
+/** The wait was named before this worker ever got a balance, so there is nothing to hold. */
+async function nothingToHold(): Promise<FalBalancePayload> {
+  const day = utcDayStart(), monthStart = utcMonthStart(), end = new Date().toISOString();
+  const waitS = Math.ceil((coolUntil - Date.now()) / 1000);
+  return {
+    ...skeleton(true, day, monthStart, end),
+    rate_limited: true,
+    no_frame: await noFrame(monthStart),
+    detail: `fal.ai asked us to slow down (${coolWhy || "it is throttling these reads"}) and will not be asked again for ${waitS}s. This worker has not been given a balance by it yet, so there is no figure to hold; the card reads on its own once that wait passes. ${NOT_A_CALL}`,
+  };
+}
+
+/**
  * The whole card in one call: every stored account's balance and spend, the same two
  * figures per stored key, and the totals the card prints above them.
+ *
+ * `force` is the man saying "look again now" — the Check button. It ignores the held
+ * reading, and it is the one thing allowed to ask fal during a wait.
  */
-export async function falBalance(): Promise<FalBalancePayload> {
-  // fal's balance is held for a minute; the meter is not. A reading served from cache
+export async function falBalance(opts?: { force?: boolean }): Promise<FalBalancePayload> {
+  const force = opts?.force === true;
+
+  // First question, before anything is asked: is fal still in the wait it named? Every glance
+  // that ignored this is what made a one-minute limit renew itself for as long as his tab stayed
+  // open — the panel polls on fifteen seconds, so a refusal that is retried at fifteen seconds
+  // never lets the window refill. Nothing on the paid side is implicated by this branch: a call
+  // is opened with a minted token against the realtime host, never through these billing pages.
+  if (!force && Date.now() < coolUntil) {
+    const src = (cache && cache.payload.balance !== null ? cache.payload : null) ?? lastGood;
+    return src ? await heldDuringWait(src) : await nothingToHold();
+  }
+
+  // fal's balance is held for three minutes; the meter is not. A reading served from cache
   // still has to say what the calls running right now have taken since that reading,
   // or the countdown would freeze at the figure fal answered with.
-  if (cache && Date.now() - cache.at < cache.ttl) {
+  if (cache && !force && Date.now() - cache.at < cache.ttl) {
     const held = { ...cache.payload, from_cache: true };
     held.live = await liveBurn(held.per_second, held.checked_at);
     held.no_frame = await noFrame(utcMonthStart());
@@ -563,34 +741,10 @@ export async function falBalance(): Promise<FalBalancePayload> {
   // summed bill be true.
   const day = utcDayStart(), monthStart = utcMonthStart(), end = new Date().toISOString();
 
-  const base: FalBalancePayload = {
-    ok: false,
-    configured: secrets.length > 0,
-    tail: "",
-    label: "",
-    warn_below: null,
-    alert_below: null,
-    balance: null,
-    currency: "USD",
-    today: null,
-    month: null,
-    per_second: null,
-    per_second_source: null,
-    minutes_left: null,
-    keys: [],
-    live: null,
-    no_frame: null,
-    checked_at: end,
-    from_cache: false,
-    accounts: [],
-    window: { start: day, month_start: monthStart, end },
-    alert: { level: null, account: "" },
-    detail: secrets.length
-      ? ""
-      : "No billing key is stored yet. On fal.ai open dashboard → API Keys and create one with the BILLING preset — it can read a balance and cannot start a call, so it is safe to keep here. Paste it and Save.",
-  };
+  const base = skeleton(secrets.length > 0, day, monthStart, end);
   const keep = (payload: FalBalancePayload): FalBalancePayload => {
     cache = { at: Date.now(), ttl: payload.ok ? FRESH_MS : STALE_FAIL_MS, payload };
+    if (payload.accounts.some((a) => a.balance !== null)) lastGood = payload;
     return payload;
   };
   if (!secrets.length) return keep({ ...base, no_frame: await noFrame(monthStart) });
@@ -647,7 +801,7 @@ export async function falBalance(): Promise<FalBalancePayload> {
       // A key no account recognises is still asked about, against the first account, so
       // the row keeps a figure rather than a blank — and `known:false` says it is not a fact.
       const src = secrets[owner ?? 0];
-      const [kt, km] = await Promise.all([falSpend(src.key, day, end, keyId), falSpend(src.key, monthStart, end, keyId)]);
+      const spend = await cachedKeySpend(src.key, day, monthStart, end, keyId);
       return {
         id: String(k.id),
         label: String(k.label ?? ""),
@@ -655,8 +809,8 @@ export async function falBalance(): Promise<FalBalancePayload> {
         tail: tail(String(k.fal_key ?? "")),
         known: owner !== undefined,
         account_id: owner === undefined ? null : accounts[owner].id,
-        today: "err" in kt ? null : kt,
-        month: "err" in km ? null : km,
+        today: spend.today,
+        month: spend.month,
       };
     }),
   );
@@ -676,7 +830,7 @@ export async function falBalance(): Promise<FalBalancePayload> {
     return { level: l, account: x.label || x.tail };
   }, { level: null, account: "" });
 
-  return keep({
+  const fresh: FalBalancePayload = {
     ...base,
     ok: !failed,
     tail: one ? one.tail : "",
@@ -696,6 +850,14 @@ export async function falBalance(): Promise<FalBalancePayload> {
     live: await liveBurn(perSecond, base.checked_at),
     no_frame: nf,
     detail: failed || "All figures read from fal.ai.",
-  });
+  };
+  // The reading that just failed did so because fal told us to back off. Handing him that
+  // failure as a blank card would be the very thing he reported, so the last figures fal
+  // actually gave are served instead, with the wait written under them — and the branch at
+  // the top of this function keeps every later glance quiet until the wait passes.
+  if (!fresh.ok && fresh.balance === null && lastGood && Date.now() < coolUntil) {
+    return await heldDuringWait(lastGood);
+  }
+  return keep(fresh);
 }
 

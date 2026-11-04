@@ -233,8 +233,11 @@ Deno.serve(async (req: Request) => {
       // ok:true means this function did its job. Whether fal answered is a separate
       // matter the card reads off balance/detail, so a fal outage must not arrive as
       // a thrown request — "the balance could not be read" is a picture, not an error.
+      //
+      // force:true is the man pressing Check all now. It is what lets one deliberate press
+      // get past the wait fal.ai asked for; the fifteen-second poll never sends it.
       case "fal_balance":
-        return json({ ...(await falBalance()), ok: true });
+        return json({ ...(await falBalance({ force: body.force === true })), ok: true });
 
       // { key?, id? }  -- what does this key see? Saves nothing, spends nothing. A blank key
       // re-checks a stored one, which is what the pool's Verify button means. With several
