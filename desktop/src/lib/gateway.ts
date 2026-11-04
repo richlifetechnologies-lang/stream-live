@@ -287,6 +287,22 @@ export function reportCallFailure(sessionId: string | null, stage: string, detai
   logAccount(`call failure reported (${stage}): ${detail}`);
 }
 
+/**
+ * Which hand closed the call, in one word.
+ *
+ * A customer pressing Stop and a video dying on its own leave the same two rows behind — one
+ * saying the call opened, one saying it shut — so the difference could only ever be guessed at
+ * afterwards from what was missing. This machine is the only witness, so it says so at the
+ * second the call comes down. Like the failure report above, a report that does not land must
+ * never become a second problem for the person already holding one.
+ */
+export function reportCallEnd(sessionId: string | null, stoppedBy: "user" | "app"): void {
+  if (!sessionId) return;
+  void gateway.raw
+    .rpc("sl_report_call_end", { p_session_id: sessionId, p_stopped_by: stoppedBy })
+    .then(() => undefined, () => undefined);
+}
+
 // Once per program run: a machine that is hours off stays hours off, and the log is
 // interesting for its first entry, not its hundredth.
 let clockSkewLogged = false;

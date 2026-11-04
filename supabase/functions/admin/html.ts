@@ -149,6 +149,7 @@ export const ADMIN_HTML = `<!doctype html>
       <button data-tab="split">Trial vs Paid</button>
       <button data-tab="burn">Burn rates</button>
       <button data-tab="sessions">Calls</button>
+      <button data-tab="ends">Call ends</button>
       <button data-tab="airtime">Airtime</button>
       <button data-tab="gateway">Gateway</button>
       <button data-tab="plans">Plans</button>
@@ -831,6 +832,58 @@ export const ADMIN_HTML = `<!doctype html>
       </div>
     </section>
 
+    <!-- ══ TAB: CALL ENDS ══════════════════════════════════════════════════ -->
+    <section id="tab-ends" class="hidden">
+      <div class="card">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <h2 style="font-size:14px;margin:0">Who closed every paid call, and why</h2>
+          <div class="row" style="gap:8px">
+            <select id="endsWindow" style="max-width:150px">
+              <option value="1">Today</option>
+              <option value="7" selected>Last 7 days</option>
+              <option value="30">Last 30 days</option>
+            </select>
+            <select id="endsFilter" style="max-width:210px">
+              <option value="all" selected>Every paid call</option>
+              <option value="sudden">Only the ones he did not stop</option>
+              <option value="hand">Only the ones he stopped</option>
+              <option value="blank">Only calls with nothing delivered</option>
+              <option value="mid">Only calls that stopped mid-way</option>
+              <option value="unrecorded">Only the ones not recorded</option>
+            </select>
+            <input id="endsSearch" placeholder="filter by email" style="max-width:200px" />
+            <button id="endsRefresh">Refresh</button>
+          </div>
+        </div>
+        <p class="muted" style="margin:6px 0 12px">
+          The paid line only — every call that ran on the video service you pay for, from the app's
+          three tabs. Two questions are answered in separate columns, because they are not the same
+          question: <b>who closed it</b> is this machine reporting the customer's own hand on Stop, and
+          <b>what the app wrote down</b> is the reason it saw. A call can have both: he pressed Stop a
+          few seconds after the line refused him.
+          <b>Nothing here is a price or a minute figure</b> — that is the Calls and Airtime tabs.
+        </p>
+        <div class="grid4" id="endsStats"></div>
+        <div style="overflow:auto;margin-top:12px">
+          <table id="endsTable">
+            <thead><tr><th>User</th><th>Tab</th><th>Call type</th><th>Device</th><th>Started</th><th style="text-align:right">On air</th><th>Who closed it</th><th>What the app wrote down</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div id="endsMsg"></div>
+      </div>
+
+      <div class="card">
+        <h2 style="font-size:14px;margin:0 0 6px">The three tabs on his desktop, separately</h2>
+        <p class="muted" style="margin:0 0 12px">
+          Every call row carries which of his three tabs dialled it, so a tab that fails more than the
+          others shows up here instead of being averaged away. A call from before the three-tab split
+          keeps the tab name it dialled with and is counted under the tab it belongs to today.
+        </p>
+        <div class="grid3" id="endsTabs"></div>
+      </div>
+    </section>
+
     <!-- ══ TAB: AIRTIME ════════════════════════════════════════════════════ -->
     <section id="tab-airtime" class="hidden">
       <div class="card">
@@ -1424,6 +1477,7 @@ export const ADMIN_HTML = `<!doctype html>
     engines: [loadConfig],
     burn: [loadRates],
     sessions: [loadSessions],
+    ends: [loadEnds],
     airtime: [loadAirtime],
     gateway: [loadConfig],
     plans: [loadPlans, loadGhsRate],
@@ -4158,6 +4212,223 @@ export const ADMIN_HTML = `<!doctype html>
   $("airRefresh").onclick = loadAirtime;
   $("airSearch").oninput = renderAirtime;
 
+  // ══ CALL ENDS ═════════════════════════════════════════════════════════════
+  // Two facts, printed in two columns, because folding them together is how a support reply ends up
+  // blaming the wrong machine. "Who closed it" is the app's own report of the customer's hand on
+  // Stop — a build before 1.8.35 never sent it, so its rows say NOT RECORDED rather than guessing.
+  // "What the app wrote down" is the reason the engine or this machine saw, on record since 1.8.31.
+  // A call can honestly carry both: he pressed Stop four seconds after the line refused him.
+  //
+  // Nothing on this tab is a price, a minute figure or a billing column — that is Calls and Airtime.
+  const ENDS_TAB = {
+    "video-audio": "Video + Audio",
+    "video-only": "Video Call",
+    "audio-only": "Voice Clone Only",
+  };
+  const ENDS_TAB_LINE = {
+    "video-audio": "AI picture with a cloned voice on the same call.",
+    "video-only": "AI picture with his own voice.",
+    "audio-only": "His cloned voice with no picture at all.",
+  };
+  // What the delivery stamp means for this kind of call: the same column says "a frame arrived" on a
+  // picture call and "the voice came back" on a cloning call, and printing "no picture" against a tab
+  // that was never sent one would invent a fault out of a design.
+  const ENDS_KIND = { video: "picture", video_audio: "picture", audio: "cloned voice" };
+  let ENDS_CALLS = [];
+  let ENDS_FAIL = {}; // session id -> the lines that app wrote down about this call
+  let ENDS_TRUNC = "";
+
+  async function loadEnds() {
+    const days = N($("endsWindow").value) || 7;
+    const since = new Date(serverNowMs() - days * 864e5).toISOString();
+    const [ses, fls] = await Promise.all([
+      sb.from("usage_sessions")
+        .select("id, user_id, tab, modality, device_id, started_at, media_started_at, ended_at, real_minutes, stopped_by")
+        .eq("engine", "fal").gte("started_at", since)
+        .order("started_at", { ascending: false }).limit(1000),
+      sb.from("call_failures")
+        .select("session_id, stage, detail, created_at").gte("created_at", since).limit(4000),
+    ]);
+    if (ses.error) return msg("endsMsg", "Could not read the paid calls: " + ses.error.message);
+    if (fls.error) return msg("endsMsg", "Could not read what the apps wrote down: " + fls.error.message);
+    ENDS_CALLS = ses.data || [];
+    ENDS_FAIL = {};
+    for (const f of (fls.data || [])) {
+      if (!f.session_id) continue;
+      (ENDS_FAIL[f.session_id] = ENDS_FAIL[f.session_id] || []).push(f);
+    }
+    ENDS_TRUNC = (ENDS_CALLS.length >= 1000 ? "The window holds more than 1,000 paid calls, so the oldest are not read. " : "")
+      + ((fls.data || []).length >= 4000 ? "More than 4,000 fault lines fell in the window, so a call's earliest lines may be missing from its detail. " : "");
+    await emailsOf(ENDS_CALLS.map((r) => r.user_id));
+    renderEnds();
+  }
+
+  // Measured from the row's own two stamps, which makes it an upper bound on the call rather than
+  // the metered time — the meter starts at the first frame, and an open call has no end yet.
+  function endsSpan(r) {
+    if (!r.started_at) return "—";
+    const to = r.ended_at ? new Date(r.ended_at) : new Date(serverNowMs());
+    const s = Math.max(0, Math.round((to - new Date(r.started_at)) / 1000));
+    return s >= 3600 ? (s / 3600).toFixed(1) + " h" : s >= 120 ? Math.round(s / 60) + " min" : s + " s";
+  }
+
+  function endsHand(r) {
+    if (!r.ended_at) return { pill: "warn", label: "Still on air", note: "This call has not closed, so nothing has been reported about how it ends." };
+    if (r.stopped_by === "user") return { pill: "ok", label: "He pressed Stop", note: "His own hand on the Stop control, reported by his app the second the call came down." };
+    if (r.stopped_by === "app") return { pill: "n", label: "The app closed it", note: "His app brought the call down: one of its own timers, the picture never arriving, the connection going, or the line shutting." };
+    return { pill: "n", label: "Not recorded", note: "Either his build predates this column — older than 1.8.35 — or the app was killed mid-call. Nothing here guesses at it." };
+  }
+
+  // The app's own wording, sorted into the handful of answers a person can act on. Every string
+  // tested here was WRITTEN by the desktop app (the four named blanks, the line's own close) or by
+  // the video service inside the app's sentence — none of it is invented on this page.
+  function endsReason(r) {
+    const kind = ENDS_KIND[r.modality] || "picture";
+    const lines = (ENDS_FAIL[r.id] || []).slice()
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+    const said = (re) => lines.find((l) => re.test((l.stage || "") + " " + (l.detail || "")));
+    const mk = (key, pill, label, side, why) => ({ key, pill, label, side, why, kind, lines });
+
+    if (!r.media_started_at) {
+      const ref = said(/cause=line_full|concurrent session limit|session_limit|at capacity|lines? (are )?(full|busy)|too many (concurrent )?(sessions|calls)/i);
+      if (ref) return mk("refused", "fail", "No " + kind + ": the video line refused the dial", "our video line", ref);
+      const cam = said(/cause=camera_stalled/i);
+      if (cam) return mk("camera", "fail", "No " + kind + ": his camera fed no frame", "his machine", cam);
+      const nc = said(/cause=never_connected/i);
+      if (nc) return mk("never", "fail", "No " + kind + ": no connection ever came up", "his machine", nc);
+      const hold = said(/cause=picture_hold/i);
+      if (hold) return mk("hold", "fail", "No " + kind + ": connected, and the line carried nothing", "our video line", hold);
+      if (lines.length) return mk("blank_said", "warn", "No " + kind + ", and the app wrote a fault", "the app's own words, below", lines[0]);
+      return mk("blank_quiet", "none", "No " + kind + ", nothing written down", "not on record", null);
+    }
+
+    const mid = said(/video line closed/i);
+    if (mid) {
+      const d = String(mid.detail || "");
+      const side = /the video service closed the line/i.test(d) ? "the video service"
+        : /transport went away/i.test(d) ? "the connection between his machine and our line"
+        : "our video line";
+      return mk("mid", "warn", "Stopped mid-call", side, mid);
+    }
+    if (lines.length) return mk("fault_late", "warn", "A fault was written down on a call that was moving", "the app's own words, below", lines[0]);
+    if (r.stopped_by === "user") return mk("clean_hand", "ok", "Nothing written down — he stopped it", "he chose to stop", null);
+    return mk("clean_quiet", "none", "Nothing written down", "no fault on record", null);
+  }
+
+  // His own definition of a sudden stop: a call he did not press Stop on, that either delivered
+  // nothing or was moving and then came down.
+  function endsSudden(x) {
+    return x.r.stopped_by !== "user" && (["refused", "camera", "never", "hold", "blank_said", "blank_quiet", "mid"].includes(x.why.key));
+  }
+
+  function endsMatches(which, x) {
+    if (which === "hand") return x.r.stopped_by === "user";
+    if (which === "sudden") return endsSudden(x);
+    if (which === "blank") return !x.r.media_started_at && !!x.r.ended_at;
+    if (which === "mid") return x.why.key === "mid";
+    if (which === "unrecorded") return !x.r.stopped_by && !!x.r.ended_at;
+    return true;
+  }
+
+  function endsMini(v, l) {
+    return '<div style="display:flex;justify-content:space-between;gap:10px;font-size:12px"><span class="muted">'
+      + esc(l) + '</span><b class="mono">' + esc(v) + "</b></div>";
+  }
+
+  function endsDetail(r, x) {
+    const facts = [
+      r.started_at ? "opened " + when(r.started_at) : "",
+      r.ended_at ? "closed " + when(r.ended_at) : "still open",
+      "span " + endsSpan(r) + " (an upper bound, not the metered time)",
+      ENDS_KIND[r.modality] === "picture"
+        ? (r.media_started_at ? "a picture arrived " + when(r.media_started_at) : "no picture ever arrived on this call")
+        : (r.media_started_at ? "the cloned voice came back " + when(r.media_started_at) : "no cloned voice ever came back"),
+      "machine " + (r.device_id || "—"),
+      "call " + shortId(r.id),
+      x.hand.note,
+    ].filter(Boolean).join(" · ");
+    const lines = x.why.lines.length
+      ? x.why.lines.slice(0, 6).map((l) => {
+          const at = r.started_at ? Math.max(0, Math.round((new Date(l.created_at) - new Date(r.started_at)) / 1000)) : null;
+          const tone = l.stage === "gateway" || l.stage === "video line closed" ? "warn" : "fail";
+          return '<div style="margin-top:6px"><span class="pill ' + tone + '">' + esc(l.stage || "note") + "</span> "
+            + '<span class="muted">' + when(l.created_at) + (at === null ? "" : " · " + at + " s into the call") + "</span>"
+            + '<div class="muted mono" style="margin-top:2px;white-space:normal">' + esc(l.detail || "") + "</div></div>";
+        }).join("")
+        + (x.why.lines.length > 6 ? '<div class="muted">…and ' + (x.why.lines.length - 6) + " more line(s) on this call.</div>" : "")
+      : '<div class="muted" style="margin-top:6px">His app wrote no fault line against this call at all.</div>';
+    return '<tr data-ends-detail class="hidden"><td colspan="9" class="muted">' + esc(facts) + lines + "</td></tr>";
+  }
+
+  function renderEnds() {
+    const all = ENDS_CALLS.map((r) => ({ r, hand: endsHand(r), why: endsReason(r) }));
+    const q = ($("endsSearch").value || "").trim().toLowerCase();
+    const shown = all.filter((x) => !q || String(EMAIL_OF[x.r.user_id] || "").toLowerCase().includes(q))
+      .filter((x) => endsMatches($("endsFilter").value, x));
+
+    // The tiles cover the whole window on purpose: the two boxes change the list, never the totals.
+    const by = (f) => all.filter(f).length;
+    $("endsStats").innerHTML = [
+      [all.length, "paid calls in the window"],
+      [by((x) => x.r.stopped_by === "user"), "he pressed Stop"],
+      [by((x) => x.r.stopped_by === "app"), "the app closed it"],
+      [by((x) => !x.r.stopped_by && !!x.r.ended_at), "not recorded by his build"],
+      [by((x) => !!x.r.ended_at && !x.r.media_started_at), "nothing was delivered"],
+      [by((x) => x.why.key === "mid"), "stopped mid-call"],
+      [new Set(all.map((x) => x.r.user_id)).size, "accounts called"],
+      [new Set(all.map((x) => x.r.device_id || "—")).size, "machines"],
+    ].map((s) => '<div class="stat"><div class="v">' + esc(s[0]) + '</div><div class="l">' + esc(s[1]) + "</div></div>").join("");
+
+    const list = shown.slice(0, 200);
+    $("endsTable").querySelector("tbody").innerHTML = list.map((x) => '<tr>'
+      + '<td><b>' + esc(EMAIL_OF[x.r.user_id] || shortId(x.r.user_id)) + "</b></td>"
+      + '<td class="muted">' + esc(ENDS_TAB[x.r.tab] || x.r.tab || "—") + "</td>"
+      + '<td class="muted">' + esc(MOD_LABEL[x.r.modality] || x.r.modality || "—") + "</td>"
+      + '<td class="muted mono">' + esc(x.r.device_id || "—") + "</td>"
+      + '<td class="muted">' + when(x.r.started_at) + "</td>"
+      + '<td class="mono" style="text-align:right">' + esc(endsSpan(x.r)) + "</td>"
+      + '<td><span class="pill ' + x.hand.pill + '">' + esc(x.hand.label) + "</span></td>"
+      + '<td><span class="pill ' + x.why.pill + '">' + esc(x.why.label) + '</span> <span class="muted">· ' + esc(x.why.side) + "</span></td>"
+      + '<td style="white-space:nowrap"><button data-act="ends-detail">+</button></td>'
+      + "</tr>" + endsDetail(x.r, x)).join("")
+      || '<tr><td colspan="9" class="muted">'
+        + (all.length ? "No paid call in this window matches that filter." : "No paid call has closed in this window at all.")
+        + "</td></tr>";
+
+    $("endsTabs").innerHTML = Object.keys(ENDS_TAB).map((id) => {
+      const set = all.filter((x) => (x.r.tab || "video-audio") === id);
+      return '<div class="stat"><div style="font-weight:800;font-size:13px">' + esc(ENDS_TAB[id]) + "</div>"
+        + '<div class="muted" style="margin:2px 0 8px">' + esc(ENDS_TAB_LINE[id]) + "</div>"
+        + endsMini(set.length, "calls dialled from this tab")
+        + endsMini(set.filter((x) => x.r.stopped_by === "user").length, "he pressed Stop")
+        + endsMini(set.filter((x) => x.r.stopped_by === "app").length, "the app closed it")
+        + endsMini(set.filter((x) => !x.r.stopped_by && !!x.r.ended_at).length, "not recorded by his build")
+        + endsMini(set.filter((x) => !!x.r.ended_at && !x.r.media_started_at).length, "nothing delivered")
+        + endsMini(set.filter((x) => x.why.key === "mid").length, "stopped mid-call")
+        + "</div>";
+    }).join("");
+
+    const others = all.filter((x) => !ENDS_TAB[x.r.tab]).length;
+    const notes = [];
+    if (shown.length > list.length) notes.push("Showing the most recent " + list.length + " of " + shown.length + " calls in that filter.");
+    if (others) notes.push(others + " row(s) carry a tab name from a build older than the three tabs, so they are listed in the table but not counted in the three tiles.");
+    if (ENDS_TRUNC) notes.push(ENDS_TRUNC.trim());
+    msg("endsMsg", notes.join(" "), notes.length ? "ok" : "err");
+  }
+
+  function endsToggle(btn) {
+    const row = btn.closest("tr");
+    const det = row ? row.nextElementSibling : null;
+    if (!det || !det.hasAttribute("data-ends-detail")) return;
+    btn.textContent = det.classList.toggle("hidden") ? "+" : "−";
+  }
+
+  $("endsRefresh").onclick = loadEnds;
+  $("endsWindow").onchange = loadEnds;
+  $("endsFilter").onchange = renderEnds;
+  $("endsSearch").oninput = renderEnds;
+
+
   // Delegated actions that live inside table rows.
   document.addEventListener("click", async (e) => {
     const b = e.target.closest("button[data-act]");
@@ -4195,6 +4466,7 @@ export const ADMIN_HTML = `<!doctype html>
       await revokeDevice(CUR.user_id, id);
       return;
     }
+    if (b.dataset.act === "ends-detail") return endsToggle(b);
     if (b.dataset.act === "end") return endSession(id);
     if (b.dataset.act === "reap1") {
       try {

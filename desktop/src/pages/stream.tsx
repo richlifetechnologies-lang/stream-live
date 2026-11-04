@@ -6,7 +6,7 @@ import { useToast } from "../hooks/use-toast";
 import {
   getSavedVoices, addSavedVoice, removeSavedVoice, type SavedVoice,
 } from "../lib/credentials";
-import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, cloneOpen, voiceCloneOpen, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure, noteClockSkew } from "../lib/gateway";
+import { gateway, deviceId, useAccount, useAdminContact, bucketFor, hasMinutes, cloneOpen, voiceCloneOpen, modalityForTab, refreshBalances, beginLease, updateLease, endLease, markMedia, reportCallFailure, reportCallEnd, noteClockSkew } from "../lib/gateway";
 import { stopDeadlineAt } from "../lib/minutes";
 import { MinuteMeter } from "../components/meter";
 import { Stage, PageHead, Pill, PillRow } from "../components/d2";
@@ -1230,6 +1230,11 @@ export default function StreamPage() {
   const videoSessionRef = useRef<VideoSession|null>(null);
   // Open lease id: heartbeat/endCall live on the gateway, this mirrors it for cleanup.
   const sessionIdRef    = useRef<string|null>(null);
+  // Did this machine's own hand close the call? Set by the Stop control and cleared when a new
+  // lease opens, so the teardown can only ever report it for the call it belongs to. Nothing
+  // else in the page reads it: it is written once, on the way out, and it decides one word in
+  // the record — whether he stopped the call or the call was stopped on him.
+  const stoppedByHandRef = useRef(false);
   // Monotonic session generation. A socket that dies late (a previous attempt's
   // ghost) must not tear down the session the user is watching now.
   const sessionGenRef = useRef(0);
@@ -1442,6 +1447,7 @@ export default function StreamPage() {
   const switchTab = useCallback((tab: TabId) => {
     tabChosen.current = true;
     if (isStreaming || isStarting) {
+      stoppedByHandRef.current = true;
       teardownStream();
       toast({ title: t("Stream stopped"), description: t("Switching modes.") });
     } else {
@@ -1982,6 +1988,11 @@ export default function StreamPage() {
     isStartingRef.current = false;
     closingRef.current = true; setIsClosing(true);
     try {
+      // Say who closed this call before anything else moves, because every path below can
+      // throw and the answer is worth nothing if it is lost with the rest of the teardown.
+      // Taken from the ref, not read later: the id is cleared a few lines down.
+      reportCallEnd(sessionIdRef.current, stoppedByHandRef.current ? "user" : "app");
+      stoppedByHandRef.current = false;
       endLease();
       releaseAirHold();
       cloneThisCallRef.current = false;
@@ -2213,6 +2224,7 @@ export default function StreamPage() {
       camFedFrameRef.current   = false;
       lineConnectedRef.current = false;
       paintedRef.current       = false;
+      stoppedByHandRef.current = false;
 
       setConnStep(voiceOnly ? "voice" : "engine");
       const style  = STYLES.find(s => s.id === selectedStyle)!;
@@ -2561,7 +2573,10 @@ export default function StreamPage() {
   }, [credsMissing, cameraReady, voiceTab, activeTab, startBlocked, cloneLocked, needsVoice,
       toast, setLocation, account, runStartLadder]);
 
-  const handleStop = useCallback(() => teardownStream(), [teardownStream]);
+  // The one button that both dials and hangs up. Pressed while a call runs, it is his own hand
+  // ending it, and that is the fact his panel needs — so it is written down here, on the way in,
+  // and reported by the teardown this hands over to.
+  const handleStop = useCallback(() => { stoppedByHandRef.current = true; teardownStream(); }, [teardownStream]);
 
   // ─── Prompt updates ────────────────────────────────────────────────────────
   const handlePromptChange = useCallback((p: string) => {
@@ -2647,7 +2662,9 @@ export default function StreamPage() {
 
   useEffect(() => {
     const h = (e: MessageEvent) => {
-      if (e.data === "stream-live-stop") teardownStream();
+      // The picture windows carry their own Stop button, and a press there is his hand on the
+      // same control — so it is recorded as his, not as a call that came down on its own.
+      if (e.data === "stream-live-stop") { stoppedByHandRef.current = true; teardownStream(); }
       else if (e.data === "stream-live-reconnect") {
         // The cable came back and asked for its call. It gets the same kind of call back, which
         // is the one this tab dials — and a picture call needs his camera running first.
@@ -2663,8 +2680,8 @@ export default function StreamPage() {
   useEffect(() => {
     const k = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (isFullscreen) { teardownStream(); setIsFullscreen(false); return; }
-        closeAll(); if (isStreaming) teardownStream(); return;
+        if (isFullscreen) { stoppedByHandRef.current = true; teardownStream(); setIsFullscreen(false); return; }
+        closeAll(); if (isStreaming) { stoppedByHandRef.current = true; teardownStream(); } return;
       }
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
