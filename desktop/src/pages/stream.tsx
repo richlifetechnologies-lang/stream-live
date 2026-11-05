@@ -428,10 +428,11 @@ class AudioSyncPipeline {
 // This engine lives in the pause between his words. The microphone is recorded
 // continuously, its level is watched, and when he stops talking - or after a second and
 // a half of talking without a breath - the piece is closed, handed to the voice service,
-// and the voice that comes back is played onto the cable. One piece is ever in flight:
-// while an answer is still out there the recorder simply keeps collecting, so a slow
-// reply makes his words late rather than lost, and cutting on a pause means a word is
-// never sliced in half by a stopwatch.
+// and the voice that comes back is played onto the cable. A few pieces may be with the
+// service at the same time, and the recorder never stops between them: with only one out
+// there, the next piece sat open while the service thought, so every sentence he spoke
+// arrived at the caller later than the one before it. Cutting on a pause still means a
+// word is never sliced in half by a stopwatch.
 
 const PUMP_MS             = 60;   // how often the microphone level is looked at
 const CLONE_MAX_PIECE_MS  = 1500; // ...unless he is still talking, then send it anyway
@@ -440,6 +441,11 @@ const CLONE_IDLE_MS       = 5000; // a piece holding no speech at all is thrown 
 // A request that never lands must not hold the pipeline shut for the rest of the call, so the
 // wait has a deadline: the piece is abandoned and his next words are tried again.
 const CLONE_SEND_MS       = 6000;
+// How many pieces may be with the service at once. Measured on his own recorded call, an
+// answer takes about 2.2 s to come back and a spoken piece runs about 1.5 s, so two would
+// already cover the wait; a third is headroom for the slow replies, and it is a ceiling so a
+// talker who never pauses cannot open an unlimited number of requests on one call.
+const CLONE_MAX_IN_FLIGHT = 3;
 
 // A cloning call is not on air until the cloned voice has answered once, because a call
 // whose voice never arrived is not the call the customer bought. The hold is bounded so a
@@ -483,6 +489,9 @@ async function voiceDoorReason(): Promise<string | null> {
   } catch { return "upstream_key"; }
 }
 
+/** A cloned answer that holds real speech, with the part of it worth putting on air. */
+type ClonedAnswer = { audio: AudioBuffer; head: number; kept: number; waitedMs: number; serviceMs: number };
+
 class VoiceCloningEngine {
   private recorder:   MediaRecorder | null = null;
   private audioCtx:   AudioContext  | null = null;
@@ -501,9 +510,17 @@ class VoiceCloningEngine {
   private inFreq:     Uint8Array<ArrayBuffer> = new Uint8Array(0);
   private gate = new VoiceGate();
   private pump: ReturnType<typeof setInterval> | null = null;
-  // One piece at a time, and no words dropped while one is out: the recorder just keeps
-  // gathering until the answer lands.
-  private busy = false;
+  // How many pieces are with the voice service right now, and whether one is mid-hand-over
+  // (the recorder stopped for it and has not opened for the next one yet). The piece is cut
+  // on his own pause, not on the answer's arrival, so the two are separate things.
+  private inFlight = 0;
+  private cutting  = false;
+  // Which piece an answer belongs to, and whose turn it is to go on air. The service
+  // finishes requests in whatever order it likes; his sentences must not reach the caller
+  // shuffled, so an answer that lands early waits here for the one ahead of it.
+  private seqAssign = 0;
+  private seqAir    = 0;
+  private settled   = new Map<number, ClonedAnswer | null>();
   private pieceMs  = 0;
   private speechMs = 0;
 
@@ -531,7 +548,15 @@ class VoiceCloningEngine {
   secondsIn  = 0;
   secondsOut = 0;
   lastAnswerMs = 0;
-  private sentAt = 0;
+  // How much of the last answer's wait belonged to the voice service itself, as the relay that
+  // carries the key reports it. Zero means this build has not been told, and the panel then
+  // quotes the single figure it can prove.
+  serviceMs = 0;
+  // The moment the microphone itself stopped feeding this app while the call was running -
+  // unplugged, handed to another program, or switched off at the machine. The call closes
+  // either way; this is what lets the screen name the microphone instead of blaming the
+  // voice service for a fault that is on the desk.
+  micGone = false;
   // Fires once, on the first cloned audio that actually reaches the cable. A cloning call
   // is not on air before that, so this is what releases the held money clock.
   onFirstAnswer?: () => void;
@@ -574,6 +599,11 @@ class VoiceCloningEngine {
     this.answeredAt = 0;
     this.piecesSent = 0; this.piecesBack = 0; this.piecesEmpty = 0;
     this.secondsIn = 0; this.secondsOut = 0; this.lastAnswerMs = 0;
+    // A call that is started twice on one engine must not inherit the previous call's
+    // outstanding pieces or its sentence order.
+    this.inFlight = 0; this.cutting = false;
+    this.seqAssign = 0; this.seqAir = 0; this.settled.clear();
+    this.micGone = false; this.serviceMs = 0;
     this.audioCtx = new AudioContext();
     // Constructed outside the click's user activation, so this context can come up
     // suspended. Left alone, every chunk decodes, every meter moves, and nothing
@@ -608,12 +638,20 @@ class VoiceCloningEngine {
     this.inSrc.connect(this.inAnalyser);
     this.gate.reset();
 
+    // The microphone is allowed to announce its own death. A track that ends - unplugged, or
+    // taken by another program - used to look exactly like a voice service that had stopped
+    // answering, because both leave the meter flat. This one line tells the two apart.
+    micStream.getAudioTracks().forEach(tr => {
+      tr.addEventListener("ended", () => { this.micGone = true; });
+    });
+
     const chunkMs = 2000;
     const chunks: Blob[] = [];
     this.recorder = new MediaRecorder(micStream, { mimeType: "audio/webm;codecs=opus" });
 
     this.recorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.push(ev.data); };
     this.recorder.onstop = () => {
+      this.cutting = false;
       if (!this.running) return;
       const blob  = new Blob(chunks.splice(0), { type: "audio/webm" });
       const worth = blob.size > 0 && this.speechMs >= CLONE_MIN_SPEECH_MS;
@@ -624,8 +662,8 @@ class VoiceCloningEngine {
       // nothing he says while the service is thinking is lost.
       this.recorder!.start(chunkMs);
       setTimeout(() => { if (this.running && this.recorder?.state === "recording") this.recorder.requestData(); }, chunkMs);
-      if (worth) void this._process(blob);
-      else this.busy = false;
+      if (worth) void this._process(blob, this.seqAssign++);
+      else this.inFlight -= 1;
     };
     this.recorder.start(chunkMs);
     setTimeout(() => { if (this.running && this.recorder?.state === "recording") this.recorder.requestData(); }, chunkMs);
@@ -639,10 +677,11 @@ class VoiceCloningEngine {
     this.gate.update(level, dtMs / 1000);
     this.pieceMs += dtMs;
     if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; }
-    // One answer at a time. While one is out there the piece simply keeps growing, which
-    // makes his words late rather than dropped - and a dropped word is a caller who heard
-    // half a sentence.
-    if (this.busy) return;
+    // A piece is closed on his own pause, not when the last answer happens to arrive. Holding
+    // it open until then stretched every sentence with silence while the service thought, and
+    // the cloned voice fell further and further behind the way he speaks. The number of
+    // requests is still bounded, so one call cannot open an unlimited line.
+    if (this.cutting || this.inFlight >= CLONE_MAX_IN_FLIGHT) return;
     // His own detector decides when a sentence is over, so a word is never sliced by a
     // stopwatch and a pause in the conversation is never read as a fault.
     if (this.speechMs >= CLONE_MIN_SPEECH_MS &&
@@ -652,8 +691,15 @@ class VoiceCloningEngine {
 
   // Close the piece. The stop handler restarts the recorder and does the sending.
   private _cut() {
-    this.busy = true;
-    try { this.recorder?.stop(); } catch { this.busy = false; }
+    if (!this.recorder || this.recorder.state !== "recording") return;
+    this.inFlight += 1;
+    this.cutting   = true;
+    try {
+      this.recorder.stop();
+    } catch {
+      this.inFlight -= 1;
+      this.cutting   = false;
+    }
   }
 
   // The service answers faster on raw samples than on a compressed file, and it promises
@@ -676,9 +722,8 @@ class VoiceCloningEngine {
     return out.buffer;
   }
 
-  // One piece of his voice, handed to the service with a deadline on the answer. Without the
-  // deadline a single lost request on a flaky connection would keep the pipeline busy forever,
-  // which means no cloned voice for the rest of the call.
+  // The deadline on one answer. Without it a request that never lands would hold its place in
+  // the sentence order forever, and every sentence after it would wait with it.
   private async _send(form: FormData): Promise<Response> {
     const call = this.call!(`/v1/speech-to-speech/${this.voiceId}/stream`, form);
     const deadline = new Promise<never>((_, reject) => {
@@ -687,9 +732,15 @@ class VoiceCloningEngine {
     return Promise.race([call, deadline]);
   }
 
-  private async _process(blob: Blob) {
-    if (!this.running || !this.audioCtx || !this.call || !this.voiceId) { this.busy = false; return; }
-    try {      const pcm = await this._toPcm16k(blob);
+  // One piece of his voice, handed to the service with a deadline on the answer, and put in
+  // its place in the sentence order whatever the answer turns out to be. Without the deadline
+  // a single lost request would hold its place in that order forever, which means no cloned
+  // voice for the rest of the call.
+  private async _process(blob: Blob, seq: number) {
+    let answer: ClonedAnswer | null = null;
+    try {
+      if (!this.running || !this.audioCtx || !this.call || !this.voiceId) return;
+      const pcm = await this._toPcm16k(blob);
       if (!pcm || !this.running) return;
       // An empty room is not a sentence. This is judged off the bytes about to leave, not off
       // the level detector, because a quiet room recorded right after a loud passage reads as
@@ -708,9 +759,12 @@ class VoiceCloningEngine {
       form.append("file_format", "pcm_s16le_16");
       form.append("model_id", "eleven_multilingual_sts_v2");
       form.append("voice_settings", JSON.stringify({ stability: 0.5, similarity_boost: 0.8, style: 0.0, use_speaker_boost: true }));
-      this.sentAt = performance.now();
+      const sentAt = performance.now();
       const res = await this._send(form);
       if (!res.ok) { console.warn(`[voice] engine returned HTTP ${res.status}`); this.onError?.(endReasonMessage("upstream_key")); return; }
+      // The relay stamps how long the voice service itself took to start answering. Whatever is
+      // left of this piece's wait is the way there and back, which is the split the panel shows.
+      const serviceMs = Math.max(0, Math.round(Number(res.headers.get("x-voice-service-ms") ?? 0) || 0));
       const buf = await res.arrayBuffer();
       if (!this.running || !this.audioCtx) return;
       if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
@@ -726,34 +780,55 @@ class VoiceCloningEngine {
         console.warn("[voice] answer held no speech, not played");
         return;
       }
-      this.piecesBack += 1;
-      this.secondsOut += trim.kept;
-      this.lastAnswerMs = Math.round(performance.now() - this.sentAt);
-      const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
-      const src = this.audioCtx.createBufferSource();
-      src.buffer = decoded; src.connect(this.voiceBus!); src.start(playAt, trim.head, trim.kept);
-      // Answered: the watchdog that decides whether this call is still worth running is
-      // reset here, the moment real cloned audio is on its way to the cable. The first
-      // time it happens is also the moment the call goes on air and starts being metered.
-      const first = this.answeredAt === 0;
-      this.answeredAt = Date.now();
-      if (first) this.onFirstAnswer?.();
-      this.nextPlayAt = playAt + trim.kept;
-      // Level is read through the player, not off these samples. Measuring the audio
-      // that merely arrived drew a dancing wave over total silence whenever the engine
-      // was asleep, which is how a dead cable got mistaken for a working one.
-      const live = this.playerLive ? this.playerLive() : true;
-      if (!live) { this.onVu?.(0); return; }
-      const data = decoded.getChannelData(0);
-      const from = Math.floor(trim.head * decoded.sampleRate);
-      const to = Math.min(data.length, Math.floor((trim.head + trim.kept) * decoded.sampleRate));
-      let sum = 0; for (let i = from; i < to; i++) sum += data[i] * data[i];
-      this.onVu?.(Math.min(100, Math.sqrt(sum / Math.max(1, to - from)) * 300));
+      answer = { audio: decoded, head: trim.head, kept: trim.kept,
+                 waitedMs: Math.round(performance.now() - sentAt), serviceMs };
     } catch (e) {
       if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
     } finally {
-      this.busy = false;
+      if (this.inFlight > 0) this.inFlight -= 1;
+      this._settle(seq, answer);
     }
+  }
+
+  // An answer has arrived, or it never will. Hand it to the air in sentence order: with more
+  // than one request out there, the service finishes them as it likes, and a caller who heard
+  // the second sentence before the first one has not heard him at all.
+  private _settle(seq: number, answer: ClonedAnswer | null) {
+    this.settled.set(seq, answer);
+    while (this.settled.has(this.seqAir)) {
+      const next = this.settled.get(this.seqAir) ?? null;
+      this.settled.delete(this.seqAir);
+      this.seqAir += 1;
+      if (next) this._play(next);
+    }
+  }
+
+  private _play(a: ClonedAnswer) {
+    if (!this.running || !this.audioCtx || !this.voiceBus) return;
+    this.piecesBack += 1;
+    this.secondsOut += a.kept;
+    this.lastAnswerMs = a.waitedMs;
+    this.serviceMs = a.serviceMs;
+    const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
+    const src = this.audioCtx.createBufferSource();
+    src.buffer = a.audio; src.connect(this.voiceBus); src.start(playAt, a.head, a.kept);
+    // Answered: the watchdog that decides whether this call is still worth running is
+    // reset here, the moment real cloned audio is on its way to the cable. The first
+    // time it happens is also the moment the call goes on air and starts being metered.
+    const first = this.answeredAt === 0;
+    this.answeredAt = Date.now();
+    if (first) this.onFirstAnswer?.();
+    this.nextPlayAt = playAt + a.kept;
+    // Level is read through the player, not off these samples. Measuring the audio
+    // that merely arrived drew a dancing wave over total silence whenever the engine
+    // was asleep, which is how a dead cable got mistaken for a working one.
+    const live = this.playerLive ? this.playerLive() : true;
+    if (!live) { this.onVu?.(0); return; }
+    const data = a.audio.getChannelData(0);
+    const from = Math.floor(a.head * a.audio.sampleRate);
+    const to = Math.min(data.length, Math.floor((a.head + a.kept) * a.audio.sampleRate));
+    let sum = 0; for (let i = from; i < to; i++) sum += data[i] * data[i];
+    this.onVu?.(Math.min(100, Math.sqrt(sum / Math.max(1, to - from)) * 300));
   }
 
   getAnalyser(): AnalyserNode | null { return this.analyserNode; }
@@ -763,7 +838,8 @@ class VoiceCloningEngine {
   stop() {
     this.running = false;
     if (this.pump) { clearInterval(this.pump); this.pump = null; }
-    this.busy = false;
+    this.inFlight = 0; this.cutting = false;
+    this.settled.clear();
     this.outDest = null;
     this.voiceBus = null;
     this.monitorGain = null; this.monitored = false;
@@ -1863,18 +1939,23 @@ export default function StreamPage() {
   // set aside but not used comes back. A pause in the conversation is not a fault, so it
   // moves nothing — only an unanswered send does.
   const [cloneAlive, setCloneAlive] = useState(false);
+  // The microphone announcing for itself. Kept apart from the liveness figure above because the
+  // two need different sentences on screen: one is a service that did not answer, the other is a
+  // device that left the call, and only the second one the customer can fix at his desk.
+  const [micGone, setMicGone] = useState(false);
   // What the voice service has been handed and what it has sent back, read off the engine
   // once a second beside the liveness check. The meters on that card come from the audio
   // graph; these come from the counting, so a bar that moved on a piece which never left
   // this app can never be read as an answer.
-  const [voiceRead, setVoiceRead] = useState({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0 });
+  const [voiceRead, setVoiceRead] = useState({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0, svcMs: 0 });
   useEffect(() => {
-    if (!vcActive) { setCloneAlive(false); setVoiceRead({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0 }); return; }
+    if (!vcActive) { setCloneAlive(false); setMicGone(false); setVoiceRead({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0, svcMs: 0 }); return; }
     const read = () => {
       const c = clonerRef.current;
       setCloneAlive(!!c && c.alive(CLONE_ALIVE_SECONDS));
+      setMicGone(!!c?.micGone);
       setVoiceRead({ sent: c?.piecesSent ?? 0, back: c?.piecesBack ?? 0,
-        inS: c?.secondsIn ?? 0, outS: c?.secondsOut ?? 0, lastMs: c?.lastAnswerMs ?? 0 });
+        inS: c?.secondsIn ?? 0, outS: c?.secondsOut ?? 0, lastMs: c?.lastAnswerMs ?? 0, svcMs: c?.serviceMs ?? 0 });
     };
     read();
     const watch = setInterval(read, 1000);
@@ -2084,7 +2165,13 @@ export default function StreamPage() {
     if (!cloner || cloner.alive(CLONE_ALIVE_SECONDS)) return;
     void teardownStream();
     toast({
-      title: t("Call ended"), description: endReasonMessage("clone_stopped"),
+      // Two faults that look the same from the outside, and only one of them he can fix. If the
+      // microphone track itself went away, there was nothing arriving to turn into a voice; if it
+      // stayed and the answers stopped, the line is ours. Telling him his microphone died when the
+      // service went quiet would send him checking a cable for no reason — and the reverse leaves
+      // a unplugged microphone unexplained.
+      title: t("Call ended"),
+      description: endReasonMessage(cloner.micGone ? "mic_stalled" : "clone_stopped"),
       variant: "destructive", withContact: true,
     });
   }, [isStreaming, vcActive, cloneAlive, teardownStream, toast]);
@@ -3129,6 +3216,27 @@ export default function StreamPage() {
 
 
   // ─── Voice cloning panel ───────────────────────────────────────────────────
+  // The wait, split as far as it honestly goes. The whole round trip out of this app is always
+  // known; the part the voice service admits to is stamped on its answer, and only appears once
+  // the relay starts stamping. A customer who hears his cloned voice arrive late needs to know
+  // whether to blame our line or the service — one combined number answers nothing.
+  const VoiceWaitSentence = () => (
+    <>
+      {t("Last answer arrived in {ms} ms.", { ms: String(voiceRead.lastMs) })}
+      {voiceRead.svcMs > 0
+        ? t(" Of that, {svc} ms was the voice service itself and the rest was the line between us.", { svc: String(voiceRead.svcMs) })
+        : ""}{" "}
+    </>
+  );
+
+  // Why the clone went quiet, in the one sentence he can act on. A microphone that left mid-call
+  // has a different cure from a service that stopped answering, and the two must not share words.
+  const VoiceQuietSentence = () => (
+    micGone
+      ? t("Your microphone stopped feeding the app mid-call. Pick it again in the bar at the bottom of this page, then press Start.")
+      : t("The cloned voice has stopped answering. The call closes in a few seconds rather than running with no voice for the people watching.")
+  );
+
   // The card his cloned voice is chosen on, on both of the tabs that send one. It carries no
   // switch: the tab he is standing on is the choice of whether a call clones his voice, and a
   // second say on the same screen — one that governed only one of two Start presses — is the
@@ -3247,7 +3355,7 @@ export default function StreamPage() {
           <p style={{ marginTop: 6, fontSize: 10, color: cloneAlive ? "hsl(265 60% 72%)" : "hsl(40 90% 62%)" }}>
             {cloneAlive
               ? t("This is the voice your callers and OBS are hearing. Your raw microphone is off the cable while the cloned voice is arriving.")
-              : t("The cloned voice has stopped answering. The call closes in a few seconds rather than running with no voice for the people watching.")}
+              : VoiceQuietSentence()}
           </p>
 
           {/* The reading panel: what the voice service has been handed, what it has sent back,
@@ -3273,7 +3381,7 @@ export default function StreamPage() {
               ))}
             </div>
             <p style={{ marginTop: 8, fontSize: 10, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
-              {t("Last answer arrived in {ms} ms.", { ms: String(voiceRead.lastMs) })}{" "}
+              {VoiceWaitSentence()}
               {voiceTab || audioRouteOn
                 ? t("It goes to your software microphone, so the calling app hears this voice and nothing else.")
                 : t("Device routing is off, so it stays in your own speakers.")}
@@ -3372,10 +3480,9 @@ export default function StreamPage() {
 
       <p style={{ marginTop: 9, fontSize: 10.5, color: vcActive ? "hsl(222 25% 55%)" : "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
         {vcActive
-          ? <>{t("Last answer arrived in {ms} ms.", { ms: String(voiceRead.lastMs) })}{" "}
-              {cloneAlive
+          ? <>{VoiceWaitSentence()}{cloneAlive
                 ? t("It goes to your software microphone, so the calling app hears this voice and nothing else.")
-                : t("The cloned voice has stopped answering. The call closes in a few seconds rather than running with no voice for the people watching.")}</>
+                : VoiceQuietSentence()}</>
           : t("Press Start voice call. This card moves the moment the voice service answers — and if it never answers, these figures stay at zero and the call costs you nothing.")}
       </p>
     </div>

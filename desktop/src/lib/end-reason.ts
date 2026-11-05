@@ -21,6 +21,10 @@ const REASON_COPY: Record<string, string> = {
   mic_not_ready: "Your microphone isn't reaching the app, so the call didn't start and nothing was used. Let the app use your microphone, then pick it in the bar at the bottom of the page and try again.",
   // Mid-call: the picture kept moving but the voice stopped arriving.
   clone_stopped: "The cloned voice stopped answering, so the call was closed rather than left running with no voice for the people watching. Anything not used is back in your minutes.",
+  // Mid-call, and not the voice service's fault: the microphone itself stopped feeding the app,
+  // which used to be reported as a dead clone. The customer can reach this one - it is on his
+  // desk - so the sentence names the plug, not our service.
+  mic_stalled: "Your microphone stopped feeding the app in the middle of the call, so there was nothing left to turn into your cloned voice. The call was closed rather than left running silent, and nothing beyond it is used. Check the microphone is still plugged in and still allowed, pick it again in the bar at the bottom of the page, then press Start.",
   no_subscription: "Your account doesn't have a plan yet. Ask your administrator to set one up.",
   status_canceled: "Your administrator cancelled this account.",
   status_past_due: "This account is on hold for payment. Ask your administrator to sort it out.",

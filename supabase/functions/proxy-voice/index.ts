@@ -29,6 +29,14 @@ const FIRST_BYTE_TIMEOUT_MS = 15_000;
 
 const ELEVEN_BASE = "https://api.elevenlabs.io";
 
+/**
+ * The header the waited-so-far figure is handed to the app on. The app already knows the whole
+ * round trip, because it times from its own send; it cannot know how much of that the voice
+ * service itself took, and only this function is standing between the two. A customer told his
+ * cloned voice arrives late needs one answer: is the service slow, or is our line slow.
+ */
+const SERVICE_TIME_HEADER = "x-voice-service-ms";
+
 const INFER_PREFIXES = ["/v1/speech-to-speech/", "/v1/text-to-speech/"];
 const LIBRARY_PATHS = ["/v1/voices", "/v1/voices/add"];
 
@@ -139,6 +147,8 @@ Deno.serve(async (req: Request) => {
       }
     }
 
+    // Set inside the key loop, read once below: how long the service took to begin answering.
+    let serviceMs = 0;
     const proxied = await runWithKeys<Response>(user.id, "elevenlabs", async (key) => {
       const { headers, payload } = upstreamPayload(body);
       // A timer that simply expires would fire during the audio as well as before it, so the
@@ -146,6 +156,7 @@ Deno.serve(async (req: Request) => {
       const ac = new AbortController();
       const armed = setTimeout(() => ac.abort(), FIRST_BYTE_TIMEOUT_MS);
       let upstream: Response;
+      const startedAt = Date.now();
       try {
         upstream = await fetch(ELEVEN_BASE + path, {
           method,
@@ -162,6 +173,10 @@ Deno.serve(async (req: Request) => {
         return { ok: false, detail: `elevenlabs did not answer: ${err instanceof Error ? err.message : String(err)}` };
       }
       clearTimeout(armed);
+      // Stamped the moment the service begins to answer, not when its last byte lands: this is a
+      // streaming reply and the audio keeps arriving after this line. The app compares it against
+      // the wait it measured itself, and the difference is the line rather than the voice.
+      serviceMs = Date.now() - startedAt;
       if (!upstream.ok) {
         const detail = await upstream.text().catch(() => "");
         return { ok: false, status: upstream.status, detail: detail.slice(0, 300) };
@@ -178,7 +193,14 @@ Deno.serve(async (req: Request) => {
 
     // Stream audio back verbatim; otherwise pass JSON through.
     const ct = upstream.headers.get("content-type") ?? "";
-    const headers: Record<string, string> = { ...corsHeaders, "Content-Type": ct || "application/json" };
+    const headers: Record<string, string> = {
+      ...corsHeaders,
+      "Content-Type": ct || "application/json",
+      // A cross-origin read needs the name handed over as well as written; without the second
+      // line the app sees its own total and nothing else, and the panel can never split the two.
+      [SERVICE_TIME_HEADER]: String(serviceMs),
+      "Access-Control-Expose-Headers": SERVICE_TIME_HEADER,
+    };
     if (ct.startsWith("audio/") || body.isStream) {
       return new Response(upstream.body, { status: upstream.status, headers });
     }
