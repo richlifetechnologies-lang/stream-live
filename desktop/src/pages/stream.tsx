@@ -19,6 +19,7 @@ import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../
 import { noPictureCause, noPictureDetail, type NoPictureEvidence } from "../lib/no-picture-cause";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
+import { answerTrim, pieceHasSignal, piecePeak } from "../lib/voice-piece";
 import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../lib/lipsync";
 import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
@@ -524,6 +525,9 @@ class VoiceCloningEngine {
   // because a bar can move on a chunk that never left this app.
   piecesSent = 0;
   piecesBack = 0;
+  // Pieces the level detector called speech but the bytes proved empty. They never leave the
+  // app, so they are counted here rather than in the figures above.
+  piecesEmpty = 0;
   secondsIn  = 0;
   secondsOut = 0;
   lastAnswerMs = 0;
@@ -568,7 +572,7 @@ class VoiceCloningEngine {
     this.running   = true;
     this.spokeAt   = 0;
     this.answeredAt = 0;
-    this.piecesSent = 0; this.piecesBack = 0;
+    this.piecesSent = 0; this.piecesBack = 0; this.piecesEmpty = 0;
     this.secondsIn = 0; this.secondsOut = 0; this.lastAnswerMs = 0;
     this.audioCtx = new AudioContext();
     // Constructed outside the click's user activation, so this context can come up
@@ -613,8 +617,8 @@ class VoiceCloningEngine {
       if (!this.running) return;
       const blob  = new Blob(chunks.splice(0), { type: "audio/webm" });
       const worth = blob.size > 0 && this.speechMs >= CLONE_MIN_SPEECH_MS;
-      // A piece of nothing but his room never leaves the app: it would be billed as
-      // airtime and would come back as nothing to hear.
+      // A piece that holds nothing but his room is handed to _process, which is where it is
+      // refused before it ever leaves.
       this.pieceMs = 0; this.speechMs = 0;
       // The next piece starts gathering immediately, before this one has been answered, so
       // nothing he says while the service is thinking is lost.
@@ -687,6 +691,15 @@ class VoiceCloningEngine {
     if (!this.running || !this.audioCtx || !this.call || !this.voiceId) { this.busy = false; return; }
     try {      const pcm = await this._toPcm16k(blob);
       if (!pcm || !this.running) return;
+      // An empty room is not a sentence. This is judged off the bytes about to leave, not off
+      // the level detector, because a quiet room recorded right after a loud passage reads as
+      // speech to a bar that has not caught up with the silence: five pieces in one recorded
+      // call went out that way and came back as silence for the caller.
+      if (!pieceHasSignal(pcm)) {
+        this.piecesEmpty += 1;
+        console.warn(`[voice] piece #${this.piecesEmpty} held no signal (peak ${piecePeak(pcm)}), not sent`);
+        return;
+      }
       // 16-bit mono at 16 kHz, which is what the piece was rebuilt as before it left.
       this.piecesSent += 1;
       this.secondsIn += pcm.byteLength / 2 / 16000;
@@ -702,27 +715,40 @@ class VoiceCloningEngine {
       if (!this.running || !this.audioCtx) return;
       if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
       const decoded = await this.audioCtx.decodeAudioData(buf);
+      // Only the spoken part of the answer is played. In that same call the cloned voice came
+      // back with up to 3.8 seconds of dead air in front of the words, and every second of it
+      // pushed the next sentence further behind the moving picture - which is a caller hearing
+      // him late, and then not at all.
+      const trim = answerTrim(decoded.getChannelData(0), decoded.sampleRate, decoded.duration);
+      if (!trim) {
+        // Nothing a person said came back. This is not the cloned voice, so it does not count
+        // as an answer, does not reach the cable, and does not put the call on air.
+        console.warn("[voice] answer held no speech, not played");
+        return;
+      }
       this.piecesBack += 1;
-      this.secondsOut += decoded.duration;
+      this.secondsOut += trim.kept;
       this.lastAnswerMs = Math.round(performance.now() - this.sentAt);
       const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
       const src = this.audioCtx.createBufferSource();
-      src.buffer = decoded; src.connect(this.voiceBus!); src.start(playAt);
+      src.buffer = decoded; src.connect(this.voiceBus!); src.start(playAt, trim.head, trim.kept);
       // Answered: the watchdog that decides whether this call is still worth running is
       // reset here, the moment real cloned audio is on its way to the cable. The first
       // time it happens is also the moment the call goes on air and starts being metered.
       const first = this.answeredAt === 0;
       this.answeredAt = Date.now();
       if (first) this.onFirstAnswer?.();
-      this.nextPlayAt = playAt + decoded.duration;
+      this.nextPlayAt = playAt + trim.kept;
       // Level is read through the player, not off these samples. Measuring the audio
       // that merely arrived drew a dancing wave over total silence whenever the engine
       // was asleep, which is how a dead cable got mistaken for a working one.
       const live = this.playerLive ? this.playerLive() : true;
       if (!live) { this.onVu?.(0); return; }
       const data = decoded.getChannelData(0);
-      let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
-      this.onVu?.(Math.min(100, Math.sqrt(sum / data.length) * 300));
+      const from = Math.floor(trim.head * decoded.sampleRate);
+      const to = Math.min(data.length, Math.floor((trim.head + trim.kept) * decoded.sampleRate));
+      let sum = 0; for (let i = from; i < to; i++) sum += data[i] * data[i];
+      this.onVu?.(Math.min(100, Math.sqrt(sum / Math.max(1, to - from)) * 300));
     } catch (e) {
       if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
     } finally {
