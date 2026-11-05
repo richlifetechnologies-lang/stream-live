@@ -4547,6 +4547,13 @@ export const ADMIN_HTML = `<!doctype html>
     const mk = (key, pill, label, side, why) => ({ key, pill, label, side, why, kind, lines });
 
     if (!r.media_started_at) {
+      // The oversized photo is asked first because it is the newest of the named blanks and the
+      // only one whose fix is a file on his disk. Before the app started keeping the line's own
+      // words this row read \`no connection ever came up\`, which sent him hunting a VPN that was
+      // never involved; his side of the cable is named here as OURS on purpose, because the app
+      // handed the line a message it would not read.
+      const big = said(/cause=photo_too_big|message too big/i);
+      if (big) return mk("photo", "fail", "No " + kind + ": the photo was too big for the line to read", "our app's photo size", big);
       const ref = said(/cause=line_full|concurrent session limit|session_limit|at capacity|lines? (are )?(full|busy)|too many (concurrent )?(sessions|calls)/i);
       if (ref) return mk("refused", "fail", "No " + kind + ": the video line refused the dial", "our video line", ref);
       const cam = said(/cause=camera_stalled/i);
@@ -4575,7 +4582,7 @@ export const ADMIN_HTML = `<!doctype html>
   // His own definition of a sudden stop: a call he did not press Stop on, that either delivered
   // nothing or was moving and then came down.
   function endsSudden(x) {
-    return x.r.stopped_by !== "user" && (["refused", "camera", "never", "hold", "blank_said", "blank_quiet", "mid"].includes(x.why.key));
+    return x.r.stopped_by !== "user" && (["refused", "photo", "camera", "never", "hold", "blank_said", "blank_quiet", "mid"].includes(x.why.key));
   }
 
   function endsMatches(which, x) {

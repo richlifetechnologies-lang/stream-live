@@ -64,6 +64,11 @@ const REASON_COPY: Record<string, string> = {
   // it is in as few words as possible, because the sentence it replaces told him to go and
   // turn off a VPN while the line on our side was the thing that was full.
   line_full: "Our video line was full when you asked for it, so this call never opened. Nothing was used - your minutes are exactly where they were. There is nothing here for you to fix: it is our line, not your computer. Wait a couple of minutes and press Start again; if the button holds you for a short count-down first, that is the line being released and it costs you nothing.",
+  // The second blank that is not his network. The photo he uploaded was too big for the video line
+  // to read, so the line closed the door before his connection was ever asked to carry anything -
+  // and the sentence this replaces told him to switch off a VPN. It has to be said in his hearing,
+  // because the fix is something he can do in one click, and it names the photo, not his computer.
+  photo_too_big: "The photo that went with your call is too large for the video line to read, so the call never opened. Nothing was used - your minutes are exactly where they were. Choose a different, plainer photo in the bar at the bottom of the page - a close-up headshot from your camera roll works best - then press Start again. This is not your internet, your VPN or your computer.",
   // The voice-only tab has no picture to fail: the only thing it can lack is the cloned voice.
   // The meter never started without it, so the one thing worth telling him is that he was not
   // charged and can press Start again straight away.

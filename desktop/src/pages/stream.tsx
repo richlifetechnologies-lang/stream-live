@@ -17,6 +17,7 @@ import { endReasonMessage, toUserMessage } from "../lib/end-reason";
 import { BLIND_RETRY_HOLD_MS, PICTURE_GIVE_UP_MS, START_TRIES, classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
 import { noPictureCause, noPictureDetail, type NoPictureEvidence } from "../lib/no-picture-cause";
+import { prepareRefPhoto } from "../lib/ref-image";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
 import { answerTrim, pieceHasSignal, piecePeak, pieceTrim, speechOnset, speechTailAt, ANSWER_KEEP_HEAD_S } from "../lib/voice-piece";
@@ -1301,7 +1302,10 @@ async function _startVideoSession(token: string, localStream: MediaStream, onRem
     };
     ws.onerror = () => abort(new Error(`${APP}: connection error`));
     ws.onclose = ev => {
-      if (!settled) abort(new Error(`${APP}: connection closed (${ev.code})`));
+      // The reason travels with the code and is the only words the far side ever gives. Without
+      // it a line that refused an oversized message and a network that dropped look identical in
+      // the log, and the app blamed the customer's own machine for both.
+      if (!settled) abort(new Error(`${APP}: connection closed (${ev.code})${ev.reason ? ` — ${_engineWords(ev.reason)}` : ""}`));
       // The code is the only thing that distinguishes a service that ran out of patience from
       // a network that dropped, and this page has no other record of it.
       else if (ev.code !== 1000) onDisconnect(`code ${ev.code}${ev.reason ? ` — ${_engineWords(ev.reason)}` : ""}`);
@@ -2532,10 +2536,14 @@ export default function StreamPage() {
     };
     const cause = noPictureCause(evidence);
     const off = clockSkewMs();
-    const note = off === null || Math.abs(off) < CLOCK_NOTICE_MS
-      ? "" : ` [machine clock ${describeClockSkew(off)} real time]`;
+    const note = (off === null || Math.abs(off) < CLOCK_NOTICE_MS
+      ? "" : ` [machine clock ${describeClockSkew(off)} real time]`)
+      // The photo's own size is the number that decides a refusal of this kind, and nothing else
+      // in the record holds it. Written down, the next oversized photo is a measurement rather
+      // than another week of guessing which size the line actually stops reading at.
+      + (refImageB64 ? ` [photo ${Math.round(refImageB64.length * 0.75 / 1024)} KB on the wire]` : " [no photo uploaded]");
     return { cause, detail: noPictureDetail(evidence, cause, note), message: endReasonMessage(cause) };
-  }, []);
+  }, [refImageB64]);
 
   // ─── Give up on a call that never puts a picture on screen ──────────────────
   // The gateway bills nothing before the first frame, so every second of a blank call is the
@@ -3027,20 +3035,34 @@ export default function StreamPage() {
   }, [isStreaming, selectedStyle, handlePromptChange]);
 
   // ─── Reference image ───────────────────────────────────────────────────────
-  const handleRefImage = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+  // The photo is the largest thing this app puts on the wire, and the video line reads one message
+  // at a time with a hard limit on its size. A file over that limit is refused before the line ever
+  // takes the call, and until this build the customer sat in front of a black screen being told it
+  // was his network. So the photo is dealt with here, at the moment he picks it: one that already
+  // fits goes out exactly as it sits on his disk, one that is too big is redrawn smaller, and one
+  // that cannot be made to fit is refused in words and never accepted. He cannot dial a refusal, so
+  // no minutes, no line time and no machine hold go into a call that could never open.
+  const handleRefImage = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]; if (!file) return;
-    const r = new FileReader();
-    r.onload = ev => {
-      const data = ev.target?.result as string; const b64 = data.split(",")[1] ?? data;
-      setRefImagePreview(data); setRefImageB64(b64);
-      if (videoSessionRef.current && isStreaming) {
-        // The photo travels with the prompt that is winning on this tab right now, so a
-        // mid-call upload cannot quietly hand the engine the master prompt over his words.
-        _updatePrompt(videoSessionRef.current, _videoPromptFor(customPrompt, STYLES.find(s => s.id === selectedStyle)!.prompt), b64);
-      }
-    };
-    r.readAsDataURL(file); e.target.value = "";
-  }, [isStreaming, selectedStyle, customPrompt, setRefImagePreview, setRefImageB64]);
+    e.target.value = "";
+    const prepared = await prepareRefPhoto(file);
+    if (!prepared.ok) {
+      toast({
+        title: t("Photo too large"),
+        description: prepared.why === "unreadable"
+          ? t("The app can't read this photo, and it is too large for the video line as it is. Choose a normal photo file instead - a JPG or PNG from your phone or camera roll - and the call will start.")
+          : t("This photo is too large for the video line, and the app can't make it small enough. Choose a plain close-up of your face - a headshot from your camera roll works best - and the call will start."),
+        variant: "destructive",
+      });
+      return;
+    }
+    setRefImagePreview(prepared.preview); setRefImageB64(prepared.b64);
+    if (videoSessionRef.current && isStreaming) {
+      // The photo travels with the prompt that is winning on this tab right now, so a
+      // mid-call upload cannot quietly hand the engine the master prompt over his words.
+      _updatePrompt(videoSessionRef.current, _videoPromptFor(customPrompt, STYLES.find(s => s.id === selectedStyle)!.prompt), prepared.b64);
+    }
+  }, [isStreaming, selectedStyle, customPrompt, setRefImagePreview, setRefImageB64, toast]);
 
   // ─── Voice upload ──────────────────────────────────────────────────────────
   const handleVoiceUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {

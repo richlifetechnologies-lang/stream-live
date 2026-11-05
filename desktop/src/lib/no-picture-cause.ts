@@ -23,14 +23,16 @@ export type NoPictureEvidence = {
 };
 
 /**
- * The four causes, as they are written into the gateway's log and as their sentences are
+ * The causes, as they are written into the gateway's log and as their sentences are
  * keyed in `end-reason`. `picture_hold` is the honest remainder: the line is connected and
  * this machine's camera is feeding it, and still nothing painted.
  *
- * `line_full` is the one cause that is never the customer's: the video service said no at the
- * door, in its own words, before any connection of his was ever involved.
+ * `line_full` and `photo_too_big` are the two causes that are never the customer's: the video
+ * service said no at the door, in its own words, before any connection of his was ever involved.
+ * Neither of them may fall through to `never_connected`, which tells a man to go and switch off a
+ * VPN over a fault that no VPN on his machine could have caused.
  */
-export type NoPictureCause = "line_full" | "camera_stalled" | "never_connected" | "picture_hold";
+export type NoPictureCause = "line_full" | "photo_too_big" | "camera_stalled" | "never_connected" | "picture_hold";
 
 /**
  * The video service's own wording for a line that was not free.
@@ -42,6 +44,24 @@ export type NoPictureCause = "line_full" | "camera_stalled" | "never_connected" 
  */
 export function lineFullRefusal(answer: string): boolean {
   return /concurrent session limit|server at capacity|at capacity|too many (?:concurrent )?(?:sessions|calls)|line(?:s)? (?:are )?(?:full|busy)/i
+    .test(answer);
+}
+
+/**
+ * The video service's own wording for a message it will not read.
+ *
+ * Close code 1009 means one thing in the protocol the call runs on: the other side was handed a
+ * message bigger than it will accept and shut the socket instead of answering it. This product
+ * sends exactly one oversized message - the customer's photo, which goes out twice per dial - so
+ * 1009 names the photo, not his network and not our capacity. Proved on 2026-11-05: nine blank
+ * calls on one machine all closed 1009, while the same device, the same network and the same call
+ * pass carried 78 and 93 seconds of picture between them.
+ *
+ * The bare code is matched as well as the wording, because the app only ever had the code until
+ * this build started keeping the reason that came with it.
+ */
+export function photoTooBigRefusal(answer: string): boolean {
+  return /\b1009\b|message too big|too big (?:for|to be read by)|frame is too large|maximum message (?:size|length)/i
     .test(answer);
 }
 
@@ -59,6 +79,7 @@ export function lineFullRefusal(answer: string): boolean {
  * sentence.
  */
 export function noPictureCause(e: NoPictureEvidence): NoPictureCause {
+  if (photoTooBigRefusal(e.lineAnswer)) return "photo_too_big";
   if (lineFullRefusal(e.lineAnswer)) return "line_full";
   if (e.cameraSeen && !e.cameraProducing) return "camera_stalled";
   if (!e.connected) return "never_connected";
@@ -79,6 +100,8 @@ export function noPictureDetail(e: NoPictureEvidence, cause: NoPictureCause, clo
     : "camera fed no frame at all";
   const line = cause === "line_full"
     ? `the video service refused the dial: ${e.lineAnswer.slice(0, 120)}`
+    : cause === "photo_too_big"
+    ? `the video service refused the message carrying the photo: ${e.lineAnswer.slice(0, 120)}`
     : e.connected ? "the connection came up and carried no picture"
     : "no connection came up between this machine and the video line";
   return `cause=${cause} (${camera}; ${line})${clockNote}`;
