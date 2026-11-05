@@ -458,17 +458,33 @@ class AudioSyncPipeline {
 
 // ─── Voice cloning engine ─────────────────────────────────────────────────────
 // This engine lives in the pause between his words. The microphone is recorded
-// continuously, its level is watched, and when he stops talking - or after a second and
-// a half of talking without a breath - the piece is closed, handed to the voice service,
-// and the voice that comes back is played onto the cable. A few pieces may be with the
+// continuously, its level is watched, and when he stops talking - or after two and a
+// half seconds of talking without a breath - the piece is closed, handed to the voice
+// service, and the voice that comes back is played onto the cable. A few pieces may be with the
 // service at the same time, and the recorder never stops between them: with only one out
 // there, the next piece sat open while the service thought, so every sentence he spoke
 // arrived at the caller later than the one before it. Cutting on a pause still means a
 // word is never sliced in half by a stopwatch.
 
 const PUMP_MS             = 60;   // how often the microphone level is looked at
-const CLONE_MAX_PIECE_MS  = 1500; // ...unless he is still talking, then send it anyway
+// The longest run of HIS VOICE one piece may hold. It is deliberately not a limit on the length of
+// the recording: the recording also holds the quiet he leaves between sentences, and a limit that
+// counted both cut his next sentence short the moment he paused longer than this before starting
+// it - a third of a second of words, which the voice service answered with a third of a second of
+// voice. Measured on his own call, that is how a whole question turned into "short replies".
+const CLONE_MAX_SPEECH_MS = 2500; // ...unless he is still talking, then send it anyway
 const CLONE_MIN_SPEECH_MS = 200;  // less than this is a cough, not a line worth paying for
+// A turn shorter than this is a fragment, and the service answers a fragment with a fragment. So a
+// pause that lands before this does not close the piece - he carries on talking into the same one,
+// and the silence trimming still keeps the extra bytes to what he said. His own detector already
+// holds the piece open through 0.45 s of quiet after a word, so this bar sits about that much above
+// the seconds actually spoken: measured with the shipped build, a 0.7 s burst reads as 1.1 s here.
+const CLONE_MIN_TURN_SPEECH_MS = 1200;
+// ...but a short answer really is a short answer, so the wait for the rest of it is bounded by this
+// much QUIET after his last sound, not by the length of the recording. His detector has already held
+// the piece open through 0.45 s of quiet by the time this starts counting, so the longest bridge is
+// about a second: longer than any pause inside a sentence, shorter than the pause between two of them.
+const CLONE_TURN_HOLD_MS       = 600;
 const CLONE_IDLE_MS       = 5000; // a piece holding no speech at all is thrown away this often
 // A request that never lands must not hold the pipeline shut for the rest of the call, so the
 // wait has a deadline: the piece is abandoned and his next words are tried again.
@@ -484,8 +500,21 @@ const CLONE_MAX_IN_FLIGHT = 3;
 // recorded call the wait for the whole file was more than twice the wait for its first byte.
 // The first step is deliberately small: it is the one that decides when his voice reaches the
 // caller. The steps after it are larger so the decoder is not called once per 26 ms frame.
-const AIR_FIRST_BYTES = 2048;   // about a tenth of a second of answer: the first words, as soon as they are real
+const AIR_FIRST_BYTES = 4096;   // about a quarter of a second of answer: the first words, as soon as they are real
 const AIR_STEP_BYTES  = 6144;   // about 0.4 s of answer per hand-over once it is speaking
+// How far behind the end of what has actually landed the play head is kept, so a hand-over is built
+// from bytes that arrived a while ago rather than bytes still on the line. Measured on a simulated
+// answer: on a line just fast enough to keep pace with the playback (16 KB/s) it takes the silence
+// inside that answer from 240 ms to 114 ms, and on any of them it stops the quiet after his last word
+// from being booked into the queue behind the next sentence. On the 50 KB/s line his own call measured
+// there is nothing to save, because the bytes outrun the player. It never costs a word of the answer,
+// and the last part of one is exempt - by then nothing more can arrive.
+const AIR_LEAD_S      = 0.18;
+// How many prefixes of one answer the decoder is allowed to call too short to stand on its own
+// before the answer is handed to the whole-file path instead. A browser decoder refuses a prefix it
+// cannot make a frame boundary of, and the next prefix - with more bytes under its belt - is usually
+// accepted. Giving up on the first objection is what left a sentence ending half way through.
+const AIR_REFUSE_TRIES = 3;
 // How much quiet, seen after his last word, is taken as the sentence having ended. It is shorter
 // than the pause between two words anyone speaks, so cutting there cannot swallow a syllable - and
 // if it ever did, the next hand-over simply carries on from that same second, since every prefix is
@@ -622,6 +651,11 @@ class VoiceCloningEngine {
   private settled   = new Map<number, ClonedAnswer | null>();
   private pieceMs  = 0;
   private speechMs = 0;
+  // How long his own detector has called the microphone quiet, counted inside the piece being
+  // recorded. Silence is measured apart from speech on purpose: the two answer different questions -
+  // "has he said enough" and "has he really stopped" - and adding them together is what cut a
+  // sentence off after its first word whenever he paused for breath before starting it.
+  private pauseMs  = 0;
 
   call       = null as null | ((path: string, body: FormData) => Promise<Response>);
   voiceId    = BUILTIN_VOICES[0].id;
@@ -701,6 +735,7 @@ class VoiceCloningEngine {
     // A call that is started twice on one engine must not inherit the previous call's
     // outstanding pieces or its sentence order.
     this.inFlight = 0; this.cutting = false;
+    this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
     this.seqAssign = 0; this.seqAir = 0; this.settled.clear();
     this.micGone = false; this.serviceMs = 0;
     this.audioCtx = new AudioContext();
@@ -759,7 +794,7 @@ class VoiceCloningEngine {
       const worth = blob.size > 0 && this.speechMs >= CLONE_MIN_SPEECH_MS;
       // A piece that holds nothing but his room is handed to _process, which is where it is
       // refused before it ever leaves.
-      this.pieceMs = 0; this.speechMs = 0;
+      this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
       // The next piece starts gathering immediately, before this one has been answered, so
       // nothing he says while the service is thinking is lost.
       this.recorder!.start(chunkMs);
@@ -778,7 +813,8 @@ class VoiceCloningEngine {
     const level = voiceBandLevel(this.inFreq, this.audioCtx?.sampleRate ?? 48000);
     this.gate.update(level, dtMs / 1000);
     this.pieceMs += dtMs;
-    if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; }
+    if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; this.pauseMs = 0; }
+    else this.pauseMs += dtMs;
     // A piece is closed on his own pause, not when the last answer happens to arrive. Holding
     // it open until then stretched every sentence with silence while the service thought, and
     // the cloned voice fell further and further behind the way he speaks. The number of
@@ -787,7 +823,13 @@ class VoiceCloningEngine {
     // His own detector decides when a sentence is over, so a word is never sliced by a
     // stopwatch and a pause in the conversation is never read as a fault.
     if (this.speechMs >= CLONE_MIN_SPEECH_MS &&
-        (!this.gate.talking || this.pieceMs >= CLONE_MAX_PIECE_MS)) { this._cut(); return; }
+        (!this.gate.talking || this.speechMs >= CLONE_MAX_SPEECH_MS)) {
+      // His pause is not the end of his turn if the turn is only a fragment. Waiting this much
+      // quiet after his last sound costs at most that much of the wait, and it is the difference
+      // between the service hearing "the weather to" and hearing the whole of what he asked.
+      if (this.speechMs < CLONE_MIN_TURN_SPEECH_MS && this.pauseMs < CLONE_TURN_HOLD_MS) return;
+      this._cut(); return;
+    }
     if (this.speechMs === 0 && this.pieceMs >= CLONE_IDLE_MS) this._cut();
   }
 
@@ -886,8 +928,9 @@ class VoiceCloningEngine {
       const airable = seq === this.seqAir && !!res.body && /mpeg|mp3/i.test(type);
       const read = await this._readAnswer(res, airable, sentAt, serviceMs);
       // His words are already on their way to the cable. Replaying them from a second decode
-      // would give the caller the same sentence twice.
-      if (read.aired) return;
+      // would give the caller the same sentence twice - but whatever never reached the air has
+      // to, or the sentence stops half way through and nothing brings the rest of it back.
+      if (read.aired) { await this._airRest(read.bytes, read.playedUntil); return; }
       const buf = read.bytes.buffer as ArrayBuffer;
       if (!this.running || !this.audioCtx) return;
       if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
@@ -920,8 +963,10 @@ class VoiceCloningEngine {
   // whole and handed back for the path that has been running since before this, so a call is
   // never left with no voice because a faster route refused to work.
   private async _readAnswer(res: Response, airable: boolean, sentAt: number, serviceMs: number):
-    Promise<{ bytes: Uint8Array; aired: boolean }> {
-    if (!airable || !res.body) return { bytes: new Uint8Array(await res.arrayBuffer()), aired: false };
+    Promise<{ bytes: Uint8Array; aired: boolean; playedUntil: number }> {
+    if (!airable || !res.body) {
+      return { bytes: new Uint8Array(await res.arrayBuffer()), aired: false, playedUntil: 0 };
+    }
     // The body is opened once, here. Everything read is kept, so an answer that progressive
     // playing cannot deliver still arrives whole for the path that has always worked.
     let buf = new Uint8Array(0);
@@ -931,19 +976,31 @@ class VoiceCloningEngine {
     let scanned = 0;       // and how far the search for it has gone
     let walked = true;
     let aired = false;
+    let refused = 0;       // prefixes the decoder called too short to stand on their own
     const reader = res.body.getReader();
     const pump = async (final: boolean) => {
       if (!walked || !this.running || !this.audioCtx) return;
       const w = mp3WholeFrameBytes(buf);
       if (w < 0) { walked = false; return; }                       // not an MP3 this can cut
       if (!final && w - cut < (aired ? AIR_STEP_BYTES : AIR_FIRST_BYTES)) return;
-      cut = w;
       const piece = new Uint8Array(w);
       piece.set(buf.subarray(0, w));
       if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
       let decoded: AudioBuffer;
       try { decoded = await this.audioCtx.decodeAudioData(piece.buffer); }
-      catch { walked = false; return; }
+      catch {
+        // A prefix of a compressed file is not a file, and a decoder is free to call one too short
+        // to stand on its own. Giving up on the first objection left the caller holding the part
+        // already played with nothing after it, so the next attempt is made with more bytes under
+        // its belt. Only after this many objections is the answer handed over to the path that
+        // decodes the complete file, which is the one that has been running since before this.
+        refused += 1;
+        if (final || refused >= AIR_REFUSE_TRIES) walked = false;
+        return;
+      }
+      // Only bytes a decoder has accepted count as handed over, so a refused prefix is retried at
+      // the next arrival rather than waiting out a whole step's worth of silence on the line.
+      cut = w;
       const data = decoded.getChannelData(0), rate = decoded.sampleRate;
       if (onset < 0) {
         const found = speechOnset(data, scanned);
@@ -959,7 +1016,10 @@ class VoiceCloningEngine {
       // and pushes the next one behind the moving picture. The most either way can add is the
       // allowance itself - a fraction of a second, against the seconds the backlog used to cost.
       const tail = speechTailAt(data, rate);
-      const upto = (final || decoded.duration - tail >= AIR_SETTLE_S) ? tail : decoded.duration;
+      let upto = (final || decoded.duration - tail >= AIR_SETTLE_S) ? tail : decoded.duration;
+      // Only what has a runway behind it goes on air, so the player never catches up with the
+      // arriving bytes and leaves a hole inside a word.
+      if (!final) upto = Math.min(upto, decoded.duration - AIR_LEAD_S);
       if (upto - from <= 0.02) return;
       if (!aired) {
         this.lastAnswerMs = Math.round(performance.now() - sentAt);
@@ -982,7 +1042,24 @@ class VoiceCloningEngine {
         if (done) break;
       }
     } catch { /* the answer is over; what was collected goes to the fallback */ }
-    return { bytes: buf, aired };
+    return { bytes: buf, aired, playedUntil };
+  }
+
+  // Finish an answer that progressive playing could not carry to its end. The bytes are all
+  // here - it was the walk that stopped, not the stream - so the part after the play head is
+  // decoded once and put on air exactly where the last chunk left off.
+  private async _airRest(bytes: Uint8Array, playedUntil: number) {
+    if (!this.running || !this.audioCtx || !this.voiceBus) return;
+    let decoded: AudioBuffer;
+    try {
+      if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
+      decoded = await this.audioCtx.decodeAudioData(bytes.buffer as ArrayBuffer);
+    } catch { return; }
+    const trim = answerTrim(decoded.getChannelData(0), decoded.sampleRate, decoded.duration);
+    const end  = trim ? trim.head + trim.kept : decoded.duration;
+    const from = Math.max(playedUntil, trim ? trim.head : 0);
+    if (end - from <= 0.02) return;
+    this._airChunk(decoded, from, end - from, false);
   }
 
   // Put one decoded piece of an answer on air. It joins the queue exactly where the last piece
@@ -1064,6 +1141,7 @@ class VoiceCloningEngine {
     this.running = false;
     if (this.pump) { clearInterval(this.pump); this.pump = null; }
     this.inFlight = 0; this.cutting = false;
+    this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
     this.settled.clear();
     this.outDest = null;
     this.voiceBus = null;
