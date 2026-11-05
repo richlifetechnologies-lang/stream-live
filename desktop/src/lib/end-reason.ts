@@ -73,6 +73,32 @@ const REASON_COPY: Record<string, string> = {
   // The meter never started without it, so the one thing worth telling him is that he was not
   // charged and can press Start again straight away.
   no_voice: "No cloned voice came back from the service, so your call was ended instead of left running silent. Nothing was used - your minutes are exactly where they were. Press Start again whenever you are ready; if it keeps happening, tell your administrator, who can see what the voice service answered.",
+  // ── The five places a voice call actually fails, now named one at a time ──────────────────
+  // Before this, a voice call had one sentence for every failure and one log line for none of
+  // them, so a crash inside our own code was reported to the customer as his VPN and a silent
+  // voice service was reported exactly like a muted microphone. Each of these says the one thing
+  // this machine proved, and only the two that are his tell him to touch anything.
+  // The first of these is the one he can never fix and must never be sent hunting: this app's own
+  // code failed while the call was still being opened, so no connection, no microphone and no
+  // service was ever involved. It says so, because the sentence it replaces cost one customer
+  // twelve presses and an evening of VPN settings.
+  app_crashed: "This app's own code failed while it was opening your call, so the call never started. Nothing was used - your minutes are exactly where they were. This is not your internet, your microphone or your computer, and there is nothing for you to check: your administrator can see exactly where it failed. If an update for Stream Live is offered, install it, then press Start again.",
+  // A microphone that measured pure silence for the whole call. Muted, or not the device he
+  // thinks he is using - both fixed on his desk in seconds, which is why it names the plug.
+  mic_silent: "Your microphone sent the app nothing at all, so there was no voice for it to turn into your cloned voice and the call was closed. Nothing was used - your minutes are exactly where they were. Check the microphone is not muted, then press Check my microphone at the bottom of the page and pick a different one in the bar if it still says no signal is arriving.",
+  // The honest middle case: sound was arriving, and the app never caught a word out of it. It
+  // does not blame him and does not blame us, because on this evidence nobody can yet tell
+  // whether the call simply went quiet - and saying "the service is down" when no one spoke
+  // would send him waiting for a fix that was never needed.
+  no_word_heard: "Your call opened and stayed quiet: the app heard sound from your microphone but never caught a word from it, so nothing was sent to the voice service and the call was closed. Nothing was used - your minutes are exactly where they were. Press Start again and speak into your microphone as soon as the call opens; if it happens while you are talking, press Check my microphone at the bottom of the page.",
+  // The app heard him and then kept the pieces to itself. Ours, and said as ours.
+  nothing_sent: "The app heard your voice but nothing it recorded ever left this computer, so the voice service was never asked to answer. Nothing was used - your minutes are exactly where they were. There is nothing here for you to fix; your administrator can see this in the call log. Press Start again, and if it repeats, tell him.",
+  // Pieces went out and no answer came back. Ours too - and the one a customer used to be left
+  // guessing between our service and his own microphone.
+  service_silent: "Your voice reached the voice service and nothing came back, so the app ended the call instead of leaving you on a silent line. Nothing was used - your minutes are exactly where they were. This is our side of the cable, not your internet. Press Start again in a moment; if it keeps happening your administrator can see every piece that went unanswered.",
+  // An answer existed and never made it to his ears. Ours, and the only one that means the
+  // service itself was working.
+  voice_hold: "The voice service answered, but its answer never reached your speakers, so the call was closed rather than left running with nothing to hear. Nothing was used - your minutes are exactly where they were. Nothing here is your microphone or your internet; press Start again, and tell your administrator if it repeats.",
   no_lease: "Your call was ended because its booking lapsed. Try starting again.",
   // The video software checks the call pass against the clock on the machine it runs on. A
   // computer set hours away from real time therefore reads a minutes-old pass as already

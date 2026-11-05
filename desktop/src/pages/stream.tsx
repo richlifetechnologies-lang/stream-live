@@ -17,6 +17,7 @@ import { endReasonMessage, toUserMessage } from "../lib/end-reason";
 import { BLIND_RETRY_HOLD_MS, PICTURE_GIVE_UP_MS, START_TRIES, classifyStartFailure, preflightFailure, startFailureMessage, startRetryWaitMs, startTriesFor, type StartFailure } from "../lib/start-retry";
 import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../lib/clock-sync";
 import { noPictureCause, noPictureDetail, type NoPictureEvidence } from "../lib/no-picture-cause";
+import { voiceCause, voiceDetail, micVerdict, micVerdictDetail, faultOrigin, type VoiceEvidence, type MicVerdict } from "../lib/voice-check";
 import { prepareRefPhoto } from "../lib/ref-image";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
@@ -679,6 +680,12 @@ class VoiceCloningEngine {
   // Pieces the level detector called speech but the bytes proved empty. They never leave the
   // app, so they are counted here rather than in the figures above.
   piecesEmpty = 0;
+  // The loudest moment this app measured on his microphone during this call, on the analyser's own
+  // 0..1 scale. Null until the first sample is taken, because "never sampled" and "sampled as
+  // silence" are different findings and only one of them is his. This is the figure that lets a
+  // voice call say whether the man on the line was ever heard - the meter bar cannot, since it is
+  // drawn relative to a floor the gate learns and legitimately reads zero in a quiet room.
+  micPeak: number | null = null;
   secondsIn  = 0;
   secondsOut = 0;
   lastAnswerMs = 0;
@@ -732,6 +739,7 @@ class VoiceCloningEngine {
     this.spokeAt   = 0;
     this.answeredAt = 0;
     this.piecesSent = 0; this.piecesBack = 0; this.piecesEmpty = 0;
+    this.micPeak = null;
     this.secondsIn = 0; this.secondsOut = 0; this.lastAnswerMs = 0;
     // A call that is started twice on one engine must not inherit the previous call's
     // outstanding pieces or its sentence order.
@@ -812,6 +820,7 @@ class VoiceCloningEngine {
     if (!this.running || !this.inAnalyser) return;
     this.inAnalyser.getByteFrequencyData(this.inFreq);
     const level = voiceBandLevel(this.inFreq, this.audioCtx?.sampleRate ?? 48000);
+    if (this.micPeak === null || level > this.micPeak) this.micPeak = level;
     this.gate.update(level, dtMs / 1000);
     this.pieceMs += dtMs;
     if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; this.pauseMs = 0; }
@@ -1541,6 +1550,9 @@ export default function StreamPage() {
     cableBars.current.forEach(b => { if (!b.isConnected) cableBars.current.delete(b); else b.style.width = w; });
   }, []);
   const [micChecking, setMicChecking] = useState(false);
+  // What the last free microphone check concluded, and how loud his voice ever got on it. Null
+  // until he presses it: an unheard check is not a passed check.
+  const [micCheck, setMicCheck] = useState<{ verdict: MicVerdict; peak: number } | null>(null);
 
   // ── Noise cancellation ────────────────────────────────────────────────────
   // There is deliberately no switch here. Most customers never look for one, never
@@ -1702,6 +1714,10 @@ export default function StreamPage() {
   // opens rather than when one closes, so a failure partway through a working call still has to
   // be able to tell itself apart from a call that was blank from the start.
   const paintedRef       = useRef(false);
+  // Whether a microphone was ever handed to this call. The voice readout below cannot tell
+  // "the app was refused the device" from "the device was silent" without it, and those two are
+  // fixed in different places — one in Windows' privacy settings, one on the desk.
+  const micProvenRef     = useRef(false);
   // The wait announced for this machine, as an instant rather than a number, so a re-render
   // mid-count never re-arms it and a press that arrives during it can be refused on the spot.
   const holdUntilRef = useRef<number | null>(null);
@@ -2292,29 +2308,52 @@ export default function StreamPage() {
   // Opens the selected microphone for a few seconds, runs the same learning the app runs inside
   // a call, and paints it on the card. Bounded on purpose — the microphone is handed back when
   // it is finished instead of being left open on the page.
-  const micCheckRef = useRef<{ stop: () => void } | null>(null);
+  //
+  // It also reaches a conclusion now, in words, and remembers it. A moving bar is not an answer:
+  // the one question this card exists for is whether sound is actually arriving, and until the
+  // check could say so, a call that died of a muted microphone left the app with nothing to point
+  // at — not for the customer, and not in his administrator's log either.
+  const micCheckRef = useRef<{ stop: () => void; log: string } | null>(null);
+  const recordCheck = useCallback((v: MicVerdict, peak: number, seconds: number, device: string) => {
+    const line = micVerdictDetail(v, peak, seconds, device);
+    if (micCheckRef.current) micCheckRef.current.log = line;
+    setMicCheck({ verdict: v, peak });
+  }, []);
   const runMicCheck = useCallback(() => {
     micCheckRef.current?.stop();
     setMicChecking(true);
+    setMicCheck(null);
     let ctx: AudioContext | null = null;
     let stream: MediaStream | null = null;
     let timer: ReturnType<typeof setInterval> | null = null;
     let finished = false;
+    const t0 = Date.now();
+    let peak = 0;
+    let heard = false;
+    // Windows' own name for the device, so the log line says which microphone was tested when the
+    // machine has three of them and the customer has no way to know which one he is holding.
+    let device = "";
     const gate = new VoiceGate();
     const stop = () => {
       finished = true;
       if (timer) clearInterval(timer);
       stream?.getTracks().forEach(track => track.stop());
       ctx?.close().catch(() => {});
-      if (micCheckRef.current?.stop === stop) { micCheckRef.current = null; setMicChecking(false); }
+      if (micCheckRef.current?.stop === stop) {
+        micCheckRef.current = null;
+        setMicChecking(false);
+        recordCheck(micVerdict(true, peak, heard), peak, Math.max(1, Math.round((Date.now() - t0) / 1000)), device);
+      }
     };
-    micCheckRef.current = { stop };
+    micCheckRef.current = { stop, log: "" };
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
           audio: micAudioConstraints(selectedMicId || undefined), video: false,
         });
         if (finished) { stream.getTracks().forEach(track => track.stop()); return; }
+        const track = stream.getAudioTracks()[0];
+        device = track?.label ?? "";
         ctx = new AudioContext();
         if (ctx.state !== "running") { try { await ctx.resume(); } catch { /* ignore */ } }
         const src = ctx.createMediaStreamSource(stream);
@@ -2328,16 +2367,21 @@ export default function StreamPage() {
         timer = setInterval(() => {
           an.getByteFrequencyData(data);
           const level = voiceBandLevel(data, rate);
+          if (level > peak) peak = level;
           gate.update(level, WINDOW_MS / 1000);
+          if (gate.talking) heard = true;
           paintMic(gate.vu(level), gateState(gate));
         }, WINDOW_MS);
         setTimeout(stop, MIC_CHECK_SECONDS * 1000);
       } catch {
         paintMic(0, "silent");
-        if (micCheckRef.current?.stop === stop) { micCheckRef.current = null; setMicChecking(false); }
+        if (micCheckRef.current?.stop === stop) {
+          micCheckRef.current = null; setMicChecking(false);
+          recordCheck("refused", 0, Math.max(1, Math.round((Date.now() - t0) / 1000)), device);
+        }
       }
     })();
-  }, [selectedMicId, paintMic]);
+  }, [selectedMicId, paintMic, recordCheck]);
 
   useEffect(() => () => micCheckRef.current?.stop(), []);
 
@@ -2545,6 +2589,41 @@ export default function StreamPage() {
     return { cause, detail: noPictureDetail(evidence, cause, note), message: endReasonMessage(cause) };
   }, [refImageB64]);
 
+  /**
+   * What this machine saw while the cloned voice stayed missing, in the same two shapes the
+   * picture readout returns: a cause for his administrator's log, and a sentence for the customer.
+   *
+   * A voice call has no picture to watch and no camera counter to blame, so it must never be read
+   * through the evidence above. Twelve calls on one machine that died inside this app's own code
+   * were filed as "no connection came up between this computer and the video line" precisely
+   * because the page had no second readout and used the video one on a call with no video line.
+   *
+   * Every figure here is one the engine already counts for its own panel card — pieces sent,
+   * pieces answered, the loudest moment on his microphone. Nothing new is measured; it is only
+   * written down before the call is torn down, which is the half that was missing.
+   */
+  const voiceReadout = useCallback((lineAnswer = "", onAir = false) => {
+    const c = clonerRef.current;
+    const evidence: VoiceEvidence = {
+      micOpened: micProvenRef.current,
+      micPeak: c ? c.micPeak : null,
+      wordHeard: (c?.spokeAt ?? 0) > 0,
+      micStopped: !!c?.micGone,
+      piecesSent: c?.piecesSent ?? 0,
+      piecesEmpty: c?.piecesEmpty ?? 0,
+      piecesBack: c?.piecesBack ?? 0,
+      onAir,
+      answer: lineAnswer,
+    };
+    const cause = voiceCause(evidence);
+    const off = clockSkewMs();
+    const note = off === null || Math.abs(off) < CLOCK_NOTICE_MS
+      ? "" : ` [machine clock ${describeClockSkew(off)} real time]`;
+    const check = micCheckRef.current?.log;
+    return { cause, detail: voiceDetail(evidence, cause, note + (check ? ` [${check}]` : "")),
+             message: endReasonMessage(cause) };
+  }, []);
+
   // ─── Give up on a call that never puts a picture on screen ──────────────────
   // The gateway bills nothing before the first frame, so every second of a blank call is the
   // seller's cost and the customer's dead time. Left alone it sits there looking broken until
@@ -2586,13 +2665,20 @@ export default function StreamPage() {
       // Cloned audio that arrived in the meantime, or a call that is no longer the one being
       // watched, both mean there is nothing to give up on.
       if (sessionIdRef.current !== sid || account.live?.mediaAt !== null) return;
+      // This machine's own evidence, in the same breath as the give-up. Twenty-seven calls on one
+      // account died this way in ninety minutes and the only thing written down was that they died:
+      // not whether his microphone was carrying sound, not whether a single piece ever left for
+      // the voice service, not whether an answer came back and failed to reach his ears. Four
+      // different faults, one log line, and a customer told his call was "horrible" with nobody
+      // able to say which of the four it was.
+      const voice = voiceReadout("", account.live?.mediaAt !== null);
       reportCallFailure(sid, "engine",
-        `no cloned audio ${Math.round(PICTURE_GIVE_UP_MS / 1000)} s after the call opened; this app ended it`);
+        `no cloned audio ${Math.round(PICTURE_GIVE_UP_MS / 1000)} s after the call opened; this app ended it — ${voice.detail}`);
       void teardownStream();
-      toast({ title: t("Call ended"), description: endReasonMessage("no_voice"), variant: "destructive", withContact: true });
+      toast({ title: t("Call ended"), description: voice.message, variant: "destructive", withContact: true });
     }, Math.max(0, lease.startedAt + PICTURE_GIVE_UP_MS - Date.now()));
     return () => clearTimeout(id);
-  }, [isStreaming, account, teardownStream, toast]);
+  }, [isStreaming, account, teardownStream, toast, voiceReadout]);
 
   // ─── Start stream ──────────────────────────────────────────────────────────
   /**
@@ -2623,9 +2709,12 @@ export default function StreamPage() {
     // minutes: is his voice reaching the app, and will the voice service answer at all.
     if (needsVoice) setConnStep("mic"); else setConnStep("auth");
     setConnStatus("connecting");
+    // A new ask, so a clean answer to "did this machine ever get a microphone". Nothing after
+    // this line may read it as true unless the line below earned it.
+    micProvenRef.current = false;
     try {
       if (needsVoice) {
-        try { mic = await openMicrophone(selectedMicId || undefined, needsVoice); }
+        try { mic = await openMicrophone(selectedMicId || undefined, needsVoice); micProvenRef.current = true; }
         catch { return preflightFailure("mic_not_ready"); }
         // Nothing is metered here: this only asks the voice service to list his saved voices.
         // A service that will not answer at all is known before the lease opens rather than
@@ -2869,21 +2958,32 @@ export default function StreamPage() {
       // one cause that is ours rather than this machine's. A gateway refusal already names
       // itself, so its words are not read as a capacity answer.
       const words = err instanceof Error ? err.message : String(err);
-      const blind = blank ? blindReadout(err instanceof GatewayError ? "" : words) : null;
+      const answer = err instanceof GatewayError ? "" : words;
+      // A Voice Only call is read through its own evidence, never through the camera's. On this
+      // machine twelve calls died inside this app's code in half a second and were filed as "no
+      // connection came up between this computer and the video line", because the page had one
+      // readout and it was built for a picture — and a voice call never paints one, so the video
+      // ladder could only ever answer that nothing connected.
+      const read = voiceOnly ? voiceReadout(answer, false) : blank ? blindReadout(answer) : null;
+      // Where the failure happened, when it happened inside this app. The message alone was the
+      // same twelve times over and named nothing; one frame names the file and the line, and it
+      // goes only to his administrator's log, never to a screen.
+      const origin = err instanceof Error ? faultOrigin(err) : "";
       return classifyStartFailure(
         err instanceof GatewayError ? err.reason : null,
-        words + (blind === null ? clockNote : ` — ${blind.detail}`),
+        words + (origin ? ` [failed at ${origin}]` : "")
+          + (read === null ? clockNote : ` — ${read.detail}`),
         sessionId,
         err instanceof GatewayError ? err.retryAfterSeconds : null,
         engine,
-        blind !== null && blind.cause !== "picture_hold" ? blind.cause : null,
+        read !== null && read.cause !== "picture_hold" ? read.cause : null,
       );
     } finally {
       // A microphone proven before the lease and never handed to a pipeline belongs to
       // nothing, and Windows shows a recording light while it is open.
       if (!micHandedOff && mic) mic.getTracks().forEach(t => t.stop());
     }
-  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold, blindReadout,
+  }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold, blindReadout, voiceReadout,
       activeTab, camOnTab, micOnTab, runVCam, applyAudioRoute, setMicFor]);
 
   /**
@@ -3872,6 +3972,19 @@ export default function StreamPage() {
         <p style={{ fontSize: 11, color: C, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, minHeight: 15 }}>
           <span ref={addMicWord}>{t(MIC_CARD_WORDS.silent)}</span>
         </p>
+        {micCheck && !micChecking && (
+          // The conclusion, not another bar. A moving bar tells a person nothing he can act on
+          // when it stops moving: he cannot tell a muted microphone from a quiet room from a
+          // device Windows will not hand over, and all three look the same here.
+          <p style={{ fontSize: 11, color: micCheck.verdict === "opened" ? "hsl(150 70% 62%)" : "hsl(0 75% 68%)",
+                      fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4 }}>
+            {micCheck.verdict === "opened"
+              ? t("Sound is arriving from this microphone, so your call can be heard. If a call still comes back with no voice, the fault is not your microphone.")
+              : micCheck.verdict === "silent"
+              ? t("This microphone sent the app nothing at all for the whole check, not even the hiss of an empty room. It is muted, or it is not the microphone you think it is: unmute it or pick another one below and check again.")
+              : t("The app could not open this microphone at all. Let Stream Live use the microphone in Windows' settings, then pick it in the bar at the bottom of the page and check again.")}
+          </p>
+        )}
         <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, marginTop: 3 }}>
           {t("The AI always hears you the moment you open your mouth. What is held back is the room noise travelling out to your callers — nothing to switch on, nothing to set.")}
         </p>

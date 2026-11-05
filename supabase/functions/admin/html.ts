@@ -4547,6 +4547,33 @@ export const ADMIN_HTML = `<!doctype html>
     const mk = (key, pill, label, side, why) => ({ key, pill, label, side, why, kind, lines });
 
     if (!r.media_started_at) {
+      // A Voice Only call has no camera counter and no picture to wait for, so not one of the five
+      // video causes below can be true of it. The app now writes seven causes of its own for that
+      // call, each as \`cause=<name>\` at the head of the line it puts in this call's record, and the
+      // side named here is the side the app itself declares - never this page guessing from the
+      // prose, because the prose carries every figure at once. Before this a voice blank could only
+      // read "the app wrote a fault", which is how twelve calls that died inside our own code were
+      // shown to his administrator as a machine that would not connect.
+      if (r.modality === "audio") {
+        const crashed = said(/cause=app_crashed\\b/);
+        if (crashed) return mk("voice_crash", "fail", "No " + kind + ": this app's own code failed while opening the call", "our app", crashed);
+        const noMic = said(/cause=mic_not_ready\\b/);
+        if (noMic) return mk("voice_mic_closed", "fail", "No " + kind + ": no microphone reached this app at all", "his machine", noMic);
+        const deadMic = said(/cause=mic_silent\\b/);
+        if (deadMic) return mk("voice_mic_silent", "fail", "No " + kind + ": his microphone sent the app nothing, digital silence for the whole call", "his machine", deadMic);
+        const quiet = said(/cause=no_word_heard\\b/);
+        if (quiet) return mk("voice_no_word", "warn", "No " + kind + ": sound was arriving but no word was caught from it", "his machine", quiet);
+        const kept = said(/cause=nothing_sent\\b/);
+        if (kept) return mk("voice_nothing_sent", "fail", "No " + kind + ": the app heard him and sent nothing to the voice service", "our app", kept);
+        const noAnswer = said(/cause=service_silent\\b/);
+        if (noAnswer) return mk("voice_service_silent", "fail", "No " + kind + ": pieces went out and nothing came back", "our voice service", noAnswer);
+        const stuck = said(/cause=voice_hold\\b/);
+        if (stuck) return mk("voice_answer_stuck", "fail", "No " + kind + ": an answer came back and never reached his speakers", "our app", stuck);
+        // Voice rows written by a build older than this one carry no cause token. They are shown as
+        // what they are - not on record - instead of being read through the video causes below.
+        if (lines.length) return mk("voice_said_unk", "warn", "No " + kind + ", and the build that ran it wrote no voice evidence", "the app's own words, below", lines[0]);
+        return mk("voice_unk", "none", "No " + kind + ", nothing written down", "not on record", null);
+      }
       // The oversized photo is asked first because it is the newest of the named blanks and the
       // only one whose fix is a file on his disk. Before the app started keeping the line's own
       // words this row read \`no connection ever came up\`, which sent him hunting a VPN that was
@@ -4580,9 +4607,12 @@ export const ADMIN_HTML = `<!doctype html>
   }
 
   // His own definition of a sudden stop: a call he did not press Stop on, that either delivered
-  // nothing or was moving and then came down.
+  // nothing or was moving and then came down. A voice blank counts here too, which it never did
+  // before - it was simply absent from this list, so the tab he lost twelve calls on showed none of them.
   function endsSudden(x) {
-    return x.r.stopped_by !== "user" && (["refused", "photo", "camera", "never", "hold", "blank_said", "blank_quiet", "mid"].includes(x.why.key));
+    return x.r.stopped_by !== "user" && (["refused", "photo", "camera", "never", "hold", "blank_said", "blank_quiet", "mid",
+      "voice_crash", "voice_mic_closed", "voice_mic_silent", "voice_no_word", "voice_nothing_sent",
+      "voice_service_silent", "voice_answer_stuck", "voice_said_unk", "voice_unk"].includes(x.why.key));
   }
 
   function endsMatches(which, x) {
