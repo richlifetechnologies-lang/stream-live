@@ -31,9 +31,26 @@ export function pieceHasSignal(pcm: ArrayBuffer): boolean {
 
 // Cloned audio comes back at full level, so one absolute line works for every voice: 2% of
 // full scale is 12-35 dB under the answers that recording measured.
-const ANSWER_SILENCE_LEVEL = 0.02;
-const ANSWER_KEEP_HEAD_S = 0.06;   // a short breath before the first word, so nothing clips
-const ANSWER_KEEP_TAIL_S = 0.12;   // and a short one after, so the last consonant survives
+export const ANSWER_SILENCE_LEVEL = 0.02;
+export const ANSWER_KEEP_HEAD_S = 0.06;   // a short breath before the first word, so nothing clips
+export const ANSWER_KEEP_TAIL_S = 0.12;   // and a short one after, so the last consonant survives
+
+/** The first sample a person actually said, from `from` onwards, or -1 for none yet. */
+export function speechOnset(data: Float32Array, from: number): number {
+  for (let i = Math.max(0, from); i < data.length; i++) {
+    if ((data[i] < 0 ? -data[i] : data[i]) >= ANSWER_SILENCE_LEVEL) return i;
+  }
+  return -1;
+}
+
+/** Where the spoken part of a clip ends, so a tail of dead air is never put on air with it. */
+export function speechTailAt(data: Float32Array, sampleRate: number): number {
+  let last = -1;
+  for (let i = data.length - 1; i >= 0; i--) {
+    if ((data[i] < 0 ? -data[i] : data[i]) >= ANSWER_SILENCE_LEVEL) { last = i; break; }
+  }
+  return last < 0 ? 0 : Math.min(data.length / sampleRate, last / sampleRate + ANSWER_KEEP_TAIL_S);
+}
 
 /**
  * Where the spoken part of a cloned answer actually starts and how long it runs, so only that
@@ -52,4 +69,43 @@ export function answerTrim(data: Float32Array, sampleRate: number, duration: num
   const tailAt = Math.min(duration, last / sampleRate + ANSWER_KEEP_TAIL_S);
   const kept = tailAt - head;
   return kept > 0.05 ? { head, kept } : null;
+}
+
+// Silence going OUT is paid for twice: the service is given the whole length, and it answers in
+// roughly the same length back, so a sentence recorded with a second of room before it and two
+// after it comes back a second and a half longer than anything he said. Cutting it here is the
+// cheapest saving in the call - fewer bytes, a shorter answer, and less dead air in the queue.
+
+const PIECE_WINDOW = 320;          // 20 ms of the 16 kHz mono piece
+const PIECE_WINDOW_FLOOR = 150;    // counts: below this a window is his room, not his voice
+const PIECE_RELATIVE = 0.15;       // and one quieter than this share of the loudest window is silence
+const PIECE_PAD_BEFORE = 0.08;     // generous at both ends: a soft consonant must never be the cut
+const PIECE_PAD_AFTER = 0.20;
+
+/**
+ * The spoken span inside a raw 16-bit piece, in samples. Null means the piece holds nothing a
+ * person said, which is the same refusal the peak guard already makes on different grounds.
+ */
+export function pieceTrim(pcm: ArrayBuffer): { from: number; to: number } | null {
+  const s = new Int16Array(pcm);
+  const windows = Math.floor(s.length / PIECE_WINDOW);
+  if (windows < 2) return { from: 0, to: s.length };
+  const rms = new Float64Array(windows);
+  let max = 0;
+  for (let w = 0; w < windows; w++) {
+    let sum = 0;
+    for (let i = 0; i < PIECE_WINDOW; i++) { const v = s[w * PIECE_WINDOW + i]; sum += v * v; }
+    const r = Math.sqrt(sum / PIECE_WINDOW);
+    rms[w] = r;
+    if (r > max) max = r;
+  }
+  const threshold = Math.max(PIECE_WINDOW_FLOOR, max * PIECE_RELATIVE);
+  let first = -1, last = -1;
+  for (let w = 0; w < windows; w++) {
+    if (rms[w] >= threshold) { if (first < 0) first = w; last = w; }
+  }
+  if (first < 0) return null;
+  const from = Math.max(0, Math.floor(first * PIECE_WINDOW - PIECE_PAD_BEFORE * 16000));
+  const to = Math.min(s.length, Math.ceil((last + 1) * PIECE_WINDOW + PIECE_PAD_AFTER * 16000));
+  return to - from > PIECE_WINDOW ? { from, to } : null;
 }

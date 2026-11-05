@@ -19,7 +19,8 @@ import { CLOCK_NOTICE_MS, alignClock, clockSkewMs, describeClockSkew } from "../
 import { noPictureCause, noPictureDetail, type NoPictureEvidence } from "../lib/no-picture-cause";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
-import { answerTrim, pieceHasSignal, piecePeak } from "../lib/voice-piece";
+import { answerTrim, pieceHasSignal, piecePeak, pieceTrim, speechOnset, speechTailAt, ANSWER_KEEP_HEAD_S } from "../lib/voice-piece";
+import { mp3WholeFrameBytes } from "../lib/mp3-frames";
 import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../lib/lipsync";
 import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
@@ -122,6 +123,37 @@ const STYLES = [
   { id: "sketch",      label: "SKETCH",       color: "#dfe6e9", prompt: "pencil sketch style, hand-drawn, graphite lines, artistic rendering, detailed crosshatching" },
 ] as const;
 type StyleId = typeof STYLES[number]["id"];
+
+// ─── The locked master prompt ───────────────────────────────────────────────────
+// The instruction a video call runs on when he writes nothing himself. It is a code
+// constant: not a database value, not a per-account setting, and not editable on any
+// screen. It carries the four guarantees asked for — the person in the photo stays the
+// same person, the light stays bright and natural and does not wander, the picture
+// stays sharp and real, and his face and look hold from the first frame to the last.
+// The frame-rate clause is kept from the wording this replaced: left out, the engine
+// trades pictures for detail and the call stutters on the line, which is the one thing
+// a live stream cannot do.
+//
+// It stays in English on purpose. This is an instruction handed to the video engine,
+// not a sentence a customer reads, so it does not go through the language files; what
+// he reads about it is translated, and shown as text he cannot submit (see PromptCard).
+const MASTER_PROMPT = "Keep the exact face, appearance and features of the person in the uploaded photo, unchanged for the whole video, with bright natural consistent lighting, high visual quality and realistic detail, and maintain a good FPS";
+
+/**
+ * The prompt one of the two video lines will be handed, for this tab, right now.
+ *
+ * Two rules, and they are the whole of it: anything he has typed is the ONLY prompt —
+ * his words are never glued onto the master prompt, on the start path or on a mid-call
+ * update. And an empty box falls back to the locked master prompt, with the chosen
+ * style's look text appended to it, so the style buttons he has always had still change
+ * the picture instead of becoming a dead click.
+ */
+function _videoPromptFor(customText: string, styleLook: string): string {
+  const typed = customText.trim();
+  if (typed) return typed;
+  const look = styleLook.trim();
+  return look ? `${MASTER_PROMPT}, ${look}` : MASTER_PROMPT;
+}
 
 // ─── Built-in voices ──────────────────────────────────────────────────────────
 const BUILTIN_VOICES = [
@@ -447,6 +479,19 @@ const CLONE_SEND_MS       = 6000;
 // talker who never pauses cannot open an unlimited number of requests on one call.
 const CLONE_MAX_IN_FLIGHT = 3;
 
+// An answer is handed to the player in two steps rather than one, because the service sends a
+// compressed file that has to be decoded before anything can be heard, and measured on his own
+// recorded call the wait for the whole file was more than twice the wait for its first byte.
+// The first step is deliberately small: it is the one that decides when his voice reaches the
+// caller. The steps after it are larger so the decoder is not called once per 26 ms frame.
+const AIR_FIRST_BYTES = 2048;   // about a tenth of a second of answer: the first words, as soon as they are real
+const AIR_STEP_BYTES  = 6144;   // about 0.4 s of answer per hand-over once it is speaking
+// How much quiet, seen after his last word, is taken as the sentence having ended. It is shorter
+// than the pause between two words anyone speaks, so cutting there cannot swallow a syllable - and
+// if it ever did, the next hand-over simply carries on from that same second, since every prefix is
+// decoded from the top of the answer.
+const AIR_SETTLE_S    = 0.15;
+
 // A cloning call is not on air until the cloned voice has answered once, because a call
 // whose voice never arrived is not the call the customer bought. The hold is bounded so a
 // man who simply has not spoken yet still pays like anyone else.
@@ -489,6 +534,57 @@ async function voiceDoorReason(): Promise<string | null> {
   } catch { return "upstream_key"; }
 }
 
+/**
+ * The copy of the microphone the voice service is handed, cleaned on the way.
+ *
+ * A cloned call is built out of whatever comes out of the microphone, and nobody speaks the same
+ * way: one man leans into it and distorts, another is a metre back and barely reaches it, and the
+ * copier has to work from whichever of those it got. Three fixed stages, in the order that cannot
+ * fight each other: a rumble filter (fans, traffic and air-conditioning sit under the voice, and
+ * on the way in they are pure cost), a level stage that holds a loud speaker down and lifts the
+ * overall working level toward it, and a clip guard on the way out so nothing that leaves here is
+ * over full scale.
+ *
+ * Deliberately absent: the browser's automatic level. It is switched off on these tabs already,
+ * because it winds itself up through silence hunting for a voice and the clone then arrives
+ * pumping - which is a fault on the cable, not a cure for a quiet microphone. These three stages
+ * are fixed: they do the same job to a whisper and to a shout, so a pause still sounds like his
+ * room and not like a machine thinking.
+ *
+ * It feeds one thing only: the recorder that carries his words to the service. The level detector
+ * that decides when he has finished speaking keeps reading the untreated microphone, exactly as it
+ * did before, so no speech rule is retuned by this, and nothing here is connected to the cable.
+ */
+function conditionMicrophoneForService(ctx: AudioContext, src: MediaStreamAudioSourceNode):
+  { stream: MediaStream; nodes: AudioNode[] } {
+  const lowcut = ctx.createBiquadFilter();
+  lowcut.type = "highpass"; lowcut.frequency.value = 90; lowcut.Q.value = 0.7;
+  const level = ctx.createDynamicsCompressor();
+  level.threshold.value = -20; level.knee.value = 16; level.ratio.value = 4;
+  level.attack.value = 0.004; level.release.value = 0.18;
+  const makeup = ctx.createGain(); makeup.gain.value = 1.7;
+  const guard = ctx.createDynamicsCompressor();
+  guard.threshold.value = -2; guard.knee.value = 0; guard.ratio.value = 20;
+  guard.attack.value = 0.002; guard.release.value = 0.08;
+  const dest = ctx.createMediaStreamDestination();
+  src.connect(lowcut); lowcut.connect(level); level.connect(makeup);
+  makeup.connect(guard); guard.connect(dest);
+  return { stream: dest.stream, nodes: [lowcut, level, makeup, guard, dest] };
+}
+
+// The recorder's own container costs the call nothing to improve: the bytes never leave this app,
+// because the piece is decoded and rebuilt as raw samples before it is sent. So it is asked for at
+// a rate well above the default, which is the difference between a rough voice arriving at the
+// service as rough and arriving as rough *and* blurred. If this machine refuses the request the
+// recorder is built the plain way, which is exactly what every call did before.
+function makePieceRecorder(stream: MediaStream): MediaRecorder {
+  try {
+    return new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus", audioBitsPerSecond: 96000 });
+  } catch {
+    return new MediaRecorder(stream, { mimeType: "audio/webm;codecs=opus" });
+  }
+}
+
 /** A cloned answer that holds real speech, with the part of it worth putting on air. */
 type ClonedAnswer = { audio: AudioBuffer; head: number; kept: number; waitedMs: number; serviceMs: number };
 
@@ -508,6 +604,9 @@ class VoiceCloningEngine {
   private inSrc:      MediaStreamAudioSourceNode | null = null;
   private inAnalyser: AnalyserNode | null = null;
   private inFreq:     Uint8Array<ArrayBuffer> = new Uint8Array(0);
+  // The cleaned copy of the microphone that is recorded and sent, held here so its filters
+  // cannot be collected out from under a running call.
+  private cond: { stream: MediaStream; nodes: AudioNode[] } | null = null;
   private gate = new VoiceGate();
   private pump: ReturnType<typeof setInterval> | null = null;
   // How many pieces are with the voice service right now, and whether one is mid-hand-over
@@ -647,7 +746,10 @@ class VoiceCloningEngine {
 
     const chunkMs = 2000;
     const chunks: Blob[] = [];
-    this.recorder = new MediaRecorder(micStream, { mimeType: "audio/webm;codecs=opus" });
+    // His own voice, filtered on the way, is what the service is given to copy. The tap above
+    // still watches the untreated microphone, so the sentence detector is untouched by this.
+    this.cond = conditionMicrophoneForService(this.audioCtx, this.inSrc);
+    this.recorder = makePieceRecorder(this.cond.stream);
 
     this.recorder.ondataavailable = (ev) => { if (ev.data.size > 0) chunks.push(ev.data); };
     this.recorder.onstop = () => {
@@ -740,17 +842,30 @@ class VoiceCloningEngine {
     let answer: ClonedAnswer | null = null;
     try {
       if (!this.running || !this.audioCtx || !this.call || !this.voiceId) return;
-      const pcm = await this._toPcm16k(blob);
-      if (!pcm || !this.running) return;
+      const raw = await this._toPcm16k(blob);
+      if (!raw || !this.running) return;
       // An empty room is not a sentence. This is judged off the bytes about to leave, not off
       // the level detector, because a quiet room recorded right after a loud passage reads as
       // speech to a bar that has not caught up with the silence: five pieces in one recorded
       // call went out that way and came back as silence for the caller.
-      if (!pieceHasSignal(pcm)) {
+      if (!pieceHasSignal(raw)) {
         this.piecesEmpty += 1;
-        console.warn(`[voice] piece #${this.piecesEmpty} held no signal (peak ${piecePeak(pcm)}), not sent`);
+        console.warn(`[voice] piece #${this.piecesEmpty} held no signal (peak ${piecePeak(raw)}), not sent`);
         return;
       }
+      // And only the part he actually spoke leaves. A piece recorded a second before his first
+      // word and two after his last one is bought at that full length, answered back at the
+      // same length, and the dead air in the middle of it then has to be played before the next
+      // sentence can start - so the room he was sitting in was pushing his voice further and
+      // further behind the picture, twice over.
+      const span = pieceTrim(raw);
+      if (!span) {
+        this.piecesEmpty += 1;
+        console.warn(`[voice] piece #${this.piecesEmpty} held no words once its silence was measured, not sent`);
+        return;
+      }
+      const pcm = span.from === 0 && span.to * 2 === raw.byteLength
+        ? raw : raw.slice(span.from * 2, span.to * 2);
       // 16-bit mono at 16 kHz, which is what the piece was rebuilt as before it left.
       this.piecesSent += 1;
       this.secondsIn += pcm.byteLength / 2 / 16000;
@@ -762,10 +877,18 @@ class VoiceCloningEngine {
       const sentAt = performance.now();
       const res = await this._send(form);
       if (!res.ok) { console.warn(`[voice] engine returned HTTP ${res.status}`); this.onError?.(endReasonMessage("upstream_key")); return; }
-      // The relay stamps how long the voice service itself took to start answering. Whatever is
-      // left of this piece's wait is the way there and back, which is the split the panel shows.
+      // The relay stamps how long the voice service took to begin answering.
       const serviceMs = Math.max(0, Math.round(Number(res.headers.get("x-voice-service-ms") ?? 0) || 0));
-      const buf = await res.arrayBuffer();
+      // Only the answer whose turn it is may go on air as it arrives. An answer for a later
+      // sentence has to be heard after the one before it, so letting it start early would put
+      // his words out of order - the one thing a caller cannot be forgiven for hearing.
+      const type = res.headers.get("content-type") ?? "";
+      const airable = seq === this.seqAir && !!res.body && /mpeg|mp3/i.test(type);
+      const read = await this._readAnswer(res, airable, sentAt, serviceMs);
+      // His words are already on their way to the cable. Replaying them from a second decode
+      // would give the caller the same sentence twice.
+      if (read.aired) return;
+      const buf = read.bytes.buffer as ArrayBuffer;
       if (!this.running || !this.audioCtx) return;
       if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
       const decoded = await this.audioCtx.decodeAudioData(buf);
@@ -788,6 +911,108 @@ class VoiceCloningEngine {
       if (this.inFlight > 0) this.inFlight -= 1;
       this._settle(seq, answer);
     }
+  }
+
+  // Read one answer. When it is this answer's turn to be heard, it is decoded in pieces as its
+  // bytes land and each piece goes straight on air, so the first word reaches the caller while
+  // the rest of the sentence is still arriving. Anything else - an answer that is not next in
+  // line, a reply this file cannot walk, a decoder that objects halfway through - is collected
+  // whole and handed back for the path that has been running since before this, so a call is
+  // never left with no voice because a faster route refused to work.
+  private async _readAnswer(res: Response, airable: boolean, sentAt: number, serviceMs: number):
+    Promise<{ bytes: Uint8Array; aired: boolean }> {
+    if (!airable || !res.body) return { bytes: new Uint8Array(await res.arrayBuffer()), aired: false };
+    // The body is opened once, here. Everything read is kept, so an answer that progressive
+    // playing cannot deliver still arrives whole for the path that has always worked.
+    let buf = new Uint8Array(0);
+    let cut = 0;           // answer bytes already handed to the decoder
+    let playedUntil = 0;   // seconds of this answer already put on air
+    let onset = -1;        // where his first spoken word is, once found
+    let scanned = 0;       // and how far the search for it has gone
+    let walked = true;
+    let aired = false;
+    const reader = res.body.getReader();
+    const pump = async (final: boolean) => {
+      if (!walked || !this.running || !this.audioCtx) return;
+      const w = mp3WholeFrameBytes(buf);
+      if (w < 0) { walked = false; return; }                       // not an MP3 this can cut
+      if (!final && w - cut < (aired ? AIR_STEP_BYTES : AIR_FIRST_BYTES)) return;
+      cut = w;
+      const piece = new Uint8Array(w);
+      piece.set(buf.subarray(0, w));
+      if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
+      let decoded: AudioBuffer;
+      try { decoded = await this.audioCtx.decodeAudioData(piece.buffer); }
+      catch { walked = false; return; }
+      const data = decoded.getChannelData(0), rate = decoded.sampleRate;
+      if (onset < 0) {
+        const found = speechOnset(data, scanned);
+        // Still only his room. Nothing is put on air for it, and the answer is not counted as
+        // one: a clone that came back with no words in it must not start the money clock.
+        if (found < 0) { scanned = data.length; return; }
+        onset = found;
+      }
+      const from = Math.max(playedUntil, Math.max(0, onset / rate - ANSWER_KEEP_HEAD_S));
+      // Where his final consonant is. A prefix that stops inside the sentence is aired whole, so
+      // the queue never stutters for want of bytes; one that stops in enough quiet is taken as the
+      // end of the sentence and cut there, so the dead air after a sentence never rides the queue
+      // and pushes the next one behind the moving picture. The most either way can add is the
+      // allowance itself - a fraction of a second, against the seconds the backlog used to cost.
+      const tail = speechTailAt(data, rate);
+      const upto = (final || decoded.duration - tail >= AIR_SETTLE_S) ? tail : decoded.duration;
+      if (upto - from <= 0.02) return;
+      if (!aired) {
+        this.lastAnswerMs = Math.round(performance.now() - sentAt);
+        this.serviceMs = serviceMs;
+      }
+      this._airChunk(decoded, from, upto - from, !aired);
+      playedUntil = upto;
+      aired = true;
+    };
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) {
+          const grown = new Uint8Array(buf.length + value.length);
+          grown.set(buf, 0); grown.set(value, buf.length);
+          buf = grown;
+        }
+        if (!this.running) break;
+        await pump(done);
+        if (done) break;
+      }
+    } catch { /* the answer is over; what was collected goes to the fallback */ }
+    return { bytes: buf, aired };
+  }
+
+  // Put one decoded piece of an answer on air. It joins the queue exactly where the last piece
+  // of it stopped, so a sentence played in four hand-overs is still one continuous voice.
+  private _airChunk(buf: AudioBuffer, from: number, dur: number, first: boolean) {
+    if (!this.running || !this.audioCtx || !this.voiceBus) return;
+    if (first) {
+      this.piecesBack += 1;
+      // Answered: the watchdog that decides whether this call is still worth running is
+      // reset here, the moment real cloned audio is on its way to the cable. The first
+      // time it happens is also the moment the call goes on air and starts being metered.
+      const wasSilent = this.answeredAt === 0;
+      this.answeredAt = Date.now();
+      if (wasSilent) this.onFirstAnswer?.();
+    }
+    const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
+    const src = this.audioCtx.createBufferSource();
+    src.buffer = buf; src.connect(this.voiceBus); src.start(playAt, from, dur);
+    this.nextPlayAt = playAt + dur;
+    this.secondsOut += dur;
+    // Level is read through the player, not off these samples. Measuring the audio
+    // that merely arrived drew a dancing wave over total silence whenever the engine
+    // was asleep, which is how a dead cable got mistaken for a working one.
+    const live = this.playerLive ? this.playerLive() : true;
+    if (!live) { this.onVu?.(0); return; }
+    const data = buf.getChannelData(0);
+    const i0 = Math.floor(from * buf.sampleRate);
+    const i1 = Math.min(data.length, Math.floor((from + dur) * buf.sampleRate));
+    let sum = 0; for (let i = i0; i < i1; i++) sum += data[i] * data[i];
+    this.onVu?.(Math.min(100, Math.sqrt(sum / Math.max(1, i1 - i0)) * 300));
   }
 
   // An answer has arrived, or it never will. Hand it to the air in sentence order: with more
@@ -847,6 +1072,7 @@ class VoiceCloningEngine {
     this.recorder = null;
     try { this.inSrc?.disconnect(); } catch { /* ignore */ }
     this.inSrc = null; this.inAnalyser = null;
+    this.cond = null;
     try { this.audioCtx?.close(); } catch { /* ignore */ }
     this.audioCtx = null; this.analyserNode = null;
   }
@@ -1052,8 +1278,8 @@ async function _startTrialVideoSession(
     client.realtime.connect(localStream, {
       model: sdk.models.realtime("lucy-2.5"),
       initialState: {
-        // enhance stays off: the style prompt is written to be taken literally,
-        // and a server-side rewrite would make the two pipelines behave apart.
+        // enhance stays off: the master prompt and the style look are written to be taken
+        // literally, and a server-side rewrite would make the two pipelines behave apart.
         prompt: { text: prompt, enhance: false },
         ...(refB64 ? { image: `data:image/jpeg;base64,${refB64}` } : {}),
       },
@@ -2350,7 +2576,10 @@ export default function StreamPage() {
 
       setConnStep(voiceOnly ? "voice" : "engine");
       const style  = STYLES.find(s => s.id === selectedStyle)!;
-      const prompt = customPrompt.trim() || style.prompt;
+      // His own words, or the locked master prompt with his chosen style's look. This one value
+      // feeds both video lines (the normal one and the trial one), so a call can never start on
+      // a prompt different from the one this column shows him.
+      const prompt = _videoPromptFor(customPrompt, style.prompt);
 
       // ── Audio sync pipeline (video tabs only) ──────────────────────────
       let sendStream = localStreamRef.current ?? new MediaStream();
@@ -2701,18 +2930,22 @@ export default function StreamPage() {
   const handleStop = useCallback(() => { stoppedByHandRef.current = true; teardownStream(); }, [teardownStream]);
 
   // ─── Prompt updates ────────────────────────────────────────────────────────
+  // Everything that can change the prompt on a live call routes through here, so the
+  // rule "typed words replace the master prompt outright, empty box means the master
+  // prompt" is written once and holds on the start, the style button, the keystroke and
+  // the photo paths alike.
   const handlePromptChange = useCallback((p: string) => {
     if (videoSessionRef.current && isStreaming) _updatePrompt(videoSessionRef.current, p, refImageB64);
   }, [isStreaming, refImageB64]);
 
   const handleStyleSelect = useCallback((id: StyleId) => {
     setSelectedStyle(id);
-    handlePromptChange(customPrompt.trim() || STYLES.find(s => s.id === id)!.prompt);
+    handlePromptChange(_videoPromptFor(customPrompt, STYLES.find(s => s.id === id)!.prompt));
   }, [customPrompt, handlePromptChange]);
 
   const handleCustomPromptChange = useCallback((v: string) => {
     setCustomPrompt(v);
-    if (isStreaming) handlePromptChange(v.trim() || STYLES.find(s => s.id === selectedStyle)!.prompt);
+    if (isStreaming) handlePromptChange(_videoPromptFor(v, STYLES.find(s => s.id === selectedStyle)!.prompt));
   }, [isStreaming, selectedStyle, handlePromptChange]);
 
   // ─── Reference image ───────────────────────────────────────────────────────
@@ -2723,7 +2956,9 @@ export default function StreamPage() {
       const data = ev.target?.result as string; const b64 = data.split(",")[1] ?? data;
       setRefImagePreview(data); setRefImageB64(b64);
       if (videoSessionRef.current && isStreaming) {
-        _updatePrompt(videoSessionRef.current, customPrompt.trim() || STYLES.find(s => s.id === selectedStyle)!.prompt, b64);
+        // The photo travels with the prompt that is winning on this tab right now, so a
+        // mid-call upload cannot quietly hand the engine the master prompt over his words.
+        _updatePrompt(videoSessionRef.current, _videoPromptFor(customPrompt, STYLES.find(s => s.id === selectedStyle)!.prompt), b64);
       }
     };
     r.readAsDataURL(file); e.target.value = "";
@@ -3116,7 +3351,9 @@ export default function StreamPage() {
     </div>
   );
 
-  /** His own words about the look — empty unless he writes one, so the app never speaks for him. */
+  /** His own words about the look — empty unless he writes one, so the app never speaks for him.
+   *  Empty is not silence: an empty box means the locked master prompt underneath it, and the box
+   *  is never pre-filled, so a stray keystroke cannot submit the master prompt as his own words. */
   const PromptCard = () => (
     <div data-tour="prompt" style={glass}>
       <p style={{ ...headLab, padding: "15px 16px 0" }}>{t("Custom Prompt")}</p>
@@ -3126,6 +3363,18 @@ export default function StreamPage() {
           onFocus={e => { e.target.style.borderColor = "hsl(187 100% 52% / 0.5)"; }}
           onBlur={e => { e.target.style.borderColor = "hsl(222 40% 14%)"; }} />
         {customPrompt && <button onClick={() => handleCustomPromptChange("")} style={{ marginTop: 6, fontSize: 11, color: "hsl(222 25% 50%)", background: "none", border: "none", cursor: "pointer", fontFamily: "'Rajdhani',sans-serif" }}>{t("↺ Reset")}</button>}
+        <p style={{ margin: "8px 0 0", fontSize: 11, lineHeight: 1.5, color: "hsl(222 25% 62%)", fontFamily: "'Rajdhani',sans-serif" }}>
+          {customPrompt.trim() ? t("Your own words will be used for this video.") : t("Leave this box empty to use the built-in master prompt.")}
+        </p>
+        {/* Read-only, and plain text rather than the box's value: what the engine will be
+            handed is shown to him, but nothing here can put it into his submitted prompt.
+            dir="ltr" because the sentence is English on an Arabic screen. */}
+        {!customPrompt.trim() && (
+          <div style={{ marginTop: 8 }}>
+            <p style={{ ...headLab, fontSize: 9 }}>{t("Built-in master prompt")}</p>
+            <p dir="ltr" style={{ margin: "4px 0 0", padding: 8, borderRadius: 8, background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(222 25% 55%)", fontSize: 10, lineHeight: 1.5, fontFamily: "'Rajdhani',sans-serif" }}>{MASTER_PROMPT}</p>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3216,15 +3465,17 @@ export default function StreamPage() {
 
 
   // ─── Voice cloning panel ───────────────────────────────────────────────────
-  // The wait, split as far as it honestly goes. The whole round trip out of this app is always
-  // known; the part the voice service admits to is stamped on its answer, and only appears once
-  // the relay starts stamping. A customer who hears his cloned voice arrive late needs to know
-  // whether to blame our line or the service — one combined number answers nothing.
+  // The wait, stated as what it actually is. This app knows the gap between his words leaving
+  // and the cloned words being heard, and the relay stamps how long the voice service took to
+  // begin answering. The difference between the two is NOT the line between us, which is what
+  // these words used to claim: the service spends most of it still making the rest of the
+  // sentence. Naming that honestly is the whole point of showing the figures at all - a
+  // customer deciding whether to blame our line or the service needs the true answer.
   const VoiceWaitSentence = () => (
     <>
-      {t("Last answer arrived in {ms} ms.", { ms: String(voiceRead.lastMs) })}
+      {t("Cloned words reached the call {ms} ms after yours left.", { ms: String(voiceRead.lastMs) })}
       {voiceRead.svcMs > 0
-        ? t(" Of that, {svc} ms was the voice service itself and the rest was the line between us.", { svc: String(voiceRead.svcMs) })
+        ? t(" The voice service took {svc} ms of that to start answering.", { svc: String(voiceRead.svcMs) })
         : ""}{" "}
     </>
   );
