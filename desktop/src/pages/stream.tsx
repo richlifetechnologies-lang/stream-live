@@ -637,11 +637,16 @@ const CLONE_MIN_VOICED_MS = 350;
 // holds the piece open through 0.45 s of quiet after a word, so this bar sits about that much above
 // the seconds actually spoken: measured with the shipped build, a 0.7 s burst reads as 1.1 s here.
 const CLONE_MIN_TURN_SPEECH_MS = 1200;
-// ...but a short answer really is a short answer, so the wait for the rest of it is bounded by this
-// much QUIET after his last sound, not by the length of the recording. His detector has already held
-// the piece open through 0.45 s of quiet by the time this starts counting, so the longest bridge is
-// about a second: longer than any pause inside a sentence, shorter than the pause between two of them.
-const CLONE_TURN_HOLD_MS       = 600;
+// Both waits below are now counted from the LAST SOUND he made, not from the moment his detector
+// gives up on him. That detector holds the microphone open for 0.45 s after the voice drops, so
+// counting from its release made every turn pay that 0.45 s twice - once to decide he had stopped,
+// and again in the hold on top of it. Measured from the sound itself, the same numbers buy the same
+// protection against splitting a sentence and land the cloned voice about 0.15 s sooner on a full
+// sentence and about 0.45 s sooner on a short one.
+const CLONE_QUIET_CUT_MS   = 300;  // this much quiet after his last sound ends a turn he has
+                                   // already spoken enough of
+const CLONE_TURN_HOLD_MS   = 600;  // ...and a turn that is still only a fragment gets this much
+                                   // quiet before it is given up on and sent as it stands
 const CLONE_IDLE_MS       = 5000; // a piece holding no speech at all is thrown away this often
 // A request that never lands must not hold the pipeline shut for the rest of the call, so the
 // wait has a deadline: the piece is abandoned and his next words are tried again.
@@ -902,11 +907,13 @@ class VoiceCloningEngine {
   // so a click or a chair accumulates most of a second of it; this one only counts the sound that
   // was really there. The bar that hands a piece over - and pays for it - is set on this number.
   private voiceMs  = 0;
-  // How long his own detector has called the microphone quiet, counted inside the piece being
-  // recorded. Silence is measured apart from speech on purpose: the two answer different questions -
-  // "has he said enough" and "has he really stopped" - and adding them together is what cut a
-  // sentence off after its first word whenever he paused for breath before starting it.
-  private pauseMs  = 0;
+  // How long since the microphone last actually cleared the gate's opening level. Silence is
+  // measured apart from speech on purpose: the two answer different questions - "has he said
+  // enough" and "has he really stopped" - and adding them together is what cut a sentence off after
+  // its first word whenever he paused for breath before starting it. This counts from the sound
+  // itself rather than from the detector's 0.45 s release, so a turn is judged over from the moment
+  // he stops speaking instead of from the moment the detector admits he has.
+  private quietMs  = 0;
 
   // The two ways this engine reaches the voice line, both of them through the gateway that
   // holds the key: `ask` sends a recording and waits for JSON, `speak` sends words and gets the
@@ -1025,7 +1032,7 @@ class VoiceCloningEngine {
     // A call that is started twice on one engine must not inherit the previous call's
     // outstanding pieces, its words, or its sentence order.
     this.inFlight = 0; this.cutting = false;
-    this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.pauseMs = 0;
+    this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.quietMs = 0;
     this.seqAssign = 0; this.seqText = 0; this.words.clear();
     this.segments = []; this.asking = 0; this.givenUp = 0;
     this.micGone = false; this.serviceMs = 0;
@@ -1087,7 +1094,7 @@ class VoiceCloningEngine {
       // A piece that holds nothing a person said never leaves this app: it is thrown away here, so
       // no turn is opened and nothing is asked of the voice line. This is the bar that stops his
       // Stop-button click from coming back spoken in his own cloned voice.
-      this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.pauseMs = 0;
+      this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.quietMs = 0;
       // The next piece starts gathering immediately, before this one has been answered, so
       // nothing he says while the service is thinking is lost.
       this.recorder!.start(chunkMs);
@@ -1114,8 +1121,8 @@ class VoiceCloningEngine {
     if (this.cond) this.cond.mute.gain.setTargetAtTime(this.gate.muted ? 0 : 1, this.audioCtx!.currentTime, 0.008);
     this.pieceMs += dtMs;
     if (this.gate.voiced) this.voiceMs += dtMs;
-    if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; this.pauseMs = 0; }
-    else this.pauseMs += dtMs;
+    this.quietMs = this.gate.voiced ? 0 : this.quietMs + dtMs;
+    if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; }
     // A piece is closed on his own pause, not when the last answer happens to arrive. Holding
     // it open until then stretched every sentence with silence while the service thought, and
     // the cloned voice fell further and further behind the way he speaks. The number of
@@ -1124,11 +1131,11 @@ class VoiceCloningEngine {
     // His own detector decides when a sentence is over, so a word is never sliced by a
     // stopwatch and a pause in the conversation is never read as a fault.
     if (this.speechMs >= CLONE_MIN_SPEECH_MS &&
-        (!this.gate.talking || this.speechMs >= CLONE_MAX_SPEECH_MS)) {
+        (this.quietMs >= CLONE_QUIET_CUT_MS || this.speechMs >= CLONE_MAX_SPEECH_MS)) {
       // His pause is not the end of his turn if the turn is only a fragment. Waiting this much
       // quiet after his last sound costs at most that much of the wait, and it is the difference
       // between the service hearing "the weather to" and hearing the whole of what he asked.
-      if (this.speechMs < CLONE_MIN_TURN_SPEECH_MS && this.pauseMs < CLONE_TURN_HOLD_MS) return;
+      if (this.speechMs < CLONE_MIN_TURN_SPEECH_MS && this.quietMs < CLONE_TURN_HOLD_MS) return;
       this._cut(); return;
     }
     if (this.speechMs === 0 && this.pieceMs >= CLONE_IDLE_MS) this._cut();
@@ -1463,7 +1470,7 @@ class VoiceCloningEngine {
     this.running = false;
     if (this.pump) { clearInterval(this.pump); this.pump = null; }
     this.inFlight = 0; this.cutting = false;
-    this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.pauseMs = 0;
+    this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.quietMs = 0;
     this.words.clear(); this.segments = []; this.asking = 0;
     this.outDest = null;
     this.voiceBus = null;
@@ -4132,8 +4139,8 @@ export default function StreamPage() {
         </div>
         {!tuneFold && (
           <div style={{ borderTop: "1px solid hsl(222 40% 12%)", marginTop: 9, paddingTop: 2 }}>
-            {TuneDial("Stability", "Higher holds the voice level and steady. Lower lets it rise and fall the way a person talking does.", voiceStability, v => applyTune("stability", v))}
-            {TuneDial("Similarity", "Higher keeps it faithful to the recording your voice was made from. Lower lets it relax.", voiceSimilarity, v => applyTune("similarity", v))}
+            {TuneDial("Stability", "How much the voice moves while it talks. Higher is even and careful. Lower sounds more like a person.", voiceStability, v => applyTune("stability", v))}
+            {TuneDial("Similarity", "How close it stays to the real voice. Higher copies it exactly, noise and all. Lower sounds cleaner.", voiceSimilarity, v => applyTune("similarity", v))}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10 }}>
               <p style={{ fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>
                 {t("Your next sentence uses it. It changes no voice, no price and no minutes.")}
