@@ -32,8 +32,6 @@ export function pieceHasSignal(pcm: ArrayBuffer): boolean {
 // Cloned audio comes back at full level, so one absolute line works for every voice: 2% of
 // full scale is 12-35 dB under the answers that recording measured.
 export const ANSWER_SILENCE_LEVEL = 0.02;
-export const ANSWER_KEEP_HEAD_S = 0.06;   // a short breath before the first word, so nothing clips
-export const ANSWER_KEEP_TAIL_S = 0.12;   // and a short one after, so the last consonant survives
 
 /** The first sample a person actually said, from `from` onwards, or -1 for none yet. */
 export function speechOnset(data: Float32Array, from: number): number {
@@ -41,34 +39,6 @@ export function speechOnset(data: Float32Array, from: number): number {
     if ((data[i] < 0 ? -data[i] : data[i]) >= ANSWER_SILENCE_LEVEL) return i;
   }
   return -1;
-}
-
-/** Where the spoken part of a clip ends, so a tail of dead air is never put on air with it. */
-export function speechTailAt(data: Float32Array, sampleRate: number): number {
-  let last = -1;
-  for (let i = data.length - 1; i >= 0; i--) {
-    if ((data[i] < 0 ? -data[i] : data[i]) >= ANSWER_SILENCE_LEVEL) { last = i; break; }
-  }
-  return last < 0 ? 0 : Math.min(data.length / sampleRate, last / sampleRate + ANSWER_KEEP_TAIL_S);
-}
-
-/**
- * Where the spoken part of a cloned answer actually starts and how long it runs, so only that
- * is played. Null means the answer holds no speech at all - it is not the cloned voice, and it
- * must never reach the cable, the readout or the money clock.
- */
-export function answerTrim(data: Float32Array, sampleRate: number, duration: number):
-  { head: number; kept: number } | null {
-  let first = -1, last = -1;
-  for (let i = 0; i < data.length; i++) {
-    const v = data[i] < 0 ? -data[i] : data[i];
-    if (v >= ANSWER_SILENCE_LEVEL) { if (first < 0) first = i; last = i; }
-  }
-  if (first < 0) return null;
-  const head = Math.max(0, first / sampleRate - ANSWER_KEEP_HEAD_S);
-  const tailAt = Math.min(duration, last / sampleRate + ANSWER_KEEP_TAIL_S);
-  const kept = tailAt - head;
-  return kept > 0.05 ? { head, kept } : null;
 }
 
 // Silence going OUT is paid for twice: the service is given the whole length, and it answers in

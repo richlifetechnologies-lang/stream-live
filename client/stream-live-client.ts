@@ -808,8 +808,9 @@ export class StreamLiveClient {
   }
 
   /**
-   * ElevenLabs through the gateway. `sessionId` is required for speech-to-speech /
-   * text-to-speech (it proves the call is being metered); voice-library calls pass none.
+   * ElevenLabs through the gateway. `sessionId` is required for the two halves of a cloned
+   * voice call — reading his words out of a recording, and saying those words back in the chosen
+   * voice — because it proves the call is being metered; voice-library calls pass none.
    *
    * A FormData body must arrive at ElevenLabs as the exact multipart payload the
    * browser would have sent, so it is serialised here and carried as base64 —

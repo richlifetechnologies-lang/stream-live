@@ -3,7 +3,7 @@
 // this function — the client sees either streamed audio or a JSON result.
 //
 // Two access levels:
-//   * inference (/v1/speech-to-speech/*, /v1/text-to-speech/*) needs an open lease
+//   * inference (/v1/speech-to-text, /v1/text-to-speech/*) needs an open lease
 //     for a voice modality, i.e. the minutes are already being metered by start-session
 //     and lease. Pass { sessionId }.
 //   * voice library work (/v1/voices, /v1/voices/add) is setup, not a call: allowed
@@ -37,8 +37,23 @@ const ELEVEN_BASE = "https://api.elevenlabs.io";
  */
 const SERVICE_TIME_HEADER = "x-voice-service-ms";
 
-const INFER_PREFIXES = ["/v1/speech-to-speech/", "/v1/text-to-speech/"];
+const INFER_PREFIXES = ["/v1/speech-to-speech/", "/v1/text-to-speech/", "/v1/speech-to-text"];
 const LIBRARY_PATHS = ["/v1/voices", "/v1/voices/add"];
+
+/**
+ * The audio format one streamed call wants, in the only header that may name it.
+ *
+ * The service reads the format off the path (`…stream?output_format=pcm_24000`) when a call names
+ * it there, and that is the figure the app's player is built around — so this header must never
+ * name a second one, because which of two disagreements the service obeys is not written down
+ * anywhere and a wrong answer arrives as audio that will not play. A call that names no format at
+ * all is every build installed before this one, which was always answered in MP3 and still is.
+ */
+function streamAccept(path: string, isStream: boolean): string | undefined {
+  if (!isStream) return "application/json";
+  if (/[?&]output_format=/.test(path)) return undefined;
+  return "audio/mpeg";
+}
 
 function classify(path: string): "inference" | "library" | null {
   if (INFER_PREFIXES.some((p) => path.startsWith(p))) return "inference";
@@ -149,6 +164,9 @@ Deno.serve(async (req: Request) => {
 
     // Set inside the key loop, read once below: how long the service took to begin answering.
     let serviceMs = 0;
+    // Worked out once, outside the key loop: this call is not retried onto another key in order
+    // to change what audio it asks for.
+    const accept = streamAccept(path, body.isStream === true);
     const proxied = await runWithKeys<Response>(user.id, "elevenlabs", async (key) => {
       const { headers, payload } = upstreamPayload(body);
       // A timer that simply expires would fire during the audio as well as before it, so the
@@ -162,7 +180,9 @@ Deno.serve(async (req: Request) => {
           method,
           headers: {
             "xi-api-key": key.secret,
-            Accept: body.isStream ? "audio/mpeg" : "application/json",
+            // A streamed call that names its own format on the path is answered in exactly that,
+            // so no header is put in its way; a JSON call is asked for as JSON.
+            ...(accept ? { Accept: accept } : {}),
             ...headers,
           },
           body: method === "POST" ? payload : undefined,

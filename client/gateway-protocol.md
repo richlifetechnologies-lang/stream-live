@@ -102,20 +102,34 @@ Stop cannot leave the machine reading as "already on a call".
 ## 4. Voice — `proxy-voice`
 
 ```ts
-const res = await client.voice("/v1/speech-to-speech/<voiceId>/stream", formData, {
+// Half one: his words, read out of a short recording.
+const read = await client.voice("/v1/speech-to-text", formData, {
+  sessionId: ticket.sessionId,
+});
+const words = (await read.json()).text;
+
+// Half two: those words spoken back in the voice he picked, arriving as raw PCM
+// (16-bit signed samples) at the rate named on the path, as they are produced.
+const res = await client.voice(`/v1/text-to-speech/${voiceId}/stream?output_format=pcm_24000`, body, {
   isStream: true,
   sessionId: ticket.sessionId,
 });
-const audio = res.body; // audio/mpeg, streamed straight from ElevenLabs
+const audio = res.body;
 ```
 
+A path that names its own `output_format` is answered in exactly that, so no `Accept`
+header is put in its way; a format-less stream still comes back as `audio/mpeg`, and a
+JSON call is asked for as JSON. Older builds keep using
+`/v1/speech-to-speech/<voiceId>/stream`, which remains allowed.
+
 The SDK accepts a plain object (JSON), a string (`text/plain`) or a `FormData`
-(multipart, base64-enclosed in the gateway envelope) — voice cloning and voice
-upload both need `FormData`. The ElevenLabs key is attached inside the function and
+(multipart, base64-enclosed in the gateway envelope) — reading his words and uploading a
+voice both need `FormData`. The ElevenLabs key is attached inside the function and
 is never sent to the client.
 
-Allowed paths are checked twice: inference (`/v1/speech-to-speech/…`,
-`/v1/text-to-speech/…`) needs a live lease on an audio or video+audio bucket;
+Allowed paths are checked twice: inference (`/v1/speech-to-text`,
+`/v1/text-to-speech/…`, `/v1/speech-to-speech/…`) needs a live lease on an audio or
+video+audio bucket;
 library calls (`/v1/voices`, `/v1/voices/add`) need an account whose audio bucket
 exists. Anything else is rejected.
 

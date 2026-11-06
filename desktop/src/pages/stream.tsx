@@ -21,8 +21,7 @@ import { voiceCause, voiceDetail, micVerdict, micVerdictDetail, faultOrigin, typ
 import { prepareRefPhoto } from "../lib/ref-image";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
-import { answerTrim, pieceHasSignal, piecePeak, pieceTrim, speechOnset, speechTailAt, ANSWER_KEEP_HEAD_S } from "../lib/voice-piece";
-import { mp3WholeFrameBytes } from "../lib/mp3-frames";
+import { pieceHasSignal, piecePeak, pieceTrim, speechOnset } from "../lib/voice-piece";
 import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../lib/lipsync";
 import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
@@ -461,12 +460,19 @@ class AudioSyncPipeline {
 // ─── Voice cloning engine ─────────────────────────────────────────────────────
 // This engine lives in the pause between his words. The microphone is recorded
 // continuously, its level is watched, and when he stops talking - or after two and a
-// half seconds of talking without a breath - the piece is closed, handed to the voice
-// service, and the voice that comes back is played onto the cable. A few pieces may be with the
-// service at the same time, and the recorder never stops between them: with only one out
-// there, the next piece sat open while the service thought, so every sentence he spoke
-// arrived at the caller later than the one before it. Cutting on a pause still means a
-// word is never sliced in half by a stopwatch.
+// half seconds of talking without a breath - the piece is closed and read as WORDS. Those
+// words are then spoken by the voice he picked, and what comes back is put on air as it
+// arrives rather than when it is finished.
+//
+// His voice never crosses the line; only what he said does. That is why the voice on the
+// other end can only ever be the one he chose: nothing that reached the microphone - his
+// room, a second speaker, a television - has any way into it. What it costs him is the way
+// he said it. A laugh, a sigh and an awkward pronunciation of a name are not carried over,
+// and no setting on either side of it can carry them.
+// A few pieces may be with the transcriber at the same time, and the recorder never stops
+// between them: with only one out there, the next piece sat open while the service thought,
+// so every sentence he spoke arrived at the caller later than the one before it. Cutting on
+// a pause still means a word is never sliced in half by a stopwatch.
 
 const PUMP_MS             = 60;   // how often the microphone level is looked at
 // The longest run of HIS VOICE one piece may hold. It is deliberately not a limit on the length of
@@ -497,31 +503,35 @@ const CLONE_SEND_MS       = 6000;
 // talker who never pauses cannot open an unlimited number of requests on one call.
 const CLONE_MAX_IN_FLIGHT = 3;
 
-// An answer is handed to the player in two steps rather than one, because the service sends a
-// compressed file that has to be decoded before anything can be heard, and measured on his own
-// recorded call the wait for the whole file was more than twice the wait for its first byte.
-// The first step is deliberately small: it is the one that decides when his voice reaches the
-// caller. The steps after it are larger so the decoder is not called once per 26 ms frame.
-const AIR_FIRST_BYTES = 4096;   // about a quarter of a second of answer: the first words, as soon as they are real
-const AIR_STEP_BYTES  = 6144;   // about 0.4 s of answer per hand-over once it is speaking
-// How far behind the end of what has actually landed the play head is kept, so a hand-over is built
-// from bytes that arrived a while ago rather than bytes still on the line. Measured on a simulated
-// answer: on a line just fast enough to keep pace with the playback (16 KB/s) it takes the silence
-// inside that answer from 240 ms to 114 ms, and on any of them it stops the quiet after his last word
-// from being booked into the queue behind the next sentence. On the 50 KB/s line his own call measured
-// there is nothing to save, because the bytes outrun the player. It never costs a word of the answer,
-// and the last part of one is exempt - by then nothing more can arrive.
-const AIR_LEAD_S      = 0.18;
-// How many prefixes of one answer the decoder is allowed to call too short to stand on its own
-// before the answer is handed to the whole-file path instead. A browser decoder refuses a prefix it
-// cannot make a frame boundary of, and the next prefix - with more bytes under its belt - is usually
-// accepted. Giving up on the first objection is what left a sentence ending half way through.
-const AIR_REFUSE_TRIES = 3;
-// How much quiet, seen after his last word, is taken as the sentence having ended. It is shorter
-// than the pause between two words anyone speaks, so cutting there cannot swallow a syllable - and
-// if it ever did, the next hand-over simply carries on from that same second, since every prefix is
-// decoded from the top of the answer.
-const AIR_SETTLE_S    = 0.15;
+// The two halves of the turn. Names here are internal only - no screen, in any of the five
+// languages, ever says what reads his words or what sings them.
+const STT_MODEL_ID = "scribe_v2";
+const TTS_MODEL_ID = "eleven_flash_v2_5";
+// The cloned voice comes back as raw samples, not as a compressed file: the player is built
+// straight out of the bytes on the line, so nothing waits for a decoder and nothing waits for a
+// frame boundary. 24 kHz is the highest rate the fast model is offered at.
+const TTS_RATE = 24000;
+// How much of an answer reaches the player at a time. One slice is short enough that his first
+// words are on air almost as soon as they are made, and long enough that the audio stack is never
+// asked to schedule a fragment of a word.
+const AIR_SLICE_S = 0.12;
+const AIR_SLICE_SAMPLES = Math.round(TTS_RATE * AIR_SLICE_S);
+// How many turns may be with the speaker at once. The transcriber works ahead of it, so two is
+// one on air and one already arriving: his next sentence is on the line while this one is spoken.
+const TTS_MAX_IN_FLIGHT = 2;
+// The one number this engine exists to hold down: how far the cloned voice may sit behind the
+// microphone. Past the first it speaks a little faster than he did, to earn the difference back.
+// Past the second, the oldest words still waiting are given up on - whole, at a sentence
+// boundary, never cut mid-word - rather than left to stretch a wait that only ever grew: a
+// measured call carried 5.2 s of it by the end of ninety seconds.
+const BACKLOG_SOFT_S = 0.45;
+const BACKLOG_HARD_S = 2.0;
+// Faster than this stops sounding like him, so it is also the ceiling on how fast the queue can
+// be paid back.
+const TTS_SPEED_MAX = 1.15;
+// A cloned answer sometimes opens with a breath of nothing. It is skipped, but only up to this
+// much: a voice that really is there is never thrown away because a silence test failed.
+const AIR_SKIP_BOUND_S = 0.5;
 
 // A cloning call is not on air until the cloned voice has answered once, because a call
 // whose voice never arrived is not the call the customer bought. The hold is bounded so a
@@ -616,8 +626,38 @@ function makePieceRecorder(stream: MediaStream): MediaRecorder {
   }
 }
 
-/** A cloned answer that holds real speech, with the part of it worth putting on air. */
-type ClonedAnswer = { audio: AudioBuffer; head: number; kept: number; waitedMs: number; serviceMs: number };
+/**
+ * One turn that has been read as words, and whatever of its cloned audio has arrived to be
+ * heard. `bytes` are raw 16-bit samples at TTS_RATE, exactly as they landed; `aired` is how far
+ * the player has been given; `onset` is where his first word turned out to be, for as long as
+ * the answer is still only a breath of nothing in front of it.
+ */
+type CloneSegment = {
+  seq: number;
+  text: string;
+  bytes: Uint8Array;
+  aired: number;
+  onset: number | null;
+  /** True once its speaking request has been opened, so it is never opened twice. */
+  asked: boolean;
+  /** True when no more bytes will arrive for these words, answer or no answer. */
+  done: boolean;
+  /** True once any of it reached the cable. This is what an "answer" means. */
+  reached: boolean;
+  /** The two waits, one per half of the turn, as the relay that holds the key reported them. */
+  sttMs: number;
+  ttsMs: number;
+  /** When this turn's audio left this app - the wait on screen runs from here. */
+  sentAt: number;
+};
+
+/** Words read off one turn, waiting for the turns ahead of them to be read too. */
+type SettledWords = { text: string; sentAt: number; sttMs: number };
+
+/** What the relay stamps on every answer: how long the service itself took to start. */
+function serviceTimeMs(res: Response): number {
+  return Math.max(0, Math.round(Number(res.headers.get("x-voice-service-ms") ?? 0) || 0));
+}
 
 class VoiceCloningEngine {
   private recorder:   MediaRecorder | null = null;
@@ -645,12 +685,19 @@ class VoiceCloningEngine {
   // on his own pause, not on the answer's arrival, so the two are separate things.
   private inFlight = 0;
   private cutting  = false;
-  // Which piece an answer belongs to, and whose turn it is to go on air. The service
-  // finishes requests in whatever order it likes; his sentences must not reach the caller
-  // shuffled, so an answer that lands early waits here for the one ahead of it.
+  // Which turn the transcriber was asked about, the next turn whose words are owed to the
+  // speaker, and the words that came back out of order while it waits. His sentences must never
+  // reach the caller shuffled, so a turn that is read early waits here for the one ahead of it.
   private seqAssign = 0;
-  private seqAir    = 0;
-  private settled   = new Map<number, ClonedAnswer | null>();
+  private seqText   = 0;
+  private words     = new Map<number, SettledWords>();
+  // The turns the speaker has been told about, oldest first. Only the one at the front may reach
+  // the cable, and only the front two may be asked at all.
+  private segments: CloneSegment[] = [];
+  private asking   = 0;
+  // Turns given up on because the queue had run further ahead than a caller should be asked to
+  // wait. Counted in the app's own log, never on his screen.
+  private givenUp  = 0;
   private pieceMs  = 0;
   private speechMs = 0;
   // How long his own detector has called the microphone quiet, counted inside the piece being
@@ -659,7 +706,11 @@ class VoiceCloningEngine {
   // sentence off after its first word whenever he paused for breath before starting it.
   private pauseMs  = 0;
 
-  call       = null as null | ((path: string, body: FormData) => Promise<Response>);
+  // The two ways this engine reaches the voice line, both of them through the gateway that
+  // holds the key: `ask` sends a recording and waits for JSON, `speak` sends words and gets the
+  // cloned voice back as it is made. A call books both, and a call that loses either says so.
+  ask?:   (path: string, body: FormData) => Promise<Response>;
+  speak?: (path: string, body: Record<string, unknown>) => Promise<Response>;
   voiceId    = BUILTIN_VOICES[0].id;
   onVu?:     (level: number) => void;
   onError?:  (msg: string) => void;
@@ -742,10 +793,11 @@ class VoiceCloningEngine {
     this.micPeak = null;
     this.secondsIn = 0; this.secondsOut = 0; this.lastAnswerMs = 0;
     // A call that is started twice on one engine must not inherit the previous call's
-    // outstanding pieces or its sentence order.
+    // outstanding pieces, its words, or its sentence order.
     this.inFlight = 0; this.cutting = false;
     this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
-    this.seqAssign = 0; this.seqAir = 0; this.settled.clear();
+    this.seqAssign = 0; this.seqText = 0; this.words.clear();
+    this.segments = []; this.asking = 0; this.givenUp = 0;
     this.micGone = false; this.serviceMs = 0;
     this.audioCtx = new AudioContext();
     // Constructed outside the click's user activation, so this context can come up
@@ -876,40 +928,51 @@ class VoiceCloningEngine {
     return out.buffer;
   }
 
-  // The deadline on one answer. Without it a request that never lands would hold its place in
-  // the sentence order forever, and every sentence after it would wait with it.
-  private async _send(form: FormData): Promise<Response> {
-    const call = this.call!(`/v1/speech-to-speech/${this.voiceId}/stream`, form);
-    const deadline = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error("the voice service took too long to answer")), CLONE_SEND_MS);
-    });
-    return Promise.race([call, deadline]);
+  // One ask, with a deadline on its first answer. Without it a request that never lands would
+  // hold its place in the sentence order forever, and every sentence after it would wait with it.
+  private async _deadline<T>(asked: Promise<T>): Promise<T> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      return await Promise.race([asked, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("the voice service took too long to answer")), CLONE_SEND_MS);
+      })]);
+    } finally { if (timer !== null) clearTimeout(timer); }
   }
 
-  // One piece of his voice, handed to the service with a deadline on the answer, and put in
-  // its place in the sentence order whatever the answer turns out to be. Without the deadline
-  // a single lost request would hold its place in that order forever, which means no cloned
-  // voice for the rest of the call.
+  // How far the cloned voice sits behind his microphone, in seconds. Everything this engine does
+  // to keep the line honest is measured against this one number.
+  private _behind(): number {
+    if (!this.audioCtx) return 0;
+    return this.nextPlayAt - this.audioCtx.currentTime;
+  }
+
+  // A queue that has fallen behind pays its debt by speaking a little faster than he did - up to
+  // a bound, because past it the voice stops sounding like him. At one, nothing is hurried.
+  private _speed(): number {
+    const behind = this._behind();
+    if (behind <= BACKLOG_SOFT_S) return 1;
+    return Math.min(TTS_SPEED_MAX, 1 + (behind - BACKLOG_SOFT_S) * 0.12);
+  }
+
+  // One piece of his voice, read as words. Whatever becomes of it, the turn is settled below -
+  // a piece that never comes back must not hold the sentence order shut for the rest of the call.
   private async _process(blob: Blob, seq: number) {
-    let answer: ClonedAnswer | null = null;
+    let text = "", sentAt = 0, sttMs = 0;
     try {
-      if (!this.running || !this.audioCtx || !this.call || !this.voiceId) return;
+      if (!this.running || !this.audioCtx || !this.ask || !this.voiceId) return;
       const raw = await this._toPcm16k(blob);
       if (!raw || !this.running) return;
-      // An empty room is not a sentence. This is judged off the bytes about to leave, not off
-      // the level detector, because a quiet room recorded right after a loud passage reads as
-      // speech to a bar that has not caught up with the silence: five pieces in one recorded
-      // call went out that way and came back as silence for the caller.
+      // An empty room is not a sentence. This is judged off the bytes about to leave, not off the
+      // level detector, because a quiet room recorded right after a loud passage reads as speech
+      // to a bar that has not caught up with the silence.
       if (!pieceHasSignal(raw)) {
         this.piecesEmpty += 1;
         console.warn(`[voice] piece #${this.piecesEmpty} held no signal (peak ${piecePeak(raw)}), not sent`);
         return;
       }
-      // And only the part he actually spoke leaves. A piece recorded a second before his first
-      // word and two after his last one is bought at that full length, answered back at the
-      // same length, and the dead air in the middle of it then has to be played before the next
-      // sentence can start - so the room he was sitting in was pushing his voice further and
-      // further behind the picture, twice over.
+      // And only the part he actually spoke leaves. Silence no longer costs the call twice over
+      // the way it did: it is not bought at his own length and then played back at him, in front
+      // of his next sentence, whether or not anyone said anything in it.
       const span = pieceTrim(raw);
       if (!span) {
         this.piecesEmpty += 1;
@@ -918,229 +981,212 @@ class VoiceCloningEngine {
       }
       const pcm = span.from === 0 && span.to * 2 === raw.byteLength
         ? raw : raw.slice(span.from * 2, span.to * 2);
-      // 16-bit mono at 16 kHz, which is what the piece was rebuilt as before it left.
       this.piecesSent += 1;
       this.secondsIn += pcm.byteLength / 2 / 16000;
       const form = new FormData();
-      form.append("audio", new Blob([pcm], { type: "application/octet-stream" }), "chunk.pcm");
+      form.append("file", new Blob([pcm], { type: "application/octet-stream" }), "speech.pcm");
+      form.append("model_id", STT_MODEL_ID);
+      // Raw samples, because the transcriber reads them faster than any encoded file, and no word
+      // timings: this engine wants his words and nothing else.
       form.append("file_format", "pcm_s16le_16");
-      form.append("model_id", "eleven_multilingual_sts_v2");
-      form.append("voice_settings", JSON.stringify({ stability: 0.5, similarity_boost: 0.8, style: 0.0, use_speaker_boost: true }));
-      const sentAt = performance.now();
-      const res = await this._send(form);
-      if (!res.ok) { console.warn(`[voice] engine returned HTTP ${res.status}`); this.onError?.(endReasonMessage("upstream_key")); return; }
-      // The relay stamps how long the voice service took to begin answering.
-      const serviceMs = Math.max(0, Math.round(Number(res.headers.get("x-voice-service-ms") ?? 0) || 0));
-      // Only the answer whose turn it is may go on air as it arrives. An answer for a later
-      // sentence has to be heard after the one before it, so letting it start early would put
-      // his words out of order - the one thing a caller cannot be forgiven for hearing.
-      const type = res.headers.get("content-type") ?? "";
-      const airable = seq === this.seqAir && !!res.body && /mpeg|mp3/i.test(type);
-      const read = await this._readAnswer(res, airable, sentAt, serviceMs);
-      // His words are already on their way to the cable. Replaying them from a second decode
-      // would give the caller the same sentence twice - but whatever never reached the air has
-      // to, or the sentence stops half way through and nothing brings the rest of it back.
-      if (read.aired) { await this._airRest(read.bytes, read.playedUntil); return; }
-      const buf = read.bytes.buffer as ArrayBuffer;
-      if (!this.running || !this.audioCtx) return;
-      if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
-      const decoded = await this.audioCtx.decodeAudioData(buf);
-      // Only the spoken part of the answer is played. In that same call the cloned voice came
-      // back with up to 3.8 seconds of dead air in front of the words, and every second of it
-      // pushed the next sentence further behind the moving picture - which is a caller hearing
-      // him late, and then not at all.
-      const trim = answerTrim(decoded.getChannelData(0), decoded.sampleRate, decoded.duration);
-      if (!trim) {
-        // Nothing a person said came back. This is not the cloned voice, so it does not count
-        // as an answer, does not reach the cable, and does not put the call on air.
-        console.warn("[voice] answer held no speech, not played");
+      form.append("timestamps_granularity", "none");
+      form.append("diarize", "false");
+      sentAt = performance.now();
+      const res = await this._deadline(this.ask("/v1/speech-to-text", form));
+      sttMs = serviceTimeMs(res);
+      if (!res.ok) {
+        console.warn(`[voice] the transcriber returned HTTP ${res.status}`);
+        this.onError?.(endReasonMessage("upstream_key"));
         return;
       }
-      answer = { audio: decoded, head: trim.head, kept: trim.kept,
-                 waitedMs: Math.round(performance.now() - sentAt), serviceMs };
+      const j = await res.json().catch(() => null) as { text?: unknown } | null;
+      text = typeof j?.text === "string" ? j.text.trim() : "";
+      if (!text) console.warn("[voice] this piece came back with no words in it");
     } catch (e) {
       if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
     } finally {
       if (this.inFlight > 0) this.inFlight -= 1;
-      this._settle(seq, answer);
+      this._settle(seq, text, sentAt, sttMs);
     }
   }
 
-  // Read one answer. When it is this answer's turn to be heard, it is decoded in pieces as its
-  // bytes land and each piece goes straight on air, so the first word reaches the caller while
-  // the rest of the sentence is still arriving. Anything else - an answer that is not next in
-  // line, a reply this file cannot walk, a decoder that objects halfway through - is collected
-  // whole and handed back for the path that has been running since before this, so a call is
-  // never left with no voice because a faster route refused to work.
-  private async _readAnswer(res: Response, airable: boolean, sentAt: number, serviceMs: number):
-    Promise<{ bytes: Uint8Array; aired: boolean; playedUntil: number }> {
-    if (!airable || !res.body) {
-      return { bytes: new Uint8Array(await res.arrayBuffer()), aired: false, playedUntil: 0 };
+  // Words have come back for a turn - or it is settled that they never will. Hand them to the
+  // speaker in the order he spoke them, and no further: a turn still with the transcriber holds
+  // the line until it is answered or given up on.
+  private _settle(seq: number, text: string, sentAt: number, sttMs: number) {
+    this.words.set(seq, { text, sentAt, sttMs });
+    while (this.words.has(this.seqText)) {
+      const w = this.words.get(this.seqText)!;
+      this.words.delete(this.seqText);
+      const at = this.seqText;
+      this.seqText += 1;
+      if (!w.text) continue;
+      this.segments.push({ seq: at, text: w.text, bytes: new Uint8Array(0), aired: 0, onset: null,
+        asked: false, done: false, reached: false, sttMs: w.sttMs, ttsMs: 0, sentAt: w.sentAt });
     }
-    // The body is opened once, here. Everything read is kept, so an answer that progressive
-    // playing cannot deliver still arrives whole for the path that has always worked.
-    let buf = new Uint8Array(0);
-    let cut = 0;           // answer bytes already handed to the decoder
-    let playedUntil = 0;   // seconds of this answer already put on air
-    let onset = -1;        // where his first spoken word is, once found
-    let scanned = 0;       // and how far the search for it has gone
-    let walked = true;
-    let aired = false;
-    let refused = 0;       // prefixes the decoder called too short to stand on their own
-    const reader = res.body.getReader();
-    const pump = async (final: boolean) => {
-      if (!walked || !this.running || !this.audioCtx) return;
-      const w = mp3WholeFrameBytes(buf);
-      if (w < 0) { walked = false; return; }                       // not an MP3 this can cut
-      if (!final && w - cut < (aired ? AIR_STEP_BYTES : AIR_FIRST_BYTES)) return;
-      const piece = new Uint8Array(w);
-      piece.set(buf.subarray(0, w));
-      if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
-      let decoded: AudioBuffer;
-      try { decoded = await this.audioCtx.decodeAudioData(piece.buffer); }
-      catch {
-        // A prefix of a compressed file is not a file, and a decoder is free to call one too short
-        // to stand on its own. Giving up on the first objection left the caller holding the part
-        // already played with nothing after it, so the next attempt is made with more bytes under
-        // its belt. Only after this many objections is the answer handed over to the path that
-        // decodes the complete file, which is the one that has been running since before this.
-        refused += 1;
-        if (final || refused >= AIR_REFUSE_TRIES) walked = false;
+    this._pump();
+  }
+
+  // Open the speaking requests the queue is owed, oldest first, and pay the backlog down before
+  // anything new is started. The words given up on here are whole sentences the caller never
+  // hears, which is the smaller of the two faults next to a line that falls further and further
+  // behind the picture for the rest of the call. A turn already on air is never touched.
+  private _pump() {
+    if (!this.running || !this.audioCtx) return;
+    while (this.segments.length > 1 && this._behind() > BACKLOG_HARD_S) {
+      const giveUp = this.segments[1];
+      this.segments.splice(1, 1);
+      this.givenUp += 1;
+      console.warn(`[voice] ${this._behind().toFixed(1)} s of cloned voice ahead; gave up on sentence #${this.givenUp}: "${giveUp.text.slice(0, 60)}"`);
+    }
+    for (const seg of this.segments) {
+      if (this.asking >= TTS_MAX_IN_FLIGHT) break;
+      if (seg.asked) continue;
+      seg.asked = true;
+      this.asking += 1;
+      void this._speak(seg);
+    }
+    // And hand the front of the queue another look. An answer that landed while a sentence ahead
+    // of it was still on air is kept whole but silent until that sentence retires, and this is the
+    // moment it becomes the front one - without this line it would sit there with its audio
+    // already arrived and nobody left to play it.
+    if (this.segments.length) this._airFrom(this.segments[0]);
+  }
+
+  // Speak one turn's words in the voice he picked, and put them on air while they are still being
+  // made. How fast is read at the moment the request opens, so a queue in debt is hurried and a
+  // queue that is current is left alone.
+  private async _speak(seg: CloneSegment) {
+    try {
+      if (!this.running || !this.speak || !this.voiceId) return;
+      const res = await this._deadline(this.speak(
+        `/v1/text-to-speech/${this.voiceId}/stream?output_format=pcm_${TTS_RATE}`,
+        { text: seg.text, model_id: TTS_MODEL_ID,
+          voice_settings: { stability: 0.5, similarity_boost: 0.8, use_speaker_boost: true, speed: this._speed() } },
+      ));
+      seg.ttsMs = serviceTimeMs(res);
+      if (!res.ok || !res.body) {
+        console.warn(`[voice] the cloned voice would not speak these words (HTTP ${res.status})`);
         return;
       }
-      // Only bytes a decoder has accepted count as handed over, so a refused prefix is retried at
-      // the next arrival rather than waiting out a whole step's worth of silence on the line.
-      cut = w;
-      const data = decoded.getChannelData(0), rate = decoded.sampleRate;
-      if (onset < 0) {
-        const found = speechOnset(data, scanned);
-        // Still only his room. Nothing is put on air for it, and the answer is not counted as
-        // one: a clone that came back with no words in it must not start the money clock.
-        if (found < 0) { scanned = data.length; return; }
-        onset = found;
-      }
-      const from = Math.max(playedUntil, Math.max(0, onset / rate - ANSWER_KEEP_HEAD_S));
-      // Where his final consonant is. A prefix that stops inside the sentence is aired whole, so
-      // the queue never stutters for want of bytes; one that stops in enough quiet is taken as the
-      // end of the sentence and cut there, so the dead air after a sentence never rides the queue
-      // and pushes the next one behind the moving picture. The most either way can add is the
-      // allowance itself - a fraction of a second, against the seconds the backlog used to cost.
-      const tail = speechTailAt(data, rate);
-      let upto = (final || decoded.duration - tail >= AIR_SETTLE_S) ? tail : decoded.duration;
-      // Only what has a runway behind it goes on air, so the player never catches up with the
-      // arriving bytes and leaves a hole inside a word.
-      if (!final) upto = Math.min(upto, decoded.duration - AIR_LEAD_S);
-      if (upto - from <= 0.02) return;
-      if (!aired) {
-        this.lastAnswerMs = Math.round(performance.now() - sentAt);
-        this.serviceMs = serviceMs;
-      }
-      this._airChunk(decoded, from, upto - from, !aired);
-      playedUntil = upto;
-      aired = true;
-    };
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
+      const reader = res.body.getReader();
+      while (this.running) {
+        const { value, done } = await this._read(reader);
         if (value) {
-          const grown = new Uint8Array(buf.length + value.length);
-          grown.set(buf, 0); grown.set(value, buf.length);
-          buf = grown;
+          const grown = new Uint8Array(seg.bytes.length + value.length);
+          grown.set(seg.bytes, 0); grown.set(value, seg.bytes.length);
+          seg.bytes = grown;
+          this._airFrom(seg);
         }
-        if (!this.running) break;
-        await pump(done);
         if (done) break;
       }
-    } catch { /* the answer is over; what was collected goes to the fallback */ }
-    return { bytes: buf, aired, playedUntil };
+    } catch (e) {
+      if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
+    } finally {
+      seg.done = true;
+      this.asking = Math.max(0, this.asking - 1);
+      this._finish(seg);
+    }
   }
 
-  // Finish an answer that progressive playing could not carry to its end. The bytes are all
-  // here - it was the walk that stopped, not the stream - so the part after the play head is
-  // decoded once and put on air exactly where the last chunk left off.
-  private async _airRest(bytes: Uint8Array, playedUntil: number) {
-    if (!this.running || !this.audioCtx || !this.voiceBus) return;
-    let decoded: AudioBuffer;
+  // One arrived piece of the answer, with the same bound on it that the first byte has. A voice
+  // service that opens a stream and then stops mid-sentence used to hold the sentence order shut
+  // for the rest of the call; now that answer is treated as finished, what landed of it is aired,
+  // and the sentences behind it go on speaking.
+  private async _read(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<ReadableStreamReadResult<Uint8Array>> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      if (this.audioCtx.state !== "running") { try { await this.audioCtx.resume(); } catch { /* ignore */ } }
-      decoded = await this.audioCtx.decodeAudioData(bytes.buffer as ArrayBuffer);
-    } catch { return; }
-    const trim = answerTrim(decoded.getChannelData(0), decoded.sampleRate, decoded.duration);
-    const end  = trim ? trim.head + trim.kept : decoded.duration;
-    const from = Math.max(playedUntil, trim ? trim.head : 0);
-    if (end - from <= 0.02) return;
-    this._airChunk(decoded, from, end - from, false);
+      return await Promise.race([reader.read(), new Promise<ReadableStreamReadResult<Uint8Array>>((res) => {
+        timer = setTimeout(() => {
+          console.warn("[voice] the cloned voice stopped mid-answer");
+          res({ value: undefined, done: true });
+        }, CLONE_SEND_MS);
+      })]);
+    } finally { if (timer !== null) clearTimeout(timer); }
   }
 
-  // Put one decoded piece of an answer on air. It joins the queue exactly where the last piece
-  // of it stopped, so a sentence played in four hand-overs is still one continuous voice.
-  private _airChunk(buf: AudioBuffer, from: number, dur: number, first: boolean) {
+  // The samples that have landed and are safe to hand over: whole slices while the answer is
+  // still arriving, and everything once it is not. A player started on part of a slice leaves a
+  // hole inside a word, which is the one thing a caller cannot be forgiven for hearing.
+  private static _landed(seg: CloneSegment): number {
+    const total = Math.floor(seg.bytes.length / 2);
+    return seg.done ? total : Math.floor(total / AIR_SLICE_SAMPLES) * AIR_SLICE_SAMPLES;
+  }
+
+  /** The landed samples of one answer, between two indices, as the player wants them. */
+  private static _floats(seg: CloneSegment, from: number, to: number): Float32Array {
+    const s = new Int16Array(seg.bytes.buffer as ArrayBuffer, 0, Math.floor(seg.bytes.length / 2));
+    const out = new Float32Array(Math.max(0, to - from));
+    for (let i = from; i < to; i++) out[i - from] = s[i] < 0 ? s[i] / 0x8000 : s[i] / 0x7fff;
+    return out;
+  }
+
+  // Hand whatever has arrived to the player, for the turn at the front of the queue and for no
+  // other. Everything behind it waits, in his order, however quickly it lands.
+  private _airFrom(seg: CloneSegment) {
     if (!this.running || !this.audioCtx || !this.voiceBus) return;
-    if (first) {
+    if (this.segments[0] !== seg) return;
+    const upto = VoiceCloningEngine._landed(seg);
+    if (seg.onset === null) {
+      const found = speechOnset(VoiceCloningEngine._floats(seg, seg.aired, upto), 0);
+      if (found < 0) {
+        // Still nothing but a breath in front of the words. Wait for more of them - but only
+        // while the answer is still coming, and only up to the bound. A voice that really is
+        // there must never be thrown away by a silence test that failed.
+        if (!seg.done && upto - seg.aired < Math.round(AIR_SKIP_BOUND_S * TTS_RATE)) return;
+        seg.onset = seg.aired;
+      } else seg.onset = seg.aired + found;
+    }
+    const from = Math.max(seg.aired, seg.onset);
+    if (upto - from < 1) { if (seg.done) seg.aired = upto; return; }
+    const samples = VoiceCloningEngine._floats(seg, from, upto);
+    const buf = this.audioCtx.createBuffer(1, samples.length, TTS_RATE);
+    buf.getChannelData(0).set(samples);
+    this._air(buf, samples.length / TTS_RATE, seg);
+    seg.aired = upto;
+  }
+
+  // Put one slice of a cloned answer on air. It joins the queue exactly where the last slice of
+  // it stopped, so a sentence handed over in ten pieces is still one continuous voice.
+  private _air(buf: AudioBuffer, dur: number, seg: CloneSegment) {
+    if (!this.running || !this.audioCtx || !this.voiceBus) return;
+    if (!seg.reached) {
+      seg.reached = true;
       this.piecesBack += 1;
-      // Answered: the watchdog that decides whether this call is still worth running is
-      // reset here, the moment real cloned audio is on its way to the cable. The first
-      // time it happens is also the moment the call goes on air and starts being metered.
+      // The whole way round: from the moment his words left this app to the moment any of them
+      // came back as cloned sound. The transcriber's wait and the speaker's wait are both in it.
+      this.lastAnswerMs = Math.round(performance.now() - seg.sentAt);
+      this.serviceMs = seg.sttMs + seg.ttsMs;
+      // Answered: the watchdog that decides whether this call is still worth running is reset
+      // here, the moment real cloned audio is on its way to the cable. The first time it happens
+      // is also the moment the call goes on air and starts being metered.
       const wasSilent = this.answeredAt === 0;
       this.answeredAt = Date.now();
       if (wasSilent) this.onFirstAnswer?.();
     }
     const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
     const src = this.audioCtx.createBufferSource();
-    src.buffer = buf; src.connect(this.voiceBus); src.start(playAt, from, dur);
+    src.buffer = buf; src.connect(this.voiceBus); src.start(playAt);
     this.nextPlayAt = playAt + dur;
     this.secondsOut += dur;
-    // Level is read through the player, not off these samples. Measuring the audio
-    // that merely arrived drew a dancing wave over total silence whenever the engine
-    // was asleep, which is how a dead cable got mistaken for a working one.
+    // Level is read through the player, not off the bytes that arrived. A bar drawn from an
+    // answer that merely landed moves over a cable carrying nothing at all.
     const live = this.playerLive ? this.playerLive() : true;
     if (!live) { this.onVu?.(0); return; }
     const data = buf.getChannelData(0);
-    const i0 = Math.floor(from * buf.sampleRate);
-    const i1 = Math.min(data.length, Math.floor((from + dur) * buf.sampleRate));
-    let sum = 0; for (let i = i0; i < i1; i++) sum += data[i] * data[i];
-    this.onVu?.(Math.min(100, Math.sqrt(sum / Math.max(1, i1 - i0)) * 300));
+    let sum = 0; for (let i = 0; i < data.length; i++) sum += data[i] * data[i];
+    this.onVu?.(Math.min(100, Math.sqrt(sum / Math.max(1, data.length)) * 300));
   }
 
-  // An answer has arrived, or it never will. Hand it to the air in sentence order: with more
-  // than one request out there, the service finishes them as it likes, and a caller who heard
-  // the second sentence before the first one has not heard him at all.
-  private _settle(seq: number, answer: ClonedAnswer | null) {
-    this.settled.set(seq, answer);
-    while (this.settled.has(this.seqAir)) {
-      const next = this.settled.get(this.seqAir) ?? null;
-      this.settled.delete(this.seqAir);
-      this.seqAir += 1;
-      if (next) this._play(next);
+  // A turn is finished with: its last sample is handed over and the queue may move on. Without
+  // this, one answer that refused to arrive would keep every sentence behind it waiting, which is
+  // a caller hearing nothing at all for the rest of the call.
+  private _finish(seg: CloneSegment) {
+    this._airFrom(seg);
+    if (this.segments[0] === seg && seg.done && seg.aired >= VoiceCloningEngine._landed(seg)) {
+      this.segments.shift();
     }
-  }
-
-  private _play(a: ClonedAnswer) {
-    if (!this.running || !this.audioCtx || !this.voiceBus) return;
-    this.piecesBack += 1;
-    this.secondsOut += a.kept;
-    this.lastAnswerMs = a.waitedMs;
-    this.serviceMs = a.serviceMs;
-    const playAt = Math.max(this.audioCtx.currentTime + this.videoDelay, this.nextPlayAt);
-    const src = this.audioCtx.createBufferSource();
-    src.buffer = a.audio; src.connect(this.voiceBus); src.start(playAt, a.head, a.kept);
-    // Answered: the watchdog that decides whether this call is still worth running is
-    // reset here, the moment real cloned audio is on its way to the cable. The first
-    // time it happens is also the moment the call goes on air and starts being metered.
-    const first = this.answeredAt === 0;
-    this.answeredAt = Date.now();
-    if (first) this.onFirstAnswer?.();
-    this.nextPlayAt = playAt + a.kept;
-    // Level is read through the player, not off these samples. Measuring the audio
-    // that merely arrived drew a dancing wave over total silence whenever the engine
-    // was asleep, which is how a dead cable got mistaken for a working one.
-    const live = this.playerLive ? this.playerLive() : true;
-    if (!live) { this.onVu?.(0); return; }
-    const data = a.audio.getChannelData(0);
-    const from = Math.floor(a.head * a.audio.sampleRate);
-    const to = Math.min(data.length, Math.floor((a.head + a.kept) * a.audio.sampleRate));
-    let sum = 0; for (let i = from; i < to; i++) sum += data[i] * data[i];
-    this.onVu?.(Math.min(100, Math.sqrt(sum / Math.max(1, to - from)) * 300));
+    this._pump();
   }
 
   getAnalyser(): AnalyserNode | null { return this.analyserNode; }
@@ -1152,7 +1198,7 @@ class VoiceCloningEngine {
     if (this.pump) { clearInterval(this.pump); this.pump = null; }
     this.inFlight = 0; this.cutting = false;
     this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
-    this.settled.clear();
+    this.words.clear(); this.segments = []; this.asking = 0;
     this.outDest = null;
     this.voiceBus = null;
     this.monitorGain = null; this.monitored = false;
@@ -1575,8 +1621,11 @@ export default function StreamPage() {
   const [vcAnalyser, setVcAnalyser]       = useState<AnalyserNode | null>(null);
 
   // ── Local monitor: hear your own cloned voice ─────────────────────────────
+  // Off until he asks for it, and his own switch setting is kept either way. The cloned voice is
+  // now made out of WORDS, so anything that reaches the microphone twice is said twice: out of a
+  // loudspeaker and straight back into the line, this app's own answer becomes his next sentence.
   const [voiceMonitor, setVoiceMonitor] = useState<boolean>(() => {
-    try { return localStorage.getItem("ss_voice_monitor") !== "0"; } catch { return true; }
+    try { return localStorage.getItem("ss_voice_monitor") === "1"; } catch { return false; }
   });
   const toggleVoiceMonitor = useCallback(() => {
     setVoiceMonitor(v => { const next = !v; try { localStorage.setItem("ss_voice_monitor", next ? "1" : "0"); } catch { /**/ } return next; });
@@ -2868,7 +2917,10 @@ export default function StreamPage() {
       }
       if (needsVoice && micStreamForCloner) {
         const cloner = new VoiceCloningEngine();
-        cloner.call    = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
+        // Two doors on the one metered call: his recording goes in and comes back as words, and
+        // those words go out again as the voice he picked.
+        cloner.ask     = (path, body) => gateway.voice(path, body, { sessionId: ticket.sessionId });
+        cloner.speak   = (path, body) => gateway.voice(path, body, { isStream: true, sessionId: ticket.sessionId });
         cloner.voiceId = vcVoiceId;
         cloner.setVideoDelay(voiceOnly ? 0 : (syncPipeRef.current?.hold ?? FALLBACK_HOLD));
         cloner.onVu    = v => setVcVu(v);

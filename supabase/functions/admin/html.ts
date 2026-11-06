@@ -512,7 +512,7 @@ export const ADMIN_HTML = `<!doctype html>
           <div class="prov">
             <div class="phead">
               <span class="pdot" id="voiceDot"></span>
-              <b>Voice</b><span class="pmeta">ElevenLabs · speech to speech</span>
+              <b>Voice</b><span class="pmeta">ElevenLabs · words read, then spoken</span>
               <span class="chip" id="voiceChip">not tested</span>
             </div>
             <label>ElevenLabs API key</label>
@@ -521,7 +521,7 @@ export const ADMIN_HTML = `<!doctype html>
               <button type="button" data-show="kEleven">show</button>
               <button type="button" id="testEleven" class="primary">Verify</button>
             </div>
-            <p class="phint">Where: <b>elevenlabs.io → your profile picture → API Key</b>. What it does: streams the caller's voice through speech-to-speech and back, and powers voice cloning. It is not the same string as your agent or workspace key.</p>
+            <p class="phint">Where: <b>elevenlabs.io → your profile picture → API Key</b>. What it does: reads the words your customer speaks out of a short recording, then says those words back in the voice he picked — both halves of a cloned-voice call run on it, and so does adding a voice he uploaded. It is not the same string as your agent or workspace key.</p>
             <div class="presult" id="voiceResult"></div>
           </div>
         </div>
@@ -5719,7 +5719,7 @@ export const ADMIN_HTML = `<!doctype html>
       voice_cloning_per_sec_cost: +(voiceMin / 60).toFixed(6),
       profit_margin_percent: Math.round(target),
       last_verified_at: serverNowIso().slice(0, 10),
-      source_notes: \`fal.ai Lucy 2.5 realtime \${falMin}/min; ElevenLabs speech to speech \${voiceMin}/min. Saved from the Prices tab.\`,
+      source_notes: \`fal.ai Lucy 2.5 realtime \${falMin}/min; ElevenLabs for the cloned voice \${voiceMin}/min. The voice service now charges for reading his words and for speaking them back as two separate lines, so this figure is your own estimate of a minute of calling rather than one price from their list. Saved from the Prices tab.\`,
     };
     const { data, error } = await sb.from("billing_config").update(row).eq("id", 1).select("id");
     if (error) return msg("pgMsg", error.message);
