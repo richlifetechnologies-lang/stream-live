@@ -164,27 +164,43 @@ function _videoPromptFor(customText: string, styleLook: string): string {
 // `region` is the accent the service itself prints beside that voice, read off the voice list of a
 // signed-in account — so every one of the nineteen carries its real accent, and none carries a
 // country nobody published. All nineteen speak English.
+//
+// `sex` and `age` are what the published record for each of these voice IDs says, in the same three
+// age words the service itself filters its library by — young, middle, older. Two of the nineteen
+// carry no published sex, so they print no band and stand only under "All": a band nobody published
+// is not a band this screen says. There is no child band to offer, because the library has none.
 const BUILTIN_VOICES = [
-  { id: "gOupLcAkjEnguROwi4oS", name: "Darian",   desc: "Warm grounded storyteller",   region: "American" },
-  { id: "OZ0L6eISlOejga3XjDFt", name: "Talia",    desc: "Warm soft guide",             region: "American" },
-  { id: "WQP7cQUF5aAS6Axh5yaa", name: "Elara",    desc: "Crisp professional narrator", region: "American" },
-  { id: "jSuBIjxMKhqIfb0wCK1F", name: "Baxter",   desc: "Dry and calm",                region: "Australian" },
-  { id: "6WwXjDDEMyNmFG95zycZ", name: "Eldrin",   desc: "Crisp baritone",              region: "British" },
-  { id: "fs2OqxduwXgp9foh2xjK", name: "Callum",   desc: "Husky, playful",              region: "American" },
-  { id: "dvbL7qkNGZY1IqPGZAjM", name: "Elowen",   desc: "Upbeat modern narrator",      region: "American" },
-  { id: "10NkTYmU7tSz3Kkl3Lex", name: "Kaelen",   desc: "Easy, unpolished",            region: "American" },
-  { id: "ktkP7Nsj67dw2zcplQYt", name: "Lawrence", desc: "Bright and informative",      region: "American" },
-  { id: "BFd5oBc2DDna33pSi4Gf", name: "Alicia",   desc: "Polished anchor",             region: "British" },
-  { id: "QtY3JBOUKEB5xzrRfOKc", name: "Maisie",   desc: "Friendly casual neighbour",   region: "American" },
-  { id: "7QN34D2r3hCNwbOYIeK0", name: "Warren",   desc: "Effortless and cool",         region: "American" },
-  { id: "g7LVvkPWALzPxOQbF6OE", name: "Jade",     desc: "Upbeat and natural",          region: "American" },
-  { id: "l7kNoIfnJKPg7779LI2t", name: "Eddie",    desc: "Natural and helpful",         region: "American" },
-  { id: "AaOhDHYJ1XLZk74lXhdE", name: "Caleb",    desc: "Trusted guide",               region: "American" },
-  { id: "8dEUmyPMdDdK91vboYih", name: "Sawyer",   desc: "Midnight storyteller",        region: "American" },
-  { id: "fnYMz3F5gMEDGMWcH1ex", name: "Finley",   desc: "Articulate anchor",           region: "British" },
-  { id: "22N9cF8z0o7y23njdyaY", name: "Florence", desc: "Atmospheric storyteller",     region: "British" },
-  { id: "FrS6cKLB1wg4WYgPa9GW", name: "Wyatt",    desc: "Seasoned mentor",             region: "American" },
+  { id: "gOupLcAkjEnguROwi4oS", name: "Darian",   desc: "Warm grounded storyteller",   region: "American",  sex: "m", age: "" },
+  { id: "OZ0L6eISlOejga3XjDFt", name: "Talia",    desc: "Warm soft guide",             region: "American",  sex: "f", age: "middle" },
+  { id: "WQP7cQUF5aAS6Axh5yaa", name: "Elara",    desc: "Crisp professional narrator", region: "American",  sex: "f", age: "middle" },
+  { id: "jSuBIjxMKhqIfb0wCK1F", name: "Baxter",   desc: "Dry and calm",                region: "Australian", sex: "m", age: "young" },
+  { id: "6WwXjDDEMyNmFG95zycZ", name: "Eldrin",   desc: "Crisp baritone",              region: "British",   sex: "m", age: "middle" },
+  { id: "fs2OqxduwXgp9foh2xjK", name: "Callum",   desc: "Husky, playful",              region: "American",  sex: "",  age: "" },
+  { id: "dvbL7qkNGZY1IqPGZAjM", name: "Elowen",   desc: "Upbeat modern narrator",      region: "American",  sex: "f", age: "middle" },
+  { id: "10NkTYmU7tSz3Kkl3Lex", name: "Kaelen",   desc: "Easy, unpolished",            region: "American",  sex: "m", age: "" },
+  { id: "ktkP7Nsj67dw2zcplQYt", name: "Lawrence", desc: "Bright and informative",      region: "American",  sex: "m", age: "young" },
+  { id: "BFd5oBc2DDna33pSi4Gf", name: "Alicia",   desc: "Polished anchor",             region: "British",   sex: "",  age: "middle" },
+  { id: "QtY3JBOUKEB5xzrRfOKc", name: "Maisie",   desc: "Friendly casual neighbour",   region: "American",  sex: "f", age: "young" },
+  { id: "7QN34D2r3hCNwbOYIeK0", name: "Warren",   desc: "Effortless and cool",         region: "American",  sex: "m", age: "young" },
+  { id: "g7LVvkPWALzPxOQbF6OE", name: "Jade",     desc: "Upbeat and natural",          region: "American",  sex: "f", age: "young" },
+  { id: "l7kNoIfnJKPg7779LI2t", name: "Eddie",    desc: "Natural and helpful",         region: "American",  sex: "m", age: "young" },
+  { id: "AaOhDHYJ1XLZk74lXhdE", name: "Caleb",    desc: "Trusted guide",               region: "American",  sex: "m", age: "" },
+  { id: "8dEUmyPMdDdK91vboYih", name: "Sawyer",   desc: "Midnight storyteller",        region: "American",  sex: "m", age: "middle" },
+  { id: "fnYMz3F5gMEDGMWcH1ex", name: "Finley",   desc: "Articulate anchor",           region: "British",   sex: "m", age: "older" },
+  { id: "22N9cF8z0o7y23njdyaY", name: "Florence", desc: "Atmospheric storyteller",     region: "British",   sex: "f", age: "middle" },
+  { id: "FrS6cKLB1wg4WYgPa9GW", name: "Wyatt",    desc: "Seasoned mentor",             region: "American",  sex: "m", age: "middle" },
 ];
+
+// The two words a tile prints under a name, from the two published fields above. Either half can be
+// missing, and when it is the tile prints the half that is published rather than inventing the other.
+// The middle band is the one the voice library itself calls "Middle-aged"; the app says "Adult", the
+// word the approved design shows, and a customer who types the library's word still finds them.
+function voiceBand(v: { sex: string; age: string }): string {
+  const who = v.sex === "f" ? "woman" : v.sex === "m" ? "man" : "";
+  const age = v.age === "young" ? "Young" : v.age === "middle" ? "Adult" : v.age === "older" ? "Older" : "";
+  if (who && age) return `${age} ${who}`;
+  return who ? who[0].toUpperCase() + who.slice(1) : age;
+}
 
 // The words a person types when he is looking for a country rather than an accent. These are search
 // words only — never printed — and they stand for the accent the service publishes for the voice.
@@ -531,6 +547,15 @@ const CLONE_IDLE_MS       = 5000; // a piece holding no speech at all is thrown 
 // A request that never lands must not hold the pipeline shut for the rest of the call, so the
 // wait has a deadline: the piece is abandoned and his next words are tried again.
 const CLONE_SEND_MS       = 6000;
+// Names the deadline above, so a turn abandoned because nothing replied can be told apart from
+// one the voice line actively refused. Only the second of the two ends a call.
+const VOICE_TIMEOUT       = "voice_timeout";
+// How many turns with no cloned voice on the line are allowed to pass before this app closes the
+// call itself. The voice line answering "no" - a status it refuses, an answer with no body, an
+// answer that carries no sound - is counted twice here and ends the call at once: the voice he
+// bought is not coming, and every further second is paid for silence. One turn that simply never
+// got an answer is given a second chance, because a network that hiccups once is not a dead voice.
+const CLONE_REFUSALS      = 2;
 // How many pieces may be with the service at once. Measured on his own recorded call, an
 // answer takes about 2.2 s to come back and a spoken piece runs about 1.5 s, so two would
 // already cover the wait; a third is headroom for the slow replies, and it is a ceiling so a
@@ -786,6 +811,27 @@ class VoiceCloningEngine {
   // Fires once, on the first cloned audio that actually reaches the cable. A cloning call
   // is not on air before that, so this is what releases the held money clock.
   onFirstAnswer?: () => void;
+  // Turns handed to the voice line that came back with no voice in them, counted in a row and
+  // cleared the moment any of the cloned voice reaches the cable. This is the figure that decides
+  // whether the call is worth running: a pause in the conversation moves nothing, a refusal does.
+  refusedRun = 0;
+  // Fires once per call, the turn the cloned voice cannot be brought back for. The page ends the
+  // call on it - timer, meter and all - because a line that will not speak in the voice he bought
+  // is a line he should not be paying for, and leaving it open is what made him press Stop himself
+  // on a call that had already died.
+  onCloneGone?: (why: string) => void;
+  private gone = false;
+
+  // One turn the voice line could not answer. `blip` is a request that never landed at all, which
+  // gets one more try; anything else is the service replying with no voice, and ends the call.
+  private _refuse(why: string, blip = false) {
+    this.refusedRun = blip ? this.refusedRun + 1 : CLONE_REFUSALS;
+    console.warn(`[voice] ${why} - ${this.refusedRun} turn(s) with no cloned voice`);
+    if (this.refusedRun >= CLONE_REFUSALS && !this.gone && this.running) {
+      this.gone = true;
+      this.onCloneGone?.(why);
+    }
+  }
 
   alive(graceSeconds: number): boolean {
     if (this.answeredAt >= this.spokeAt) return true;
@@ -833,6 +879,7 @@ class VoiceCloningEngine {
     this.seqAssign = 0; this.seqText = 0; this.words.clear();
     this.segments = []; this.asking = 0; this.givenUp = 0;
     this.micGone = false; this.serviceMs = 0;
+    this.refusedRun = 0; this.gone = false;
     this.audioCtx = new AudioContext();
     // Constructed outside the click's user activation, so this context can come up
     // suspended. Left alone, every chunk decodes, every meter moves, and nothing
@@ -968,7 +1015,8 @@ class VoiceCloningEngine {
     let timer: ReturnType<typeof setTimeout> | null = null;
     try {
       return await Promise.race([asked, new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new Error("the voice service took too long to answer")), CLONE_SEND_MS);
+        timer = setTimeout(() => { const e = new Error("the voice service took too long to answer");
+          e.name = VOICE_TIMEOUT; reject(e); }, CLONE_SEND_MS);
       })]);
     } finally { if (timer !== null) clearTimeout(timer); }
   }
@@ -1029,15 +1077,21 @@ class VoiceCloningEngine {
       const res = await this._deadline(this.ask("/v1/speech-to-text", form));
       sttMs = serviceTimeMs(res);
       if (!res.ok) {
-        console.warn(`[voice] the transcriber returned HTTP ${res.status}`);
-        this.onError?.(endReasonMessage("upstream_key"));
+        // The transcriber answered, and its answer was no. Without his words there is nothing for
+        // the cloned voice to speak, so this is a refused turn and not a toast over a live call.
+        this._refuse(`the transcriber returned HTTP ${res.status}`);
         return;
       }
       const j = await res.json().catch(() => null) as { text?: unknown } | null;
       text = typeof j?.text === "string" ? j.text.trim() : "";
       if (!text) console.warn("[voice] this piece came back with no words in it");
     } catch (e) {
-      if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
+      if (!this.running) return;
+      // A turn whose request had already left this app failed on the voice line; anything earlier
+      // in the turn is this machine's own trouble and stays the message it always was.
+      if (sentAt > 0) this._refuse(toUserMessage(e, "Voice processing error"),
+        (e as Error | null)?.name === VOICE_TIMEOUT);
+      else this.onError?.(toUserMessage(e, "Voice processing error"));
     } finally {
       if (this.inFlight > 0) this.inFlight -= 1;
       this._settle(seq, text, sentAt, sttMs);
@@ -1091,16 +1145,22 @@ class VoiceCloningEngine {
   // made. How fast is read at the moment the request opens, so a queue in debt is hurried and a
   // queue that is current is left alone.
   private async _speak(seg: CloneSegment) {
+    let refused = false;
     try {
       if (!this.running || !this.speak || !this.voiceId) return;
       const res = await this._deadline(this.speak(
         `/v1/text-to-speech/${this.voiceId}/stream?output_format=pcm_${TTS_RATE}`,
         { text: seg.text, model_id: TTS_MODEL_ID,
-          voice_settings: { stability: 0.5, similarity_boost: 0.8, use_speaker_boost: true, speed: this._speed() } },
+          // 0.4, not the middle 0.5. The vendor's own reading of this dial is that a lower number
+          // lets the delivery vary and carry feeling, while a higher one holds it flat and steady -
+          // and flat is exactly what a customer writes in when he says a voice sounds like a robot.
+          // It changes no price, no timing and nothing else on the call.
+          voice_settings: { stability: 0.4, similarity_boost: 0.8, use_speaker_boost: true, speed: this._speed() } },
       ));
       seg.ttsMs = serviceTimeMs(res);
       if (!res.ok || !res.body) {
-        console.warn(`[voice] the cloned voice would not speak these words (HTTP ${res.status})`);
+        refused = true;
+        this._refuse(`the cloned voice would not speak these words (HTTP ${res.status})`);
         return;
       }
       const reader = res.body.getReader();
@@ -1115,8 +1175,16 @@ class VoiceCloningEngine {
         if (done) break;
       }
     } catch (e) {
-      if (this.running) this.onError?.(toUserMessage(e, "Voice processing error"));
+      refused = true;
+      if (this.running) this._refuse(toUserMessage(e, "Voice processing error"),
+        (e as Error | null)?.name === VOICE_TIMEOUT);
     } finally {
+      // The line opened and then carried nothing at all. From the caller's chair that is the same
+      // dead voice as a refusal, and it used to leave the call running with his microphone on the
+      // cable and his minutes going.
+      if (!refused && this.running && seg.bytes.length === 0) {
+        this._refuse("the cloned voice opened the answer and sent no sound in it");
+      }
       seg.done = true;
       this.asking = Math.max(0, this.asking - 1);
       this._finish(seg);
@@ -1186,6 +1254,9 @@ class VoiceCloningEngine {
     if (!this.running || !this.audioCtx || !this.voiceBus) return;
     if (!seg.reached) {
       seg.reached = true;
+      // Real cloned audio on the line: whatever the voice line refused before this is water under
+      // the bridge, and a later refusal counts from here.
+      this.refusedRun = 0;
       this.piecesBack += 1;
       // The whole way round: from the moment his words left this app to the moment any of them
       // came back as cloned sound. The transcriber's wait and the speaker's wait are both in it.
@@ -1655,6 +1726,8 @@ export default function StreamPage() {
   const [voiceFold, setVoiceFold]         = useState(true);
   const [voiceFind, setVoiceFind]         = useState("");
   const [voiceRegion, setVoiceRegion]     = useState("");
+  const [voiceSex, setVoiceSex]           = useState("");
+  const [voiceAge, setVoiceAge]           = useState("");
   const [savedVoices, setSavedVoices]     = useState<SavedVoice[]>(() => getSavedVoices());
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [uploadVoiceName, setUploadVoiceName] = useState("");
@@ -1916,18 +1989,30 @@ export default function StreamPage() {
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
 
-  // The list inside the fold: what his search and his accent choice leave standing. He may type a
-  // country instead of an accent — "Australia", "the UK", "United States" — and the voices of that
-  // country answer, because the search words below are what a person actually writes. What stands on
-  // the row is still only the accent the service publishes for that voice.
+  // The list inside the fold: what his search, his sex choice, his age choice and his accent choice
+  // leave standing. He may type a country instead of an accent — "Australia", "the UK", "United
+  // States" — and the voices of that country answer, because the search words below are what a person
+  // actually writes. What stands on the tile is only what the service publishes for that voice.
   const listedVoices = BUILTIN_VOICES.filter(v => {
     if (voiceRegion !== "" && v.region !== voiceRegion) return false;
+    if (voiceSex !== "" && v.sex !== voiceSex) return false;
+    if (voiceAge !== "" && v.age !== voiceAge) return false;
     const q = voiceFind.trim().toLowerCase();
     if (!q) return true;
     const words = q.split(/[\s-]+/).filter(Boolean);
-    const text = `${v.name} ${v.desc}`.toLowerCase();
+    const band = voiceBand(v).toLowerCase();
+    // The words a person actually writes for the same band the tile prints. The library calls the
+    // middle band "Middle-aged" and the tile says "Adult", so both answer here, and neither one is
+    // ever shown as a guess: a voice with no published age carries no word for it.
+    const sexWords = v.sex === "f" ? "female woman women" : v.sex === "m" ? "male man men" : "";
+    const ageWords = v.age === "young" ? "young"
+      : v.age === "middle" ? "adult middle aged" : v.age === "older" ? "older aged" : "";
+    const text = `${v.name} ${v.desc} ${band} ${sexWords} ${ageWords}`.toLowerCase();
     const wordsForAccent = (COUNTRY_SEARCH[v.region] ?? v.region).toLowerCase().split(" ");
-    return words.every(w => text.includes(w) || wordsForAccent.some(a => a.startsWith(w)));
+    // A word has to start one, not merely sit inside one: without this, a man typing "male" gets
+    // every woman too, because "male" is inside "female".
+    return words.every(w => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(text)
+      || wordsForAccent.some(a => a.startsWith(w)));
   });
 
   // ─── Enumerate devices ─────────────────────────────────────────────────────
@@ -2985,6 +3070,24 @@ export default function StreamPage() {
           return !!el && !el.paused && el.readyState >= 2;
         };
         cloner.onError = msg => toast({ title: t("Voice engine problem"), description: toUserMessage(msg, t("The voice service had trouble. Try again.")), variant: "destructive", withContact: true });
+        // The voice line refused, twice over, with nothing of his bought voice on the cable between
+        // the refusals. There is no third try worth waiting for, and every second this call stays
+        // open after that is a second counted against him for a voice that is not coming - so the
+        // call closes here, the timer stops with it, and he reads which side went quiet.
+        cloner.onCloneGone = why => {
+          const sid = sessionIdRef.current;
+          // Read before the teardown: it clears the engine, and whether this call ever had his
+          // voice decides which of the two true sentences he gets. One says nothing was used, the
+          // other says the unused part came back - and after a call that aired answers for a while,
+          // the first of those would be a lie.
+          const aired = (clonerRef.current?.piecesBack ?? 0) > 0;
+          if (sid) reportCallFailure(sid, "engine",
+            `the cloned voice refused to answer${aired ? " mid-call" : ""}; this app ended it — ${why}`);
+          void teardownStream();
+          toast({ title: t("Call ended"),
+            description: endReasonMessage(aired ? "clone_stopped" : "no_voice"),
+            variant: "destructive", withContact: true });
+        };
         await cloner.start(micStreamForCloner);
         clonerRef.current = cloner;
         setVcAnalyser(cloner.getAnalyser());
@@ -3856,9 +3959,32 @@ export default function StreamPage() {
         {voiceFold && (
           <div style={{ padding: "0 11px 11px", borderTop: "1px solid hsl(222 40% 12%)" }}>
             <label style={{ display: "block", fontSize: 9.5, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", margin: "9px 0 6px", lineHeight: 1.45 }}>{t("Clone Voice")}</label>
-            <input type="search" value={voiceFind} onChange={e => setVoiceFind(e.target.value)} placeholder={t("Search a name or an accent")}
+            <input type="search" value={voiceFind} onChange={e => setVoiceFind(e.target.value)} placeholder={t("Search a name, an accent or a voice type")}
               style={{ width: "100%", padding: "7px 9px", borderRadius: 7, background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 11.5, fontFamily: "'Rajdhani',sans-serif", outline: "none", boxSizing: "border-box" }} />
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "7px 0" }}>
+
+            {/* Two rows of switches, then the accents. Woman or man first, because that is the choice
+                a person makes before he cares where the voice is from; how old it sounds second;
+                where it comes from last. Each row is its own line so the three never crowd together,
+                and every one of them is a word as well as a colour — nothing here asks him to read a
+                tint to know what he picked. */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "7px 0 5px", alignItems: "center" }}>
+              <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 42%)", marginRight: 2 }}>{t("Sex")}</span>
+              {[["", t("All")], ["f", t("Women")], ["m", t("Men")]].map(([key, label]) => (
+                <button key={key} onClick={() => setVoiceSex(key)} aria-pressed={voiceSex === key}
+                  style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${voiceSex === key ? (key === "f" ? "hsl(330 90% 68% / 0.7)" : key === "m" ? "hsl(205 95% 62% / 0.7)" : "hsl(265 90% 65% / 0.45)") : "hsl(222 40% 14%)"}`, background: voiceSex === key ? (key === "f" ? "hsl(330 90% 68% / 0.12)" : key === "m" ? "hsl(205 95% 62% / 0.12)" : "hsl(265 90% 65% / 0.16)") : "hsl(222 40% 6%)", color: voiceSex === key ? (key === "f" ? "hsl(330 90% 74%)" : key === "m" ? "hsl(205 95% 70%)" : VC) : "hsl(222 25% 60%)" }}>
+                  {label}
+                </button>
+              ))}
+              <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 42%)", marginLeft: 6, marginRight: 2 }}>{t("Age")}</span>
+              {[["", t("All ages")], ["young", t("Young")], ["middle", t("Adult")], ["older", t("Older")]].map(([key, label]) => (
+                <button key={key} onClick={() => setVoiceAge(key)} aria-pressed={voiceAge === key}
+                  style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${voiceAge === key ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 14%)"}`, background: voiceAge === key ? "hsl(265 90% 65% / 0.16)" : "hsl(222 40% 6%)", color: voiceAge === key ? VC : "hsl(222 25% 60%)" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "0 0 8px", alignItems: "center" }}>
+              <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 42%)", marginRight: 2 }}>{t("Accent")}</span>
               {[["", t("All")], ["American", t("American")], ["British", t("British")], ["Australian", t("Australian")]].map(([key, label]) => (
                 <button key={key} onClick={() => setVoiceRegion(key)} aria-pressed={voiceRegion === key}
                   style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${voiceRegion === key ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 14%)"}`, background: voiceRegion === key ? "hsl(265 90% 65% / 0.16)" : "hsl(222 40% 6%)", color: voiceRegion === key ? VC : "hsl(222 25% 60%)" }}>
@@ -3867,20 +3993,36 @@ export default function StreamPage() {
               ))}
             </div>
 
-            <div style={{ maxHeight: 208, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+            {/* Tiles, three across, the approved design. The block at the top is the voice's first
+                letter, tinted for a woman or a man, and the words underneath say the same thing again
+                — so the list is scannable at a glance and still readable on a dim screen, in colour
+                or out of it. The box scrolls inside itself: the readings, the upload and Start stay
+                exactly where they are however many voices are standing. */}
+            <div style={{ maxHeight: 236, overflowY: "auto", display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, paddingRight: 3 }}>
               {listedVoices.length === 0 && (
-                <p style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", padding: "6px 2px" }}>{t("No voice matches that search.")}</p>
+                <p style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", padding: "6px 2px", gridColumn: "1 / -1" }}>{t("No voice matches that search.")}</p>
               )}
-              {listedVoices.map(v => (
-                <div key={v.id} onClick={() => { if (!isStreaming) setVcVoiceId(v.id); }} role="button" aria-pressed={vcVoiceId === v.id}
-                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 8, cursor: isStreaming ? "not-allowed" : "pointer", opacity: isStreaming ? 0.55 : 1, background: vcVoiceId === v.id ? "hsl(265 90% 65% / 0.14)" : "hsl(222 40% 6%)", border: `1px solid ${vcVoiceId === v.id ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 12%)"}` }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 94%)", fontFamily: "'Rajdhani',sans-serif", flexShrink: 0, minWidth: 68 }}>{v.name}</span>
-                  <span style={{ fontSize: 10.5, color: "hsl(222 25% 58%)", fontFamily: "'Rajdhani',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{v.desc}</span>
-                  {v.region !== "" && (
-                    <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: VC }}>{t(v.region)}</span>
-                  )}
-                </div>
-              ))}
+              {listedVoices.map(v => {
+                const on = vcVoiceId === v.id;
+                const band = voiceBand(v);
+                const SC = v.sex === "f" ? "hsl(330 90% 68%)" : "hsl(205 95% 62%)";
+                return (
+                  <div key={v.id} onClick={() => { if (!isStreaming) setVcVoiceId(v.id); }} role="button" aria-pressed={on}
+                    style={{ padding: 8, borderRadius: 9, cursor: isStreaming ? "not-allowed" : "pointer", opacity: isStreaming ? 0.55 : 1, background: on ? "hsl(265 90% 65% / 0.14)" : "hsl(222 40% 6%)", border: `1px solid ${on ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 12%)"}`, minWidth: 0 }}>
+                    <span style={{ width: 26, height: 26, borderRadius: 7, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "'Orbitron',monospace", fontWeight: 700, fontSize: 12, marginBottom: 5, color: v.sex === "" ? "hsl(222 25% 62%)" : SC, background: v.sex === "" ? "hsl(222 40% 12%)" : v.sex === "f" ? "hsl(330 90% 68% / 0.14)" : "hsl(205 95% 62% / 0.14)", border: `1px solid ${v.sex === "" ? "hsl(222 40% 16%)" : v.sex === "f" ? "hsl(330 90% 68% / 0.45)" : "hsl(205 95% 62% / 0.45)"}` }}>
+                      {v.name[0]}
+                    </span>
+                    <p style={{ fontSize: 11.5, fontWeight: 700, color: "hsl(190 80% 94%)", fontFamily: "'Rajdhani',sans-serif", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.name}</p>
+                    {band !== "" && (
+                      <p style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", margin: "1px 0 0", color: v.sex === "f" ? "hsl(330 90% 72%)" : v.sex === "m" ? "hsl(205 95% 68%)" : "hsl(222 25% 58%)" }}>{t(band)}</p>
+                    )}
+                    <p style={{ fontSize: 9.5, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", margin: "2px 0 0", lineHeight: 1.3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.desc}</p>
+                    {v.region !== "" && (
+                      <p style={{ display: "inline-block", fontSize: 8, fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", margin: "5px 0 0", padding: "2px 6px", borderRadius: 6, border: "1px solid hsl(222 40% 14%)", color: "hsl(222 25% 58%)" }}>{t(v.region)}</p>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
