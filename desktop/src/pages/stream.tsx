@@ -26,7 +26,7 @@ import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../l
 import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
   Zap, Square, Play, Camera, Monitor, Maximize2, RefreshCw,
-  ChevronDown, Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
+  Image, Loader2, X, Settings, Mic, Wifi, WifiOff,
   Volume2, Upload, Trash2, Video, Headphones, VideoIcon, Smartphone, CameraOff, Sparkles, Lock, Clock,
 } from "lucide-react";
 import { GuidedTour, onTourRequested, tourSeen, tourStops } from "../components/guided-tour";
@@ -157,16 +157,50 @@ function _videoPromptFor(customText: string, styleLook: string): string {
 }
 
 // ─── Built-in voices ──────────────────────────────────────────────────────────
+// The nineteen voices the service now publishes as the standing ones, in its own order. The eight
+// this app used to offer are retired by the service on 31 December 2026, so a customer choosing one
+// of those in January would hear nothing at all — this list is the reason it changed, not a coat of
+// paint. `desc` is the words the service publishes for that voice, lowered to sentence case;
+// `region` is the accent the service itself prints beside that voice, read off the voice list of a
+// signed-in account — so every one of the nineteen carries its real accent, and none carries a
+// country nobody published. All nineteen speak English.
 const BUILTIN_VOICES = [
-  { id: "JBFqnCBsd6RMkjVDRZzb", name: "George — warm male" },
-  { id: "TX3LPaxmHKxFdv7VOQHJ", name: "Liam — articulate male" },
-  { id: "XB0fDUnXU5powFXDhCwa", name: "Charlotte — seductive female" },
-  { id: "Xb7hH8MSUJpSbSDYk0k2", name: "Alice — confident female" },
-  { id: "pFZP5JQG7iQjIQuC4Bku", name: "Lily — warm female" },
-  { id: "nPczCjzI2devNBz1zQrb", name: "Brian — deep male" },
-  { id: "N2lVS1w4EtoT3dr4eOWO", name: "Callum — intense male" },
-  { id: "iP95p4xoKVk53GoZ742B", name: "Chris — casual male" },
+  { id: "gOupLcAkjEnguROwi4oS", name: "Darian",   desc: "Warm grounded storyteller",   region: "American" },
+  { id: "OZ0L6eISlOejga3XjDFt", name: "Talia",    desc: "Warm soft guide",             region: "American" },
+  { id: "WQP7cQUF5aAS6Axh5yaa", name: "Elara",    desc: "Crisp professional narrator", region: "American" },
+  { id: "jSuBIjxMKhqIfb0wCK1F", name: "Baxter",   desc: "Dry and calm",                region: "Australian" },
+  { id: "6WwXjDDEMyNmFG95zycZ", name: "Eldrin",   desc: "Crisp baritone",              region: "British" },
+  { id: "fs2OqxduwXgp9foh2xjK", name: "Callum",   desc: "Husky, playful",              region: "American" },
+  { id: "dvbL7qkNGZY1IqPGZAjM", name: "Elowen",   desc: "Upbeat modern narrator",      region: "American" },
+  { id: "10NkTYmU7tSz3Kkl3Lex", name: "Kaelen",   desc: "Easy, unpolished",            region: "American" },
+  { id: "ktkP7Nsj67dw2zcplQYt", name: "Lawrence", desc: "Bright and informative",      region: "American" },
+  { id: "BFd5oBc2DDna33pSi4Gf", name: "Alicia",   desc: "Polished anchor",             region: "British" },
+  { id: "QtY3JBOUKEB5xzrRfOKc", name: "Maisie",   desc: "Friendly casual neighbour",   region: "American" },
+  { id: "7QN34D2r3hCNwbOYIeK0", name: "Warren",   desc: "Effortless and cool",         region: "American" },
+  { id: "g7LVvkPWALzPxOQbF6OE", name: "Jade",     desc: "Upbeat and natural",          region: "American" },
+  { id: "l7kNoIfnJKPg7779LI2t", name: "Eddie",    desc: "Natural and helpful",         region: "American" },
+  { id: "AaOhDHYJ1XLZk74lXhdE", name: "Caleb",    desc: "Trusted guide",               region: "American" },
+  { id: "8dEUmyPMdDdK91vboYih", name: "Sawyer",   desc: "Midnight storyteller",        region: "American" },
+  { id: "fnYMz3F5gMEDGMWcH1ex", name: "Finley",   desc: "Articulate anchor",           region: "British" },
+  { id: "22N9cF8z0o7y23njdyaY", name: "Florence", desc: "Atmospheric storyteller",     region: "British" },
+  { id: "FrS6cKLB1wg4WYgPa9GW", name: "Wyatt",    desc: "Seasoned mentor",             region: "American" },
 ];
+
+// The words a person types when he is looking for a country rather than an accent. These are search
+// words only — never printed — and they stand for the accent the service publishes for the voice.
+const COUNTRY_SEARCH: Record<string, string> = {
+  American: "america american usa united states",
+  British: "britain british uk united kingdom england",
+  Australian: "australia australian aussie",
+};
+
+// Why this list is not a coat of paint: the eight voices this app used to offer are retired by the
+// service on 31 December 2026, so any of them still chosen in January would answer with silence. The
+// chosen voice is held for the session and never written to disk, so an upgrade simply asks the
+// customer to pick again - there is no old choice on his machine to translate, and no silent swap
+// onto a voice nobody offered him. Charlotte leaves with the old list because the service publishes
+// no replacement for her, and a country nobody publishes is a country nobody may print.
+
 
 const C  = "hsl(187 100% 52%)";
 const VC = "hsl(265 90% 65%)";
@@ -1615,6 +1649,12 @@ export default function StreamPage() {
   // chose, and the call would bill before he noticed — so the list opens on "Choose a voice"
   // and no cloning call starts until he answers it.
   const [vcVoiceId, setVcVoiceId]         = usePerTabState<string>(activeTab, "");
+  // The voice list, folded. It opens on its own when nothing is chosen yet, and shuts itself the
+  // moment he picks — a list he has already read should not spend the rest of the call pushing the
+  // readings off his screen.
+  const [voiceFold, setVoiceFold]         = useState(true);
+  const [voiceFind, setVoiceFind]         = useState("");
+  const [voiceRegion, setVoiceRegion]     = useState("");
   const [savedVoices, setSavedVoices]     = useState<SavedVoice[]>(() => getSavedVoices());
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [uploadVoiceName, setUploadVoiceName] = useState("");
@@ -1875,6 +1915,20 @@ export default function StreamPage() {
 
   // ─── All voices merged ─────────────────────────────────────────────────────
   const allVoices = [...savedVoices.map(v => ({ id: v.id, name: `★ ${v.name}` })), ...BUILTIN_VOICES];
+
+  // The list inside the fold: what his search and his accent choice leave standing. He may type a
+  // country instead of an accent — "Australia", "the UK", "United States" — and the voices of that
+  // country answer, because the search words below are what a person actually writes. What stands on
+  // the row is still only the accent the service publishes for that voice.
+  const listedVoices = BUILTIN_VOICES.filter(v => {
+    if (voiceRegion !== "" && v.region !== voiceRegion) return false;
+    const q = voiceFind.trim().toLowerCase();
+    if (!q) return true;
+    const words = q.split(/[\s-]+/).filter(Boolean);
+    const text = `${v.name} ${v.desc}`.toLowerCase();
+    const wordsForAccent = (COUNTRY_SEARCH[v.region] ?? v.region).toLowerCase().split(" ");
+    return words.every(w => text.includes(w) || wordsForAccent.some(a => a.startsWith(w)));
+  });
 
   // ─── Enumerate devices ─────────────────────────────────────────────────────
   // Reads the live picks from refs rather than from its own closure, so any caller —
@@ -3300,7 +3354,6 @@ export default function StreamPage() {
   }, [isStreaming, isFullscreen, teardownStream, closeAll]);
 
   const curStyle = STYLES.find(s => s.id === selectedStyle)!;
-  const selectSt: React.CSSProperties = { width: "100%", appearance: "none", padding: "8px 32px 8px 12px", background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", borderRadius: 8, color: "hsl(190 80% 96%)", fontSize: 13, fontFamily: "'Rajdhani',sans-serif", cursor: "pointer", opacity: isStreaming ? 0.5 : 1 };
 
   // ─── Video output panel (portrait & landscape) ────────────────────────────
   // Portrait mode = 9:16 ratio, clean output, no overlay chrome.
@@ -3784,28 +3837,74 @@ export default function StreamPage() {
         </div>
       )}
 
-      {/* The two doors of one panel, side by side: the voice he goes out with, and the
-          way to add his own right beside it. Nothing to hunt for under the fold. */}
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "stretch", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
-      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", minWidth: 0 }}>
-        <label style={{ display: "block", fontSize: 9.5, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", marginBottom: 6, lineHeight: 1.45 }}>{t("Clone Voice")}</label>
-        <div style={{ position: "relative" }}>
-          <select value={vcVoiceId} onChange={e => setVcVoiceId(e.target.value)} disabled={isStreaming} style={{ ...selectSt, borderColor: vcVoiceId ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 14%)" }}>
-            <option value="" disabled hidden>{t("Choose a voice")}</option>
-            {savedVoices.length > 0 && (
-              <optgroup label={t("── Your Voices ──")}>
-                {savedVoices.map(v => <option key={v.id} value={v.id}>★ {v.name}</option>)}
-              </optgroup>
-            )}
-            <optgroup label={t("── Built-in Voices ──")}>
-              {BUILTIN_VOICES.map(v => <option key={v.id} value={v.id}>{v.name}</option>)}
-            </optgroup>
-          </select>
-          <ChevronDown style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", width: 14, height: 14, color: "hsl(222 25% 50%)", pointerEvents: "none" }} />
+      {/* The voice list folds. Closed it is one line — who he goes out as, how many there are,
+          and the sign that opens it — so a long list can never push the readings, the upload box
+          or Start down the screen and out of sight while a call is running. */}
+      <div style={{ border: "1px solid hsl(265 90% 65% / 0.28)", borderRadius: 10, background: "hsl(222 40% 8%)", overflow: "hidden", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
+        <div onClick={() => setVoiceFold(v => !v)} role="button" tabIndex={0} aria-expanded={voiceFold}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setVoiceFold(v => !v); } }}
+          style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 11px", cursor: "pointer", userSelect: "none" }}>
+          <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6, border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 13, fontWeight: 700, fontFamily: "'Orbitron',monospace", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>{voiceFold ? "−" : "+"}</span>
+          <span style={{ fontSize: 14.5, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+            {allVoices.find(v => v.id === vcVoiceId)?.name ?? t("Choose a voice")}
+          </span>
+          <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10.5, color: "hsl(222 25% 52%)", fontFamily: "'Rajdhani',sans-serif" }}>
+            {t(listedVoices.length === 1 ? "{n} voice" : "{n} voices", { n: listedVoices.length })}
+          </span>
         </div>
-        <p style={{ fontSize: 10, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, marginTop: "auto", paddingTop: 8 }}>
-          {t("Your saved voices come first in this list.")}
-        </p>
+
+        {voiceFold && (
+          <div style={{ padding: "0 11px 11px", borderTop: "1px solid hsl(222 40% 12%)" }}>
+            <label style={{ display: "block", fontSize: 9.5, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", margin: "9px 0 6px", lineHeight: 1.45 }}>{t("Clone Voice")}</label>
+            <input type="search" value={voiceFind} onChange={e => setVoiceFind(e.target.value)} placeholder={t("Search a name or an accent")}
+              style={{ width: "100%", padding: "7px 9px", borderRadius: 7, background: "hsl(222 47% 4%)", border: "1px solid hsl(222 40% 14%)", color: "hsl(190 80% 96%)", fontSize: 11.5, fontFamily: "'Rajdhani',sans-serif", outline: "none", boxSizing: "border-box" }} />
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "7px 0" }}>
+              {[["", t("All")], ["American", t("American")], ["British", t("British")], ["Australian", t("Australian")]].map(([key, label]) => (
+                <button key={key} onClick={() => setVoiceRegion(key)} aria-pressed={voiceRegion === key}
+                  style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${voiceRegion === key ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 14%)"}`, background: voiceRegion === key ? "hsl(265 90% 65% / 0.16)" : "hsl(222 40% 6%)", color: voiceRegion === key ? VC : "hsl(222 25% 60%)" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <div style={{ maxHeight: 208, overflowY: "auto", display: "flex", flexDirection: "column", gap: 4 }}>
+              {listedVoices.length === 0 && (
+                <p style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", padding: "6px 2px" }}>{t("No voice matches that search.")}</p>
+              )}
+              {listedVoices.map(v => (
+                <div key={v.id} onClick={() => { if (!isStreaming) setVcVoiceId(v.id); }} role="button" aria-pressed={vcVoiceId === v.id}
+                  style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 9px", borderRadius: 8, cursor: isStreaming ? "not-allowed" : "pointer", opacity: isStreaming ? 0.55 : 1, background: vcVoiceId === v.id ? "hsl(265 90% 65% / 0.14)" : "hsl(222 40% 6%)", border: `1px solid ${vcVoiceId === v.id ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 12%)"}` }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "hsl(190 80% 94%)", fontFamily: "'Rajdhani',sans-serif", flexShrink: 0, minWidth: 68 }}>{v.name}</span>
+                  <span style={{ fontSize: 10.5, color: "hsl(222 25% 58%)", fontFamily: "'Rajdhani',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>{v.desc}</span>
+                  {v.region !== "" && (
+                    <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: VC }}>{t(v.region)}</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* What he already saved and the way to add to it, side by side under the list. */}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 10, alignItems: "stretch", marginTop: 10, opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
+      <div style={{ background: "hsl(222 40% 8%)", borderRadius: 10, padding: 10, display: "flex", flexDirection: "column", minWidth: 0 }}>
+        <p style={{ fontSize: 9.5, fontWeight: 700, color: "hsl(265 70% 60%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", marginBottom: 6, lineHeight: 1.45 }}>{t("Your voices")}</p>
+        {savedVoices.length === 0 && (
+          <p style={{ fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4 }}>{t("Nothing saved yet. Add your own voice on the right.")}</p>
+        )}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: "auto", paddingTop: 8 }}>
+          {savedVoices.map(v => (
+            <span key={v.id} onClick={() => { if (!isStreaming) setVcVoiceId(v.id); }} title={t("Use this voice")}
+              style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, cursor: isStreaming ? "not-allowed" : "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(190 80% 92%)", background: vcVoiceId === v.id ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 6%)", border: `1px solid ${vcVoiceId === v.id ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 12%)"}`, minWidth: 0, opacity: isStreaming ? 0.55 : 1 }}>
+              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }}>★ {v.name}</span>
+              <button onClick={e => { e.stopPropagation(); handleDeleteVoice(v.id); }}
+                style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(0 85% 55%)", padding: 0, display: "flex", flexShrink: 0 }}>
+                <Trash2 style={{ width: 10, height: 10 }} />
+              </button>
+            </span>
+          ))}
+        </div>
       </div>
 
       {/* Upload your own voice */}
@@ -3828,22 +3927,6 @@ export default function StreamPage() {
       <p style={{ fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", marginTop: 9, lineHeight: 1.45 }}>
         {t("Upload 30s–3min of clear speech. It is saved and appears on the left for your next call.")}
       </p>
-
-      {/* What he already saved: one chip per voice, tap it to go out with that voice. */}
-      {savedVoices.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 10 }}>
-          {savedVoices.map(v => (
-            <span key={v.id} onClick={() => setVcVoiceId(v.id)} title={t("Use this voice")}
-              style={{ display: "flex", alignItems: "center", gap: 6, padding: "5px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10.5, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", color: "hsl(190 80% 92%)", background: vcVoiceId === v.id ? "hsl(265 90% 65% / 0.15)" : "hsl(222 40% 8%)", border: `1px solid ${vcVoiceId === v.id ? "hsl(265 90% 65% / 0.4)" : "hsl(222 40% 12%)"}`, minWidth: 0 }}>
-              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 150 }}>★ {v.name}</span>
-              <button onClick={e => { e.stopPropagation(); handleDeleteVoice(v.id); }}
-                style={{ background: "none", border: "none", cursor: "pointer", color: "hsl(0 85% 55%)", padding: 0, display: "flex", flexShrink: 0 }}>
-                <Trash2 style={{ width: 10, height: 10 }} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
 
       {/* Waveform — the voice leaving the app, measured on the player itself.
           On the voice-only tab the same proof stands in its own card in the right column,
