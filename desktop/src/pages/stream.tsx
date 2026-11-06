@@ -157,38 +157,90 @@ function _videoPromptFor(customText: string, styleLook: string): string {
 }
 
 // ─── Built-in voices ──────────────────────────────────────────────────────────
-// The nineteen voices the service now publishes as the standing ones, in its own order. The eight
-// this app used to offer are retired by the service on 31 December 2026, so a customer choosing one
-// of those in January would hear nothing at all — this list is the reason it changed, not a coat of
-// paint. `desc` is the words the service publishes for that voice, lowered to sentence case;
-// `region` is the accent the service itself prints beside that voice, read off the voice list of a
-// signed-in account — so every one of the nineteen carries its real accent, and none carries a
-// country nobody published. All nineteen speak English.
+// The voices a customer can go out with, and where each one comes from. Every one of them was read
+// off its own published record before it was written here: `desc` is the words the service prints
+// for that voice, `region` is the accent or language that record names, and `sex`/`age` are what it
+// says in the same three age words the service filters its library by - young, middle, older.
 //
-// `sex` and `age` are what the published record for each of these voice IDs says, in the same three
-// age words the service itself filters its library by — young, middle, older. Two of the nineteen
-// carry no published sex, so they print no band and stand only under "All": a band nobody published
-// is not a band this screen says. There is no child band to offer, because the library has none.
+// Nothing here is guessed to fill a gap. Eleven of these voices publish several languages and no
+// accent of their own, so they carry no region and print no chip: a voice the service offers in
+// twenty-six languages has one accent named by nobody, and printing the first of them would be this
+// screen claiming something the record does not. The same rule covers a sex nobody published - the
+// tile prints the half that is stated and stays quiet about the half that is not.
+//
+// These voices speak what they are handed. The call reads his words in whatever language he says
+// them in, so a customer whose callers speak German or Tagalog is not put through an English-only
+// list - the accent he picks is the accent those words come back wearing.
 const BUILTIN_VOICES = [
-  { id: "gOupLcAkjEnguROwi4oS", name: "Darian",   desc: "Warm grounded storyteller",   region: "American",  sex: "m", age: "" },
-  { id: "OZ0L6eISlOejga3XjDFt", name: "Talia",    desc: "Warm soft guide",             region: "American",  sex: "f", age: "middle" },
-  { id: "WQP7cQUF5aAS6Axh5yaa", name: "Elara",    desc: "Crisp professional narrator", region: "American",  sex: "f", age: "middle" },
-  { id: "jSuBIjxMKhqIfb0wCK1F", name: "Baxter",   desc: "Dry and calm",                region: "Australian", sex: "m", age: "young" },
-  { id: "6WwXjDDEMyNmFG95zycZ", name: "Eldrin",   desc: "Crisp baritone",              region: "British",   sex: "m", age: "middle" },
-  { id: "fs2OqxduwXgp9foh2xjK", name: "Callum",   desc: "Husky, playful",              region: "American",  sex: "",  age: "" },
-  { id: "dvbL7qkNGZY1IqPGZAjM", name: "Elowen",   desc: "Upbeat modern narrator",      region: "American",  sex: "f", age: "middle" },
-  { id: "10NkTYmU7tSz3Kkl3Lex", name: "Kaelen",   desc: "Easy, unpolished",            region: "American",  sex: "m", age: "" },
-  { id: "ktkP7Nsj67dw2zcplQYt", name: "Lawrence", desc: "Bright and informative",      region: "American",  sex: "m", age: "young" },
-  { id: "BFd5oBc2DDna33pSi4Gf", name: "Alicia",   desc: "Polished anchor",             region: "British",   sex: "",  age: "middle" },
-  { id: "QtY3JBOUKEB5xzrRfOKc", name: "Maisie",   desc: "Friendly casual neighbour",   region: "American",  sex: "f", age: "young" },
-  { id: "7QN34D2r3hCNwbOYIeK0", name: "Warren",   desc: "Effortless and cool",         region: "American",  sex: "m", age: "young" },
-  { id: "g7LVvkPWALzPxOQbF6OE", name: "Jade",     desc: "Upbeat and natural",          region: "American",  sex: "f", age: "young" },
-  { id: "l7kNoIfnJKPg7779LI2t", name: "Eddie",    desc: "Natural and helpful",         region: "American",  sex: "m", age: "young" },
-  { id: "AaOhDHYJ1XLZk74lXhdE", name: "Caleb",    desc: "Trusted guide",               region: "American",  sex: "m", age: "" },
-  { id: "8dEUmyPMdDdK91vboYih", name: "Sawyer",   desc: "Midnight storyteller",        region: "American",  sex: "m", age: "middle" },
-  { id: "fnYMz3F5gMEDGMWcH1ex", name: "Finley",   desc: "Articulate anchor",           region: "British",   sex: "m", age: "older" },
-  { id: "22N9cF8z0o7y23njdyaY", name: "Florence", desc: "Atmospheric storyteller",     region: "British",   sex: "f", age: "middle" },
-  { id: "FrS6cKLB1wg4WYgPa9GW", name: "Wyatt",    desc: "Seasoned mentor",             region: "American",  sex: "m", age: "middle" },
+  { id: "dxdOayhnd0jLtELGeNtF", name: "Mason", desc: "Friendly Southern Neighbor", region: "American", sex: "m", age: "" },
+  { id: "DMyrgzQFny3JI1Y1paM5", name: "Donovan", desc: "Articulate, Strong and Deep", region: "", sex: "", age: "" },
+  { id: "pVnrL6sighQX7hVz89cp", name: "Henry", desc: "Deep, Professional, and Soothing", region: "", sex: "m", age: "" },
+  { id: "Nhs7eitvQWFTQBsf0yiT", name: "Sarah", desc: "Approachable and Informative", region: "", sex: "", age: "" },
+  { id: "15CVCzDByBinCIoCblXo", name: "Lucan Rook", desc: "Energetic Male", region: "", sex: "m", age: "middle" },
+  { id: "7NsaqHdLuKNFvEfjpUno", name: "Seer Morganna", desc: "Intimidating, and Clear", region: "", sex: "f", age: "" },
+  { id: "dIeHOwebB4fO6l6gNfUK", name: "Victoria", desc: "Vibrant and Fresh", region: "", sex: "f", age: "young" },
+  { id: "X6lMep3MH36hSteAavNu", name: "Andreas", desc: "Natural & clear male", region: "Norwegian", sex: "m", age: "" },
+  { id: "j05EIz3iI3JmBTWC3CsA", name: "Natasha", desc: "Soothing ASMR Whisperer", region: "", sex: "", age: "" },
+  { id: "Ik5XUhfFDmwjOkm6MjvO", name: "Elizabeth Q", desc: "Narrative Story", region: "American", sex: "", age: "" },
+  { id: "xsCyJoN5C09EtVx1TtJZ", name: "Serena", desc: "Soft", region: "British", sex: "f", age: "" },
+  { id: "ARoHjGrzr2zDSDt13Awg", name: "Marco Juelke", desc: "Clear and Neutral", region: "German", sex: "", age: "" },
+  { id: "CZdRaSQ51p0onta4eec8", name: "Akshay", desc: "Soothing and Soft", region: "Indian", sex: "", age: "" },
+  { id: "Us3vfHBiYjBe281R2EwN", name: "Armagan Erguney", desc: "Young and Fast", region: "Turkish", sex: "", age: "young" },
+  { id: "19RpI2OM42MzPGEGlFzN", name: "Dovvy", desc: "West coast Canada/USA", region: "Canadian", sex: "", age: "" },
+  { id: "xg7RXypgOlRSIidsSV4l", name: "Michelle", desc: "Full and Reassuring", region: "American", sex: "f", age: "" },
+  { id: "NQJnREzQtnAHHZnia0tY", name: "Alexei", desc: "Eastern European business voice", region: "Eastern European", sex: "m", age: "" },
+  { id: "iYPmlSIyAfrtEl1YrFsy", name: "Zsolt", desc: "Confident", region: "Hungarian", sex: "m", age: "" },
+  { id: "kGgZJkUJuKLeqefzX61D", name: "Thimsen", desc: "Castillian Spanish Spain", region: "Spanish", sex: "m", age: "" },
+  { id: "3xo8vOwxfBdazUIbWODB", name: "Esther", desc: "Fun, warm and laid-back", region: "Spanish", sex: "", age: "" },
+  { id: "XWuTx9ClCtLoYjuLF6Fa", name: "Sheila", desc: "Warm, clear and professional", region: "Spanish", sex: "f", age: "young" },
+  { id: "eZxqQzb5CuYo3Kl6EXfZ", name: "Sofia", desc: "Natural Conversations", region: "Spanish", sex: "f", age: "young" },
+  { id: "MW0LBphjVXELkIY7lnfu", name: "Hugo López", desc: "Empathetic Customer Support", region: "Spanish", sex: "m", age: "" },
+  { id: "GB7fZx4ubHWxbBE05abF", name: "Marina", desc: "Clear, Velvety and Articulated", region: "Spanish", sex: "f", age: "" },
+  { id: "gGr0c5znjcZfTNIRdJZ1", name: "Gabriel Reyes", desc: "Clear and Engaging", region: "Spanish", sex: "", age: "" },
+  { id: "1aJyZpkt0vxhGPBnPyrs", name: "Fernanda Sanmiguel", desc: "Neutral and Serious", region: "Spanish", sex: "f", age: "" },
+  { id: "UOIqAnmS11Reiei1Ytkc", name: "Carolina", desc: "Natural, Neutral and Clear", region: "Spanish", sex: "f", age: "" },
+  { id: "ypIbR1aohyRSdDv25DPr", name: "Rosa", desc: "Neutral, Calm and Genuine", region: "Spanish", sex: "f", age: "" },
+  { id: "OCsEi4G5LJzKMSZFmYBD", name: "Martina", desc: "Customer Support & Call Center", region: "Catalan", sex: "f", age: "young" },
+  { id: "iCCltpMulQlVWET3GYOx", name: "Dr. John Mansoor", desc: "Informative Educational", region: "", sex: "", age: "" },
+  { id: "v3sSens3ygqofjGcvi1W", name: "Tobi", desc: "Friendly German Narrator", region: "German", sex: "m", age: "" },
+  { id: "QT6va3HQK8j63EC2r9cw", name: "Sophia", desc: "German Corporate & Brand", region: "German", sex: "", age: "" },
+  { id: "bWYICUVx1JWc1lInzna3", name: "Nerio", desc: "German Narrator", region: "German", sex: "m", age: "" },
+  { id: "iyscHPBBWOqnjHpyGETU", name: "Hannah", desc: "Engaging German Storytelling", region: "German", sex: "f", age: "young" },
+  { id: "m1xJVQ4AuvhAWXoSQdeA", name: "Anneke", desc: "German Non-Fiction Educational", region: "German", sex: "", age: "" },
+  { id: "1s5ETcPtsJ9W2cUUQrDb", name: "Luca", desc: "Warm Italian Narrator", region: "Italian", sex: "m", age: "" },
+  { id: "MuTiG4dbrEGYEy3XP4iP", name: "Rossana", desc: "Warm Italian Conversational", region: "Italian", sex: "f", age: "" },
+  { id: "kAzI34nYjizE0zON6rXv", name: "Sami", desc: "Energetic, Expressive and Smiley", region: "Italian", sex: "f", age: "young" },
+  { id: "RXoaSpLaWTEckJgPUBG3", name: "Tiziana", desc: "Smart, Balanced and Credible", region: "Italian", sex: "", age: "middle" },
+  { id: "BMLpHVZqLTDQfQalqMJJ", name: "Morgaine", desc: "Deep, Dark & Dramatic Female", region: "", sex: "f", age: "" },
+  { id: "JsR3mfNsGZAOT5E6FJ4q", name: "Vincent", desc: "French with an Italian accent", region: "French", sex: "", age: "" },
+  { id: "k9vmajscw5CWMqSx8tFw", name: "Trivia Host", desc: "Filipino entertainment voice", region: "Filipino", sex: "", age: "" },
+  { id: "6LXO12QQcaZd6xGp9UIZ", name: "Cielle", desc: "Calm & Natural Filipino", region: "Filipino", sex: "f", age: "" },
+  { id: "nAjIdBO5jCaTG1W0RTrz", name: "Marla", desc: "Casual Filipino Conversationalist", region: "Filipino", sex: "", age: "" },
+  { id: "vy5FHcwTzRxpcxreOntL", name: "Manny", desc: "Filipino, Youthful and Fun", region: "Filipino", sex: "m", age: "young" },
+  { id: "buRCcvL68tX5TY71eAAL", name: "Joel", desc: "English Filipino Accent", region: "Filipino", sex: "", age: "" },
+  { id: "3BDtQgJQtkDnbDR0xPpK", name: "Ro Raza", desc: "Friendly, Warm and Honest", region: "", sex: "", age: "" },
+  { id: "gKy4twPAmGgskTXd6GER", name: "Kim ChiNam", desc: "Korean man based in Seoul", region: "Korean", sex: "m", age: "" },
+  { id: "4NQthjVhIGGVfL3Si000", name: "Chen", desc: "Mandarin with a Taiwanese accent", region: "Chinese", sex: "", age: "" },
+  { id: "cwzmKSYMCC9Aym1ymCnt", name: "Mr. Chen", desc: "Trustworthy Chinese Narrator", region: "Chinese", sex: "m", age: "" },
+  { id: "cHDwXsKG0qHMNLIjOusN", name: "Lucky Chan", desc: "Suspenseful, Cinematic, Dramatic", region: "Chinese", sex: "", age: "" },
+  { id: "Qc0X0JnOfc5XzetLVusF", name: "Oolong", desc: "Chinese Accented English", region: "Chinese", sex: "", age: "" },
+  { id: "9lHjugDhwqoxA5MhX0az", name: "Anna Su", desc: "Casual, Friendly and Bright", region: "Chinese", sex: "f", age: "young" },
+  { id: "3L29IUUN61xcyvsKscMy", name: "Chinmay", desc: "Wise Gujarati Friend Voice", region: "Gujarati", sex: "", age: "" },
+  { id: "JEyYjYhKfZusWtpp0Hhs", name: "Dave Chen", desc: "Narrative Story", region: "Indonesian", sex: "", age: "" },
+  { id: "adKHAxMhQpNqu1eDLlmg", name: "Jon Chan", desc: "Voice for documentaries", region: "", sex: "", age: "" },
+  { id: "XkKan4KiM64ZCzjtecYJ", name: "Chi-town John", desc: "Chicago, Generation X male", region: "American", sex: "m", age: "" },
+  { id: "SynJqan9pB2a3IQFMkCP", name: "Crystal", desc: "Chic Southern Belle", region: "American", sex: "f", age: "" },
+  { id: "hIreuBly94QFepU63yel", name: "Scotty", desc: "Australian conversational narrator", region: "Australian", sex: "m", age: "" },
+  { id: "CFN1FeTIoSu4xm6mDCkI", name: "David", desc: "Australian Tech Pro & Storyteller", region: "Australian", sex: "m", age: "" },
+  { id: "M7ya1YbaeFaPXljg9BpK", name: "Hannah", desc: "Natural Australian, conversational", region: "Australian", sex: "f", age: "" },
+  { id: "QhzTYkz7VbKNwVeK3URf", name: "Sammy", desc: "Australian Young Girl", region: "Australian", sex: "f", age: "young" },
+  { id: "jQQiXyFE3PBHLF8znAIb", name: "Australian female", desc: "Early to mid 30s", region: "Australian", sex: "f", age: "" },
+  { id: "PoD6Ncnu5vpDftSDIu4S", name: "Elle", desc: "Young Australian Female", region: "Australian", sex: "f", age: "young" },
+  { id: "5GZaeOOG7yqLdoTRsaa6", name: "Happy Australian Woman", desc: "Conversational", region: "Australian", sex: "f", age: "" },
+  { id: "GK4ZNLi5L8ZOBBT2Kaww", name: "Leo", desc: "Brazilian Portuguese (Neutral)", region: "Portuguese", sex: "m", age: "" },
+  { id: "Dps47AVoFamqqkDShRDS", name: "Fabio Oliveira", desc: "Deep Portuguese", region: "Portuguese", sex: "", age: "" },
+  { id: "U6hRLyLGv1KzjR4htCyY", name: "Marcia", desc: "Young female voice", region: "Portuguese", sex: "f", age: "young" },
+  { id: "RGymW84CSmfVugnA5tvA", name: "Roberta", desc: "Smooth and Confident", region: "Portuguese", sex: "f", age: "young" },
 ];
 
 // The two words a tile prints under a name, from the two published fields above. Either half can be
@@ -203,19 +255,53 @@ function voiceBand(v: { sex: string; age: string }): string {
 }
 
 // The words a person types when he is looking for a country rather than an accent. These are search
-// words only — never printed — and they stand for the accent the service publishes for the voice.
+// words only — never printed — and they stand for the accent the published record names for the
+// voice. Every accent that stands on the accent row has its own line here, including the places whose
+// adjective and country are different words: nobody types "australia" and expects to have to know
+// the demonym, and nobody types "Germany" having read the word "German" anywhere on this screen.
 const COUNTRY_SEARCH: Record<string, string> = {
   American: "america american usa united states",
-  British: "britain british uk united kingdom england",
   Australian: "australia australian aussie",
+  British: "britain british uk united kingdom england",
+  Canadian: "canada canadian",
+  Catalan: "catalan catalonia",
+  Chinese: "chinese china mandarin taiwan taiwanese",
+  "Eastern European": "eastern european europe",
+  Filipino: "filipino philippines tagalog taglish",
+  French: "french france",
+  German: "german germany bavaria",
+  Gujarati: "gujarati gujarat",
+  Hungarian: "hungarian hungary",
+  Indian: "indian india",
+  Indonesian: "indonesian indonesia",
+  Italian: "italian italy",
+  Korean: "korean korea seoul",
+  Norwegian: "norwegian norway",
+  Portuguese: "portuguese portugal brazil brazilian",
+  Spanish: "spanish spain castillian",
+  Turkish: "turkish turkey",
 };
 
-// Why this list is not a coat of paint: the eight voices this app used to offer are retired by the
-// service on 31 December 2026, so any of them still chosen in January would answer with silence. The
-// chosen voice is held for the session and never written to disk, so an upgrade simply asks the
-// customer to pick again - there is no old choice on his machine to translate, and no silent swap
-// onto a voice nobody offered him. Charlotte leaves with the old list because the service publishes
-// no replacement for her, and a country nobody publishes is a country nobody may print.
+// The accent row is read off the list rather than written out beside it, so an accent appears the
+// moment a voice carrying it stands in the list and goes when the last one leaves - a row typed by
+// hand is a row that can name a country the screen has no voice for. Ordered by how many voices he
+// would get for it, so the groups worth a press come first and the one-voice accents sit at the end
+// where the search box reaches them anyway.
+const VOICE_ACCENTS = (() => {
+  const n = new Map<string, number>();
+  for (const v of BUILTIN_VOICES) if (v.region) n.set(v.region, (n.get(v.region) ?? 0) + 1);
+  return [...n.entries()].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? -1 : 1)).map(([r]) => r);
+})();
+// Past this many chips the row is a block to read instead of a filter, and the accents it hides are
+// the ones holding a single voice each. The sign opens the rest in place.
+const ACCENT_CHIPS_SHOWN = 8;
+
+// Why the list may be swapped out at all: the chosen voice is held for the session and never written
+// to disk, so a build that changes it simply asks the customer to pick again. There is no old choice
+// on his machine to translate, and no silent swap onto a voice nobody offered him. What goes up for
+// him to pick is read off the published record of that voice and nothing else - a name this screen
+// invented, an accent nobody published, or a description nobody wrote is all a customer has to go on
+// when he asks afterwards which voice he went out with.
 
 
 const C  = "hsl(187 100% 52%)";
@@ -525,13 +611,26 @@ class AudioSyncPipeline {
 // a pause still means a word is never sliced in half by a stopwatch.
 
 const PUMP_MS             = 60;   // how often the microphone level is looked at
+// How far the recording leg is held ahead of the gate that opens it. The gate can only judge a level
+// it has already seen - up to one pump interval ago - so the audio has to be later than the decision
+// about it, or the first sound of a word is clipped by a gate that had not been told to open yet.
+const SERVICE_LEAD_S      = 0.15;
 // The longest run of HIS VOICE one piece may hold. It is deliberately not a limit on the length of
 // the recording: the recording also holds the quiet he leaves between sentences, and a limit that
 // counted both cut his next sentence short the moment he paused longer than this before starting
 // it - a third of a second of words, which the voice service answered with a third of a second of
 // voice. Measured on his own call, that is how a whole question turned into "short replies".
 const CLONE_MAX_SPEECH_MS = 2500; // ...unless he is still talking, then send it anyway
-const CLONE_MIN_SPEECH_MS = 200;  // less than this is a cough, not a line worth paying for
+const CLONE_MIN_SPEECH_MS = 200;  // this much of his detector calling the microphone busy is enough
+                                  // to treat a pause as the end of a piece - nothing more
+// ...and this much of it is the bar for HANDING THE PIECE OVER, which is where the money is. The two
+// are measured apart on purpose. The figure above counts the time the detector holds a piece open
+// after the last sound (0.45 s), so a button click, a chair or a dog accumulates 600-700 ms of it and
+// opens a paid turn for a sound no person made. This one counts only the intervals where the
+// microphone actually cleared the gate's own opening level, which a click does for a fraction of the
+// time a word does. Run through the app's own gate, a click of four pumps holds 240 ms of real
+// level against 720 ms for a spoken sentence - so 350 ms sits between the two, not at either end.
+const CLONE_MIN_VOICED_MS = 350;
 // A turn shorter than this is a fragment, and the service answers a fragment with a fragment. So a
 // pause that lands before this does not close the piece - he carries on talking into the same one,
 // and the silence trimming still keeps the extra bytes to what he said. His own detector already
@@ -566,6 +665,29 @@ const CLONE_MAX_IN_FLIGHT = 3;
 // languages, ever says what reads his words or what sings them.
 const STT_MODEL_ID = "scribe_v2";
 const TTS_MODEL_ID = "eleven_flash_v2_5";
+// Where the tuning card starts, and the figures every call ran on before he could move them. The
+// steadiness one is deliberately below the middle: read against a listener, a higher figure holds a
+// voice level and flat, and "flat" is the word customers use when they say a voice sounds like a
+// machine. Neither of them is a speed: how fast the queue is paid back is the engine's own job and
+// is not offered here, because a voice hurried past 1.15 stops sounding like anybody.
+const VOICE_STABILITY_DEFAULT  = 0.4;
+const VOICE_SIMILARITY_DEFAULT = 0.8;
+
+/**
+ * One dial as this machine left it, or the figure every call ran on before dials existed.
+ *
+ * A stored value that is not a number between 0 and 1 is a damaged box rather than a setting, and
+ * the default is the sound he has already agreed to by using the app - so it is always a safe
+ * place to land, and a bad read can never put a voice on his line that no screen is showing.
+ */
+function storedTune(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw === null) return fallback;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
+  } catch { return fallback; }
+}
 // The cloned voice comes back as raw samples, not as a compressed file: the player is built
 // straight out of the bytes on the line, so nothing waits for a decoder and nothing waits for a
 // frame boundary. 24 kHz is the highest rate the fast model is offered at.
@@ -654,9 +776,22 @@ async function voiceDoorReason(): Promise<string | null> {
  * It feeds one thing only: the recorder that carries his words to the service. The level detector
  * that decides when he has finished speaking keeps reading the untreated microphone, exactly as it
  * did before, so no speech rule is retuned by this, and nothing here is connected to the cable.
+ *
+ * The fourth stage is the one that decides whether anything is handed over at all, and it is why the
+ * delay in front of it exists. A microphone left open to the reader means the cloned voice answers
+ * with whatever the room said: the television between his sentences, the click of a button, a second
+ * person in the house. So the leg closes on the same verdict the meter shows - the gate's own
+ * "nobody here is speaking" - and a piece that was only ever the room reaches the service as nothing,
+ * which the empty-piece guard below then refuses before it costs anything.
+ *
+ * The delay is not there to soften anything: the level the gate judges was sampled up to one pump
+ * interval ago, and a gain change can only act on audio that has not reached it yet. Holding the
+ * audio 150 ms in front of the gate buys back that interval and the one after it, so the first
+ * sound of his first word arrives at an opener that has already been told to open. The detector
+ * itself is tapped ahead of the delay and never waits a millisecond longer than it used to.
  */
 function conditionMicrophoneForService(ctx: AudioContext, src: MediaStreamAudioSourceNode):
-  { stream: MediaStream; nodes: AudioNode[] } {
+  { stream: MediaStream; nodes: AudioNode[]; mute: GainNode } {
   const lowcut = ctx.createBiquadFilter();
   lowcut.type = "highpass"; lowcut.frequency.value = 90; lowcut.Q.value = 0.7;
   const level = ctx.createDynamicsCompressor();
@@ -666,10 +801,12 @@ function conditionMicrophoneForService(ctx: AudioContext, src: MediaStreamAudioS
   const guard = ctx.createDynamicsCompressor();
   guard.threshold.value = -2; guard.knee.value = 0; guard.ratio.value = 20;
   guard.attack.value = 0.002; guard.release.value = 0.08;
+  const ahead = ctx.createDelay(0.5); ahead.delayTime.value = SERVICE_LEAD_S;
+  const mute = ctx.createGain(); mute.gain.value = 1;
   const dest = ctx.createMediaStreamDestination();
   src.connect(lowcut); lowcut.connect(level); level.connect(makeup);
-  makeup.connect(guard); guard.connect(dest);
-  return { stream: dest.stream, nodes: [lowcut, level, makeup, guard, dest] };
+  makeup.connect(guard); guard.connect(ahead); ahead.connect(mute); mute.connect(dest);
+  return { stream: dest.stream, nodes: [lowcut, level, makeup, guard, ahead, mute, dest], mute };
 }
 
 // The recorder's own container costs the call nothing to improve: the bytes never leave this app,
@@ -735,8 +872,9 @@ class VoiceCloningEngine {
   private inAnalyser: AnalyserNode | null = null;
   private inFreq:     Uint8Array<ArrayBuffer> = new Uint8Array(0);
   // The cleaned copy of the microphone that is recorded and sent, held here so its filters
-  // cannot be collected out from under a running call.
-  private cond: { stream: MediaStream; nodes: AudioNode[] } | null = null;
+  // cannot be collected out from under a running call. `mute` is the gate's hand on that copy:
+  // the level detector above decides, this node carries out the decision.
+  private cond: { stream: MediaStream; nodes: AudioNode[]; mute: GainNode } | null = null;
   private gate = new VoiceGate();
   private pump: ReturnType<typeof setInterval> | null = null;
   // How many pieces are with the voice service right now, and whether one is mid-hand-over
@@ -759,6 +897,11 @@ class VoiceCloningEngine {
   private givenUp  = 0;
   private pieceMs  = 0;
   private speechMs = 0;
+  // How long the microphone actually cleared the gate's opening level inside this piece, counted
+  // apart from `speechMs` above. That figure holds on through 0.45 s of quiet after the last sound,
+  // so a click or a chair accumulates most of a second of it; this one only counts the sound that
+  // was really there. The bar that hands a piece over - and pays for it - is set on this number.
+  private voiceMs  = 0;
   // How long his own detector has called the microphone quiet, counted inside the piece being
   // recorded. Silence is measured apart from speech on purpose: the two answer different questions -
   // "has he said enough" and "has he really stopped" - and adding them together is what cut a
@@ -771,6 +914,13 @@ class VoiceCloningEngine {
   ask?:   (path: string, body: FormData) => Promise<Response>;
   speak?: (path: string, body: Record<string, unknown>) => Promise<Response>;
   voiceId    = BUILTIN_VOICES[0].id;
+  // The two dials on the tuning card, read afresh every time a turn is spoken. They change how the
+  // voice he picked is DELIVERED - how level its keeping, and how close it holds to the recording it
+  // was made from - not which voice it is, and not what the call costs. Both defaults are the
+  // figures this build shipped with, so a customer who never touches either hears exactly what he
+  // heard before, and a customer who moves one hears his next sentence, not one already on air.
+  stability  = VOICE_STABILITY_DEFAULT;
+  similarity = VOICE_SIMILARITY_DEFAULT;
   onVu?:     (level: number) => void;
   onError?:  (msg: string) => void;
   // Reports whether the player that carries the cloned voice is actually running. The
@@ -875,7 +1025,7 @@ class VoiceCloningEngine {
     // A call that is started twice on one engine must not inherit the previous call's
     // outstanding pieces, its words, or its sentence order.
     this.inFlight = 0; this.cutting = false;
-    this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
+    this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.pauseMs = 0;
     this.seqAssign = 0; this.seqText = 0; this.words.clear();
     this.segments = []; this.asking = 0; this.givenUp = 0;
     this.micGone = false; this.serviceMs = 0;
@@ -933,10 +1083,11 @@ class VoiceCloningEngine {
       this.cutting = false;
       if (!this.running) return;
       const blob  = new Blob(chunks.splice(0), { type: "audio/webm" });
-      const worth = blob.size > 0 && this.speechMs >= CLONE_MIN_SPEECH_MS;
-      // A piece that holds nothing but his room is handed to _process, which is where it is
-      // refused before it ever leaves.
-      this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
+      const worth = blob.size > 0 && this.voiceMs >= CLONE_MIN_VOICED_MS;
+      // A piece that holds nothing a person said never leaves this app: it is thrown away here, so
+      // no turn is opened and nothing is asked of the voice line. This is the bar that stops his
+      // Stop-button click from coming back spoken in his own cloned voice.
+      this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.pauseMs = 0;
       // The next piece starts gathering immediately, before this one has been answered, so
       // nothing he says while the service is thinking is lost.
       this.recorder!.start(chunkMs);
@@ -955,7 +1106,14 @@ class VoiceCloningEngine {
     const level = voiceBandLevel(this.inFreq, this.audioCtx?.sampleRate ?? 48000);
     if (this.micPeak === null || level > this.micPeak) this.micPeak = level;
     this.gate.update(level, dtMs / 1000);
+    // The gate's hand on the leg that is written down for the voice line. Without this the reader
+    // hears the room: a television talking in another language came back dressed in his own voice,
+    // because the same untreated microphone fed the transcriber that the callers never saw.
+    // It closes 0.15 s of audio behind the level it judged, so the word it lets through is already
+    // on its way and the first sound of his next sentence is never the part that is cut.
+    if (this.cond) this.cond.mute.gain.setTargetAtTime(this.gate.muted ? 0 : 1, this.audioCtx!.currentTime, 0.008);
     this.pieceMs += dtMs;
+    if (this.gate.voiced) this.voiceMs += dtMs;
     if (this.gate.talking) { this.spokeAt = Date.now(); this.speechMs += dtMs; this.pauseMs = 0; }
     else this.pauseMs += dtMs;
     // A piece is closed on his own pause, not when the last answer happens to arrive. Holding
@@ -1151,11 +1309,14 @@ class VoiceCloningEngine {
       const res = await this._deadline(this.speak(
         `/v1/text-to-speech/${this.voiceId}/stream?output_format=pcm_${TTS_RATE}`,
         { text: seg.text, model_id: TTS_MODEL_ID,
-          // 0.4, not the middle 0.5. The vendor's own reading of this dial is that a lower number
-          // lets the delivery vary and carry feeling, while a higher one holds it flat and steady -
-          // and flat is exactly what a customer writes in when he says a voice sounds like a robot.
-          // It changes no price, no timing and nothing else on the call.
-          voice_settings: { stability: 0.4, similarity_boost: 0.8, use_speaker_boost: true, speed: this._speed() } },
+          // The two dials on the tuning card, read as he left them every time a turn opens. The
+          // delivery figures the app shipped with are the defaults, so nobody hears a change they
+          // did not ask for. On stability the low number is the one that keeps a voice human: the
+          // vendor's own reading is that lowering it lets the delivery vary and carry feeling, while
+          // raising it holds it flat - and flat is what a customer writes in as "sounds like a robot".
+          // Neither dial moves a price, a timing or anything else on the call.
+          voice_settings: { stability: this.stability, similarity_boost: this.similarity,
+            use_speaker_boost: true, speed: this._speed() } },
       ));
       seg.ttsMs = serviceTimeMs(res);
       if (!res.ok || !res.body) {
@@ -1302,7 +1463,7 @@ class VoiceCloningEngine {
     this.running = false;
     if (this.pump) { clearInterval(this.pump); this.pump = null; }
     this.inFlight = 0; this.cutting = false;
-    this.pieceMs = 0; this.speechMs = 0; this.pauseMs = 0;
+    this.pieceMs = 0; this.speechMs = 0; this.voiceMs = 0; this.pauseMs = 0;
     this.words.clear(); this.segments = []; this.asking = 0;
     this.outDest = null;
     this.voiceBus = null;
@@ -1728,10 +1889,38 @@ export default function StreamPage() {
   const [voiceRegion, setVoiceRegion]     = useState("");
   const [voiceSex, setVoiceSex]           = useState("");
   const [voiceAge, setVoiceAge]           = useState("");
+  // The accent row holds the accents with voices behind them; this opens the rest without letting a
+  // twenty-accent list stand between him and the tiles every time the panel is drawn.
+  const [moreAccents, setMoreAccents]     = useState(false);
   const [savedVoices, setSavedVoices]     = useState<SavedVoice[]>(() => getSavedVoices());
   const [uploadingVoice, setUploadingVoice] = useState(false);
   const [uploadVoiceName, setUploadVoiceName] = useState("");
   const [vcAnalyser, setVcAnalyser]       = useState<AnalyserNode | null>(null);
+
+  // The two delivery dials, kept on this machine. They are on the order of the look he picked for
+  // the call rather than of his account: a setting that followed him onto a second computer would
+  // be one he never agreed to there, and what sounds right in one room can sound loose in another.
+  const [voiceStability, setVoiceStability]   = useState<number>(() => storedTune("ss_voice_stability", VOICE_STABILITY_DEFAULT));
+  const [voiceSimilarity, setVoiceSimilarity] = useState<number>(() => storedTune("ss_voice_similarity", VOICE_SIMILARITY_DEFAULT));
+  // Folded until he opens it. This card is a refinement, and a refinement that spends the room the
+  // readings, the voice list and Start stand in has stopped being a refinement.
+  const [tuneFold, setTuneFold]               = useState(true);
+
+  // One move on either dial reaches three places: this screen, this machine, and - if a call is on
+  // air - the engine, which reads both figures at the moment it opens its next speaking request. A
+  // sentence already playing is deliberately left alone: changing a voice mid-word is the one thing
+  // here that would sound broken rather than tuned.
+  const applyTune = useCallback((which: "stability" | "similarity", v: number) => {
+    const key = which === "stability" ? "ss_voice_stability" : "ss_voice_similarity";
+    try { localStorage.setItem(key, String(v)); } catch { /* remembering is a convenience */ }
+    (which === "stability" ? setVoiceStability : setVoiceSimilarity)(v);
+    const c = clonerRef.current;
+    if (c) { if (which === "stability") c.stability = v; else c.similarity = v; }
+  }, []);
+  const resetTune = useCallback(() => {
+    applyTune("stability", VOICE_STABILITY_DEFAULT);
+    applyTune("similarity", VOICE_SIMILARITY_DEFAULT);
+  }, [applyTune]);
 
   // ── Local monitor: hear your own cloned voice ─────────────────────────────
   // Off until he asks for it, and his own switch setting is kept either way. The cloned voice is
@@ -2014,6 +2203,14 @@ export default function StreamPage() {
     return words.every(w => new RegExp(`\\b${w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(text)
       || wordsForAccent.some(a => a.startsWith(w)));
   });
+
+  // The accents standing on the row: the big groups first, the rest behind a sign — and always the
+  // one he has already pressed, because a filter that is working but invisible is a filter he has no
+  // way to turn off.
+  const accentRow = (() => {
+    const head = moreAccents ? VOICE_ACCENTS : VOICE_ACCENTS.slice(0, ACCENT_CHIPS_SHOWN);
+    return voiceRegion !== "" && !head.includes(voiceRegion) ? [voiceRegion, ...head] : head;
+  })();
 
   // ─── Enumerate devices ─────────────────────────────────────────────────────
   // Reads the live picks from refs rather than from its own closure, so any caller —
@@ -3088,6 +3285,9 @@ export default function StreamPage() {
             description: endReasonMessage(aired ? "clone_stopped" : "no_voice"),
             variant: "destructive", withContact: true });
         };
+        // A fresh engine is built on the shipped defaults, so this is where a call picks up the
+        // figures he left on the card - including the ones he set while no call was running.
+        cloner.stability = voiceStability; cloner.similarity = voiceSimilarity;
         await cloner.start(micStreamForCloner);
         clonerRef.current = cloner;
         setVcAnalyser(cloner.getAnalyser());
@@ -3896,6 +4096,59 @@ export default function StreamPage() {
       : t("The cloned voice has stopped answering. The call closes in a few seconds rather than running with no voice for the people watching.")
   );
 
+  // ─── Voice delivery tuning ────────────────────────────────────────────────
+  // It sits between the voice he chose and the microphone feeding it, because it changes neither of
+  // them: this is how the voice he chose is DELIVERED. Both dials are figures the voice line is
+  // already sent with every one of these calls, so nothing new is asked of the account, no price
+  // moves, and no voice turns into a different voice. Folded it is one line that still shows both
+  // figures - a setting he can only read by opening a box is a setting he will go and check.
+  const TuneDial = (label: string, hint: string, value: number, set: (v: number) => void) => (
+    <div style={{ marginTop: 9 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 8 }}>
+        <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(190 80% 92%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", margin: 0 }}>{t(label)}</p>
+        <p style={{ fontSize: 11, fontWeight: 700, color: VC, fontFamily: "'Orbitron',monospace", margin: 0 }}>{Math.round(value * 100)}%</p>
+      </div>
+      <input type="range" min={0} max={100} step={5} value={Math.round(value * 100)}
+        aria-label={t(label)} onChange={e => set(Number(e.target.value) / 100)}
+        style={{ width: "100%", margin: "6px 0 2px", accentColor: VC, cursor: "pointer", background: "transparent" }} />
+      <p style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>{t(hint)}</p>
+    </div>
+  );
+
+  const TuneCard = () => {
+    const atDefault = voiceStability === VOICE_STABILITY_DEFAULT && voiceSimilarity === VOICE_SIMILARITY_DEFAULT;
+    return (
+      <div data-tour="tune" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(265 90% 65% / 0.3)", borderRadius: 14, padding: "11px 14px", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
+        <div onClick={() => setTuneFold(v => !v)} role="button" tabIndex={0} aria-expanded={!tuneFold}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setTuneFold(v => !v); } }}
+          style={{ display: "flex", alignItems: "center", gap: 10, cursor: "pointer", userSelect: "none" }}>
+          <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6, border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 13, fontWeight: 700, fontFamily: "'Orbitron',monospace", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>{tuneFold ? "+" : "−"}</span>
+          <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.04em", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{t("Voice delivery")}</p>
+          {tuneFold && (
+            <p style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10.5, color: "hsl(222 25% 55%)", fontFamily: "'Rajdhani',sans-serif", whiteSpace: "nowrap" }}>
+              {`${t("Stability")} ${Math.round(voiceStability * 100)}% · ${t("Similarity")} ${Math.round(voiceSimilarity * 100)}%`}
+            </p>
+          )}
+        </div>
+        {!tuneFold && (
+          <div style={{ borderTop: "1px solid hsl(222 40% 12%)", marginTop: 9, paddingTop: 2 }}>
+            {TuneDial("Stability", "Higher holds the voice level and steady. Lower lets it rise and fall the way a person talking does.", voiceStability, v => applyTune("stability", v))}
+            {TuneDial("Similarity", "Higher keeps it faithful to the recording your voice was made from. Lower lets it relax.", voiceSimilarity, v => applyTune("similarity", v))}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10 }}>
+              <p style={{ fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>
+                {t("Your next sentence uses it. It changes no voice, no price and no minutes.")}
+              </p>
+              <button onClick={resetTune} disabled={atDefault}
+                style={{ flexShrink: 0, background: atDefault ? "hsl(222 40% 8%)" : "hsl(265 90% 65% / 0.14)", border: `1px solid ${atDefault ? "hsl(222 40% 14%)" : "hsl(265 90% 65% / 0.4)"}`, borderRadius: 8, padding: "6px 10px", cursor: atDefault ? "default" : "pointer", color: atDefault ? "hsl(222 25% 35%)" : VC, fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif" }}>
+                {t("Back to default")}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // The card his cloned voice is chosen on, on both of the tabs that send one. It carries no
   // switch: the tab he is standing on is the choice of whether a call clones his voice, and a
   // second say on the same screen — one that governed only one of two Start presses — is the
@@ -3966,17 +4219,18 @@ export default function StreamPage() {
                 a person makes before he cares where the voice is from; how old it sounds second;
                 where it comes from last. Each row is its own line so the three never crowd together,
                 and every one of them is a word as well as a colour — nothing here asks him to read a
-                tint to know what he picked. */}
+                tint to know what he picked. A switch only stands while a voice on the list carries it,
+                for the same reason the accents do: a press that leads to an empty list reads as broken. */}
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "7px 0 5px", alignItems: "center" }}>
               <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 42%)", marginRight: 2 }}>{t("Sex")}</span>
-              {[["", t("All")], ["f", t("Women")], ["m", t("Men")]].map(([key, label]) => (
+              {[["", t("All")], ["f", t("Women")], ["m", t("Men")]].filter(([key]) => key === "" || BUILTIN_VOICES.some(v => v.sex === key)).map(([key, label]) => (
                 <button key={key} onClick={() => setVoiceSex(key)} aria-pressed={voiceSex === key}
                   style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${voiceSex === key ? (key === "f" ? "hsl(330 90% 68% / 0.7)" : key === "m" ? "hsl(205 95% 62% / 0.7)" : "hsl(265 90% 65% / 0.45)") : "hsl(222 40% 14%)"}`, background: voiceSex === key ? (key === "f" ? "hsl(330 90% 68% / 0.12)" : key === "m" ? "hsl(205 95% 62% / 0.12)" : "hsl(265 90% 65% / 0.16)") : "hsl(222 40% 6%)", color: voiceSex === key ? (key === "f" ? "hsl(330 90% 74%)" : key === "m" ? "hsl(205 95% 70%)" : VC) : "hsl(222 25% 60%)" }}>
                   {label}
                 </button>
               ))}
               <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 42%)", marginLeft: 6, marginRight: 2 }}>{t("Age")}</span>
-              {[["", t("All ages")], ["young", t("Young")], ["middle", t("Adult")], ["older", t("Older")]].map(([key, label]) => (
+              {[["", t("All ages")], ["young", t("Young")], ["middle", t("Adult")], ["older", t("Older")]].filter(([key]) => key === "" || BUILTIN_VOICES.some(v => v.age === key)).map(([key, label]) => (
                 <button key={key} onClick={() => setVoiceAge(key)} aria-pressed={voiceAge === key}
                   style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${voiceAge === key ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 14%)"}`, background: voiceAge === key ? "hsl(265 90% 65% / 0.16)" : "hsl(222 40% 6%)", color: voiceAge === key ? VC : "hsl(222 25% 60%)" }}>
                   {label}
@@ -3985,12 +4239,18 @@ export default function StreamPage() {
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "0 0 8px", alignItems: "center" }}>
               <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", fontFamily: "'Orbitron',monospace", color: "hsl(222 25% 42%)", marginRight: 2 }}>{t("Accent")}</span>
-              {[["", t("All")], ["American", t("American")], ["British", t("British")], ["Australian", t("Australian")]].map(([key, label]) => (
+              {[["", t("All")] as [string, string], ...accentRow.map(r => [r, t(r)] as [string, string])].map(([key, label]) => (
                 <button key={key} onClick={() => setVoiceRegion(key)} aria-pressed={voiceRegion === key}
                   style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${voiceRegion === key ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 14%)"}`, background: voiceRegion === key ? "hsl(265 90% 65% / 0.16)" : "hsl(222 40% 6%)", color: voiceRegion === key ? VC : "hsl(222 25% 60%)" }}>
                   {label}
                 </button>
               ))}
+              {VOICE_ACCENTS.length > ACCENT_CHIPS_SHOWN && (
+                <button onClick={() => setMoreAccents(v => !v)}
+                  style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: "1px dashed hsl(222 40% 22%)", background: "transparent", color: "hsl(222 25% 62%)" }}>
+                  {moreAccents ? t("Fewer accents") : t("{n} more accents", { n: VOICE_ACCENTS.length - ACCENT_CHIPS_SHOWN })}
+                </button>
+              )}
             </div>
 
             {/* Tiles, three across, the approved design. The block at the top is the voice's first
@@ -4263,7 +4523,9 @@ export default function StreamPage() {
           </p>
         )}
         <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4, marginTop: 3 }}>
-          {t("The AI always hears you the moment you open your mouth. What is held back is the room noise travelling out to your callers — nothing to switch on, nothing to set.")}
+          {cloneTab
+            ? t("The AI hears you the moment you open your mouth. What is held back is your room noise — both what travels out to your callers and what your cloned voice is made from.")
+            : t("The AI always hears you the moment you open your mouth. What is held back is the room noise travelling out to your callers — nothing to switch on, nothing to set.")}
         </p>
       </div>
       {!isStreaming && (
@@ -4636,6 +4898,7 @@ export default function StreamPage() {
             <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
               <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 14 }}>
                 {VoicePanel()}
+                {TuneCard()}
                 {/* The microphone and how it is handled are one decision seen from two sides,
                     so they sit side by side instead of stacked half-empty. */}
                 <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14 }}>
@@ -4677,6 +4940,7 @@ export default function StreamPage() {
 
             <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
               {comboTab && VoicePanel()}
+              {comboTab && TuneCard()}
               {AudioSyncPanel()}
               {PromptCard()}
               {!comboTab && renderVirtualDevices(true)}

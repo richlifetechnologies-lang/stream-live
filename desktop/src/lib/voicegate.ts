@@ -5,11 +5,12 @@
 // and how loud THEIR voice actually is - and drives the level meter, the microphone gate and how
 // far the AI is let in from that one pair of numbers.
 //
-// The gate closes the copy of your voice that goes out to your callers - the virtual microphone -
-// so a fan or a television is not carried down the line as if it were you. It never closes in front
-// of the AI's ears, only turns that leg down: the avatar must react to you the instant you open
-// your mouth, and a level detector that has decided wrongly can then never be the reason a call
-// goes silent.
+// The gate closes both copies of your voice: the one that goes out to your callers - the virtual
+// microphone - and the one that is written down for the AI to read. A fan or a television is then
+// not carried down the line as if it were you, and the same noise cannot come back dressed in your
+// own voice. The leg that is written down is held 0.15 s behind the speaker first, so the closing
+// reaches a word that has already been heard rather than the one you are starting; nothing you say
+// is lost to the delay.
 
 // Fractions of the customer's own dynamic range (between their silence and their loudest speech).
 const OPEN_FRAC  = 0.30;   // this far above the room floor counts as speaking
@@ -43,6 +44,10 @@ export class VoiceGate {
   floor    = 0;
   voice    = 0;
   talking  = false;
+  // True only for the sample itself: the level is over the open bar RIGHT NOW. `talking` stays
+  // true for 0.45 s after the voice drops so a word tail is never cut, which is also long enough
+  // to turn a short click into most of a second of "speech" - so the two are counted apart.
+  voiced   = false;
   muted    = false;
   armed    = false;
   started  = false;
@@ -60,7 +65,8 @@ export class VoiceGate {
     const openAt  = this.floor + Math.min(OPEN_FRAC  * spread, OPEN_CAP);
     const closeAt = this.floor + Math.min(CLOSE_FRAC * spread, CLOSE_CAP);
 
-    if (level > openAt) {
+    this.voiced = level > openAt;
+    if (this.voiced) {
       this.talking = true;
       this.lastVoice = this.seen;
     } else if (this.talking && level < closeAt && this.seen - this.lastVoice > HOLD_SECONDS) {
@@ -90,8 +96,8 @@ export class VoiceGate {
   }
 
   reset(): void {
-    this.floor = 0; this.voice = 0; this.talking = false; this.muted = false; this.armed = false;
-    this.started = false; this.seen = 0; this.lastVoice = 0;
+    this.floor = 0; this.voice = 0; this.talking = false; this.voiced = false; this.muted = false;
+    this.armed = false; this.started = false; this.seen = 0; this.lastVoice = 0;
   }
 }
 
