@@ -22,6 +22,8 @@ import { prepareRefPhoto } from "../lib/ref-image";
 import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
 import { pieceHasSignal, piecePeak, pieceTrim, speechOnset } from "../lib/voice-piece";
+import { speakableWords } from "../lib/transcript";
+import { autoDelivery, SpeechTrack, VOICE_STABILITY_DEFAULT, VOICE_SIMILARITY_DEFAULT, type Delivery } from "../lib/voice-tune";
 import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../lib/lipsync";
 import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
 import {
@@ -615,6 +617,12 @@ const PUMP_MS             = 60;   // how often the microphone level is looked at
 // it has already seen - up to one pump interval ago - so the audio has to be later than the decision
 // about it, or the first sound of a word is clipped by a gate that had not been told to open yet.
 const SERVICE_LEAD_S      = 0.15;
+// The cloned voice reaches the room's speakers whenever the app is not routing it into the cable,
+// or he has the local monitor on - and an open microphone hears it, writes it down, and has it
+// spoken back a turn later in a voice that drifts a little further from his each time. This much is
+// added past the last sample the app has already put on air, for the sound to cross the room and
+// for the detector to notice it going.
+const SELF_ECHO_TAIL_S    = 0.35;
 // The longest run of HIS VOICE one piece may hold. It is deliberately not a limit on the length of
 // the recording: the recording also holds the quiet he leaves between sentences, and a limit that
 // counted both cut his next sentence short the moment he paused longer than this before starting
@@ -674,9 +682,9 @@ const TTS_MODEL_ID = "eleven_flash_v2_5";
 // steadiness one is deliberately below the middle: read against a listener, a higher figure holds a
 // voice level and flat, and "flat" is the word customers use when they say a voice sounds like a
 // machine. Neither of them is a speed: how fast the queue is paid back is the engine's own job and
-// is not offered here, because a voice hurried past 1.15 stops sounding like anybody.
-const VOICE_STABILITY_DEFAULT  = 0.4;
-const VOICE_SIMILARITY_DEFAULT = 0.8;
+// is not offered here, because a voice hurried past 1.15 stops sounding like anybody. They live in
+// the delivery rule now, so that the automatic choice and the manual card cannot disagree about what
+// "the app's own numbers" means.
 
 /**
  * One dial as this machine left it, or the figure every call ran on before dials existed.
@@ -712,9 +720,13 @@ const TTS_MAX_IN_FLIGHT = 2;
 // measured call carried 5.2 s of it by the end of ninety seconds.
 const BACKLOG_SOFT_S = 0.45;
 const BACKLOG_HARD_S = 2.0;
-// Faster than this stops sounding like him, so it is also the ceiling on how fast the queue can
-// be paid back.
-const TTS_SPEED_MAX = 1.15;
+// Faster than this is heard as a change of pitch, not as a change of pace - and a cloned voice
+// whose tone rises and falls between answers while the man speaking holds his own tone flat is a
+// voice that no longer sounds like him. Until 1.8.48 this ceiling was 1.15, which is a fifth of his
+// delivery per answer, and a line 1.7 seconds behind his microphone reached it. The queue is still
+// paid back, but by the rule that already exists for it - a whole sentence given up at a sentence
+// boundary once the line is BACKLOG_HARD_S behind - not by re-pitching the man.
+const TTS_SPEED_MAX = 1.04;
 // A cloned answer sometimes opens with a breath of nothing. It is skipped, but only up to this
 // much: a voice that really is there is never thrown away because a silence test failed.
 const AIR_SKIP_BOUND_S = 0.5;
@@ -871,6 +883,8 @@ class VoiceCloningEngine {
   private outDest: MediaStreamAudioDestinationNode | null = null;
   private monitorGain: GainNode | null = null;
   private monitored = false;
+  // True while the app's own cloned voice can be heard by the microphone it feeds.
+  private selfAudible = false;
   // The microphone watched, not forwarded. Nothing audible hangs off this tap: it exists
   // so the engine can tell his voice from his room and know when he has finished speaking.
   private inSrc:      MediaStreamAudioSourceNode | null = null;
@@ -881,6 +895,11 @@ class VoiceCloningEngine {
   // the level detector above decides, this node carries out the decision.
   private cond: { stream: MediaStream; nodes: AudioNode[]; mute: GainNode } | null = null;
   private gate = new VoiceGate();
+  // The same microphone frames the gate looks at, counted a second way: how much HIS OWN voice moved
+  // while it was talking. The gate uses them to decide when he has stopped; the delivery rule uses
+  // them to decide how level his voice should be kept. Nothing is measured twice here, and nothing is
+  // measured that the pump was not already measuring.
+  private track = new SpeechTrack();
   private pump: ReturnType<typeof setInterval> | null = null;
   // How many pieces are with the voice service right now, and whether one is mid-hand-over
   // (the recorder stopped for it and has not opened for the next one yet). The piece is cut
@@ -921,13 +940,26 @@ class VoiceCloningEngine {
   ask?:   (path: string, body: FormData) => Promise<Response>;
   speak?: (path: string, body: Record<string, unknown>) => Promise<Response>;
   voiceId    = BUILTIN_VOICES[0].id;
-  // The two dials on the tuning card, read afresh every time a turn is spoken. They change how the
-  // voice he picked is DELIVERED - how level its keeping, and how close it holds to the recording it
-  // was made from - not which voice it is, and not what the call costs. Both defaults are the
-  // figures this build shipped with, so a customer who never touches either hears exactly what he
-  // heard before, and a customer who moves one hears his next sentence, not one already on air.
+  // The two delivery figures. They change how the voice he picked is DELIVERED - how level its
+  // keeping, and how close it holds to the recording it was made from - not which voice it is, and
+  // not what the call costs. Two ways of getting them, and only one is ever in force:
+  //
+  //   Manual   - the two dials, read afresh every time a turn is spoken, so his next sentence uses
+  //              what he just set rather than one already on air.
+  //   Chosen   - this engine decides both figures itself, once, from what its own gate and its own
+  //              level meter have already heard: his room against his voice for Similarity, and how
+  //              much his voice moves while he talks for Stability. `tuneLocked` is the promise that
+  //              it is never said twice in one call, because a delivery that shifts between answers is
+  //              heard as a different person speaking. The rule it decides by is in voice-tune, and it
+  //              carries the standing preference every customer has given: a voice that sounds like a
+  //              person, on a clean line.
   stability  = VOICE_STABILITY_DEFAULT;
   similarity = VOICE_SIMILARITY_DEFAULT;
+  tuneAuto   = false;
+  private tuneLocked = false;
+  // Tells the card the pair this call is running on, so the figures on the screen are the figures
+  // the line is carrying rather than a setting nobody measured.
+  onTune?:   (d: Delivery) => void;
   onVu?:     (level: number) => void;
   onError?:  (msg: string) => void;
   // Reports whether the player that carries the cloned voice is actually running. The
@@ -1021,6 +1053,12 @@ class VoiceCloningEngine {
     } catch { /* monitor is a nicety; the call is not */ }
   }
 
+  // Tell the engine whether its own voice is audible where the microphone is. It is the one sound
+  // the reader was never meant to hear: a cloned answer that comes back through the mic is
+  // transcribed as if HE said it, so the call answers itself, and every pass re-renders the voice
+  // and moves it a little further from his. The page knows this and the engine cannot guess it.
+  setSelfAudible(on: boolean) { this.selfAudible = on; }
+
   async start(micStream: MediaStream) {
     if (this.running) return;
     this.running   = true;
@@ -1037,6 +1075,10 @@ class VoiceCloningEngine {
     this.segments = []; this.asking = 0; this.givenUp = 0;
     this.micGone = false; this.serviceMs = 0;
     this.refusedRun = 0; this.gone = false;
+    // The delivery rule starts each call over too. What the microphone heard on the last call is not
+    // a reading of this room, and a pair of figures carried over would be the same fault as an
+    // inherited sentence: one call answered in another call's delivery.
+    this.track.reset(); this.tuneLocked = false;
     this.audioCtx = new AudioContext();
     // Constructed outside the click's user activation, so this context can come up
     // suspended. Left alone, every chunk decodes, every meter moves, and nothing
@@ -1099,7 +1141,7 @@ class VoiceCloningEngine {
       // nothing he says while the service is thinking is lost.
       this.recorder!.start(chunkMs);
       setTimeout(() => { if (this.running && this.recorder?.state === "recording") this.recorder.requestData(); }, chunkMs);
-      if (worth) void this._process(blob, this.seqAssign++);
+      if (worth) { this._lockTune(); void this._process(blob, this.seqAssign++); }
       else this.inFlight -= 1;
     };
     this.recorder.start(chunkMs);
@@ -1113,12 +1155,20 @@ class VoiceCloningEngine {
     const level = voiceBandLevel(this.inFreq, this.audioCtx?.sampleRate ?? 48000);
     if (this.micPeak === null || level > this.micPeak) this.micPeak = level;
     this.gate.update(level, dtMs / 1000);
+    // Only the frames his own detector has called speech are noted, so a chair scraping or the
+    // avatar's voice coming out of his speakers cannot be counted as a way of talking.
+    if (this.gate.voiced) this.track.note(level);
     // The gate's hand on the leg that is written down for the voice line. Without this the reader
     // hears the room: a television talking in another language came back dressed in his own voice,
     // because the same untreated microphone fed the transcriber that the callers never saw.
     // It closes 0.15 s of audio behind the level it judged, so the word it lets through is already
     // on its way and the first sound of his next sentence is never the part that is cut.
-    if (this.cond) this.cond.mute.gain.setTargetAtTime(this.gate.muted ? 0 : 1, this.audioCtx!.currentTime, 0.008);
+    if (this.cond) {
+      // Shut for our own voice as well as for a quiet room. What is left in the piece when this is
+      // on is silence, and the empty-piece guard below already throws silence away for nothing.
+      const ours = this.selfAudible && this.audioCtx!.currentTime < this.nextPlayAt + SELF_ECHO_TAIL_S;
+      this.cond.mute.gain.setTargetAtTime(this.gate.muted || ours ? 0 : 1, this.audioCtx!.currentTime, 0.008);
+    }
     this.pieceMs += dtMs;
     if (this.gate.voiced) this.voiceMs += dtMs;
     this.quietMs = this.gate.voiced ? 0 : this.quietMs + dtMs;
@@ -1201,6 +1251,33 @@ class VoiceCloningEngine {
     return Math.min(TTS_SPEED_MAX, 1 + (behind - BACKLOG_SOFT_S) * 0.12);
   }
 
+  // The card's switch, arriving here. Turning it on re-opens the decision, because he asked for it and
+  // the card has always promised that his next sentence uses what he just set. It is still decided only
+  // once: from that sentence to the end of the call nothing moves again.
+  setTuneAuto(on: boolean) {
+    this.tuneAuto = on;
+    if (on) this.tuneLocked = false;
+  }
+
+  // Decide the delivery ONCE, at the first sentence that is really going out, and never again for this
+  // call. A call that shifts between answers is heard as the voice changing person, which is the exact
+  // fault his customers report - so the pair is settled here and carried to the end. If nothing has
+  // been heard yet the figures stay the app's own and the lock is NOT taken: a microphone that has only
+  // heard his room gets another chance at the next sentence rather than spending the whole call on one
+  // empty reading.
+  private _lockTune() {
+    if (!this.tuneAuto || this.tuneLocked) return;
+    const d = autoDelivery(this.gate.floor, this.gate.voice, this.gate.heardFor, this.track.wander);
+    if (!d.fromRoom && !d.fromVoice) return;
+    this.tuneLocked = true;
+    this.stability  = d.stability;
+    this.similarity = d.similarity;
+    // The card is told, so the two figures it shows are the two this call is carrying. A screen that
+    // shows what it intends while the line carries something else is the fault he reported about the
+    // sliders, not a setting.
+    this.onTune?.(d);
+  }
+
   // One piece of his voice, read as words. Whatever becomes of it, the turn is settled below -
   // a piece that never comes back must not hold the sentence order shut for the rest of the call.
   private async _process(blob: Blob, seq: number) {
@@ -1248,8 +1325,15 @@ class VoiceCloningEngine {
         return;
       }
       const j = await res.json().catch(() => null) as { text?: unknown } | null;
-      text = typeof j?.text === "string" ? j.text.trim() : "";
-      if (!text) console.warn("[voice] this piece came back with no words in it");
+      // What came back is read for HIS words, and only his words. An engine that found no speech
+      // often says so in prose - "[background noise]" is a note about the room, not a sentence - and
+      // that prose used to be handed to the cloned voice and spoken down the line as if he had said
+      // it. Whatever is left is what he said, with nothing added.
+      const said = typeof j?.text === "string" ? j.text : "";
+      text = speakableWords(said);
+      if (!text && said.trim())
+        console.warn(`[voice] the transcriber described the audio, not his words ("${said.trim().slice(0, 60)}"), nothing spoken`);
+      else if (!text) console.warn("[voice] this piece came back with no words in it");
     } catch (e) {
       if (!this.running) return;
       // A turn whose request had already left this app failed on the voice line; anything earlier
@@ -1912,15 +1996,46 @@ export default function StreamPage() {
   // Folded until he opens it. This card is a refinement, and a refinement that spends the room the
   // readings, the voice list and Start stand in has stopped being a refinement.
   const [tuneFold, setTuneFold]               = useState(true);
+  // WHO sets the two figures. On unless this machine holds a dial he has moved, which is the same
+  // arrangement the app's own language follows: one setter works the answer out, and his hand beats it
+  // for good once he has used it. With nothing stored he has never overruled anything, so the app
+  // decides - and what it decides is written on this card, never hidden behind it.
+  const [voiceTuneAuto, setVoiceTuneAuto]     = useState<boolean>(() => {
+    try {
+      const his = localStorage.getItem("ss_voice_stability") !== null
+               || localStorage.getItem("ss_voice_similarity") !== null;
+      const said = localStorage.getItem("ss_voice_tune_auto");
+      return said === null ? !his : said === "1";
+    } catch { return true; }
+  });
+  // What the app decided, and which of his own sounds it decided from. Held so the card can say the
+  // reason in the same words it uses under the dials, instead of showing two numbers it cannot explain.
+  const [tuneSaid, setTuneSaid]               = useState<Delivery | null>(null);
+  const toggleTuneAuto = useCallback(() => {
+    setVoiceTuneAuto(v => {
+      const next = !v;
+      try { localStorage.setItem("ss_voice_tune_auto", next ? "1" : "0"); } catch { /* remembering is a convenience */ }
+      return next;
+    });
+  }, []);
 
   // One move on either dial reaches three places: this screen, this machine, and - if a call is on
   // air - the engine, which reads both figures at the moment it opens its next speaking request. A
   // sentence already playing is deliberately left alone: changing a voice mid-word is the one thing
   // here that would sound broken rather than tuned.
+  //
+  // It does one more thing now, and this is the override he asked for: his hand on a dial ENDS the
+  // app's decision, here and on every call after it, rather than being chosen over again by a rule he
+  // has just said he does not want. The switch says so on the card, so nothing is ever set behind his
+  // back in either direction.
   const applyTune = useCallback((which: "stability" | "similarity", v: number) => {
     const key = which === "stability" ? "ss_voice_stability" : "ss_voice_similarity";
-    try { localStorage.setItem(key, String(v)); } catch { /* remembering is a convenience */ }
+    try {
+      localStorage.setItem(key, String(v));
+      localStorage.setItem("ss_voice_tune_auto", "0");
+    } catch { /* remembering is a convenience */ }
     (which === "stability" ? setVoiceStability : setVoiceSimilarity)(v);
+    setVoiceTuneAuto(false); setTuneSaid(null);
     const c = clonerRef.current;
     if (c) { if (which === "stability") c.stability = v; else c.similarity = v; }
   }, []);
@@ -2616,7 +2731,7 @@ export default function StreamPage() {
     if (!next) setBroadcastBlocked("");
     await applyAudioRoute(next, false, activeTab);
     if (next && voiceMonitor && clonerRef.current) {
-      toast({ title: t("Local monitor is on"), description: t("Your cloned voice also plays in your speakers. Use headphones — loudspeakers let your mic feed it back into the call.") });
+      toast({ title: t("Local monitor is on"), description: t("Your cloned voice also plays in your speakers. Use headphones — your mic still hears your room, and your room comes back in your cloned voice.") });
     }
   }, [audioRouteOn, activeTab, applyAudioRoute, setMicFor, voiceMonitor, toast]);
 
@@ -2694,7 +2809,17 @@ export default function StreamPage() {
   // element; monitor mode only adds local playback when the clone is on the cable.
   useEffect(() => {
     clonerRef.current?.setMonitor(voiceMonitor && audioRouteOn);
+    // Either of those puts the cloned voice where his microphone can hear it: the monitor on
+    // purpose, and no routing at all by accident, since then the playback element simply uses his
+    // speakers. The engine closes its own ears on this, so a call can no longer answer itself.
+    clonerRef.current?.setSelfAudible(voiceMonitor || !audioRouteOn);
   }, [voiceMonitor, audioRouteOn, vcActive]);
+
+  // WHO sets the delivery figures, pushed to a call already on air. A switch that only took hold after
+  // a restart would break the one promise this card has always made - that his next sentence uses what
+  // he just set - and the engine treats the turn as the single decision point, so switching here costs
+  // at most one more settled pair and never a delivery that drifts answer by answer.
+  useEffect(() => { clonerRef.current?.setTuneAuto(voiceTuneAuto); }, [voiceTuneAuto, vcActive]);
 
   // ─── Microphone check: proof that costs no minutes ─────────────────────────
   // Opens the selected microphone for a few seconds, runs the same learning the app runs inside
@@ -3293,8 +3418,16 @@ export default function StreamPage() {
             variant: "destructive", withContact: true });
         };
         // A fresh engine is built on the shipped defaults, so this is where a call picks up the
-        // figures he left on the card - including the ones he set while no call was running.
+        // figures he left on the card - including the ones he set while no call was running. On Choose
+        // for me these two are only a starting point: the call replaces them at its first real
+        // sentence and tells the card back, which is what `onTune` below is for. The figures the card
+        // shows are then the figures the line is carrying, never the ones the app intended.
         cloner.stability = voiceStability; cloner.similarity = voiceSimilarity;
+        cloner.tuneAuto  = voiceTuneAuto;
+        cloner.onTune    = d => { setVoiceStability(d.stability); setVoiceSimilarity(d.similarity); setTuneSaid(d); };
+        // A new call has been told nothing yet, so the card is not allowed to keep explaining the last
+        // one's room as if it were this one's.
+        setTuneSaid(null);
         await cloner.start(micStreamForCloner);
         clonerRef.current = cloner;
         setVcAnalyser(cloner.getAnalyser());
@@ -4124,6 +4257,45 @@ export default function StreamPage() {
 
   const TuneCard = () => {
     const atDefault = voiceStability === VOICE_STABILITY_DEFAULT && voiceSimilarity === VOICE_SIMILARITY_DEFAULT;
+
+    // Who owns the two figures, and what the app heard when it took them. The sentences here are the
+    // ones standing under the sliders - "even and careful", "sounds more like a person", "sounds
+    // cleaner" - because that is the only description of these dials he has ever been given, and a
+    // choice this screen cannot put into those words is a choice it should not be making.
+    const tuneLines: string[] = [];
+    if (!voiceTuneAuto) {
+      tuneLines.push(t("These are your own numbers, set on the two sliders. Turn this back on to let the app listen and choose again."));
+    } else {
+      tuneLines.push(t("The app listens to your voice and your room on this call, then sets both figures itself."));
+      if (tuneSaid) {
+        tuneLines.push(!tuneSaid.fromVoice
+          ? t("It has not heard enough of your voice yet, so the first figure is still the app's own.")
+          : tuneSaid.steady
+            ? t("Your voice stayed at one level, so the voice is kept even and careful.")
+            : t("Your voice rises and falls as you talk, so the voice is left to sound more like a person."));
+        tuneLines.push(!tuneSaid.fromRoom
+          ? t("It has not heard your room yet, so the second figure is still the app's own.")
+          : tuneSaid.quietRoom
+            ? t("Your room is quiet beside your voice, so it can stay close to you and still sound cleaner.")
+            : t("Your room is loud beside your voice, so it is held back to sound cleaner."));
+      }
+    }
+
+    const TuneAutoRow = () => (
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "hsl(190 80% 92%)", textTransform: "uppercase", letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", margin: "0 0 3px" }}>{t("Choose for me")}</p>
+          {tuneLines.map(line => (
+            <p key={line} style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>{line}</p>
+          ))}
+        </div>
+        <button onClick={toggleTuneAuto} aria-pressed={voiceTuneAuto} title={t("Toggle Choose for me")}
+          style={{ flexShrink: 0, width: 46, height: 24, borderRadius: 14, border: "none", cursor: "pointer", background: voiceTuneAuto ? VC : "hsl(222 30% 20%)", position: "relative", transition: "background 0.15s" }}>
+          <span style={{ position: "absolute", top: 3, left: voiceTuneAuto ? 25 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
+        </button>
+      </div>
+    );
+
     return (
       <div data-tour="tune" style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: "1px solid hsl(265 90% 65% / 0.3)", borderRadius: 14, padding: "11px 14px", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
         <div onClick={() => setTuneFold(v => !v)} role="button" tabIndex={0} aria-expanded={!tuneFold}
@@ -4139,6 +4311,7 @@ export default function StreamPage() {
         </div>
         {!tuneFold && (
           <div style={{ borderTop: "1px solid hsl(222 40% 12%)", marginTop: 9, paddingTop: 2 }}>
+            {TuneAutoRow()}
             {TuneDial("Stability", "How much the voice moves while it talks. Higher is even and careful. Lower sounds more like a person.", voiceStability, v => applyTune("stability", v))}
             {TuneDial("Similarity", "How close it stays to the real voice. Higher copies it exactly, noise and all. Lower sounds cleaner.", voiceSimilarity, v => applyTune("similarity", v))}
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 10 }}>
@@ -4401,7 +4574,7 @@ export default function StreamPage() {
           <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Orbitron',monospace", letterSpacing: "0.06em", marginBottom: 3 }}>{t("Hear my cloned voice")}</p>
           <p style={{ fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.4 }}>
             {voiceMonitor
-              ? t("On — the clone also plays in your own speakers. Wear headphones; loudspeakers let your mic feed it back into the call.")
+              ? t("On — the clone also plays in your own speakers. Wear headphones; your mic still hears your room, and your room comes back in your cloned voice.")
               : t("Off — the clone goes to the calling app only. You hear yourself as usual.")}
           </p>
         </div>

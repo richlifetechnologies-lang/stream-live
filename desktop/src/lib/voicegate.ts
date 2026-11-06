@@ -88,6 +88,10 @@ export class VoiceGate {
     this.muted = this.armed && !this.talking;
   }
 
+  // How long this gate has been hearing the room. The delivery rule asks for it, because a floor and
+  // a voice taken after one sample are not a reading of anything.
+  get heardFor(): number { return this.seen; }
+
   // The meter is the customer's voice measured against their own silence, so a normal speaking
   // level lands in the middle of the bar instead of pinning it the instant they open their mouth.
   vu(level: number): number {
