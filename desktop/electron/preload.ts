@@ -62,6 +62,19 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on("checkout-receipt", () => callback());
   },
 
+  // The floating subtitle line over whatever app the call is really in. Putting it up, taking it
+  // away, and handing it the one sentence to show - nothing else about a call is its business.
+  subtitleBar: (on: boolean): void => {
+    ipcRenderer.send("subtitle-bar", on === true);
+  },
+  subtitleLine: (line: { chip: string; text: string; asSaid: string }): void => {
+    ipcRenderer.send("subtitle-line", line);
+  },
+  // The id of the machine's own speaker output, so the app can hear what comes out of it.
+  getSpeakerSourceId: (): Promise<string> => {
+    return ipcRenderer.invoke("speaker-source-id");
+  },
+
   // Quit and install the downloaded update
   quitAndInstall: () => {
     ipcRenderer.send("quit-and-install");

@@ -43,14 +43,22 @@ const TRANSLATE_TIMEOUT_MS = 1500;
 const MAX_CHARS = 1200;
 
 /**
- * The languages the card offers, keyed by the code the app sends. Every one of these names is a name
- * that already appears in the voice list he picks models from - this table adds no language the
- * customer has never been shown - and each code is what the TRANSLATOR calls that language, which is
- * not always the same two letters.
+ * The languages words may be changed INTO, keyed by the code the app sends. Two cards ask this route,
+ * and they are held to different lists on purpose.
+ *
+ * The Answer in box changes the words his cloned voice is about to SPEAK, so every name on that row is
+ * a name that already stands in the voice list he picks models from: a language no voice of his can
+ * say is a choice that leads nowhere. Those are the first eleven below.
+ *
+ * The text box changes the words his CALLER said, which are only ever read on a screen - no voice is
+ * involved, so the shelf does not decide what may be offered there. Those are the five after them, and
+ * each code is what the TRANSLATOR calls that language, which is not always the same two letters.
  */
 const TARGETS: Record<string, string> = {
   es: "ES", fr: "FR", de: "DE", zh: "ZH", it: "IT", pt: "PT-PT",
   ko: "KO", tr: "TR", no: "NB", hu: "HU", id: "ID",
+  // Read on the screen only: nothing here has to be sayable by a voice on his shelf.
+  pl: "PL", sv: "SV", ja: "JA", ar: "AR", nl: "NL",
 };
 
 /**
@@ -64,6 +72,8 @@ const TARGETS: Record<string, string> = {
 const SOURCES: Record<string, string> = {
   en: "EN", es: "ES", fr: "FR", de: "DE", zh: "ZH", it: "IT", pt: "PT", ko: "KO",
   tr: "TR", no: "NB", hu: "HU", id: "ID", ja: "JA", nl: "NL", pl: "PL", ru: "RU",
+  // A caller may speak either of these, and the reading step names them in its own two letters.
+  ar: "AR", sv: "SV",
 };
 
 /**

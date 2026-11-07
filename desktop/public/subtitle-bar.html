@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<!--
+  The floating subtitle line. It is a page of its own rather than a component of the app's page
+  because it has to sit over the calling app, which is a different window entirely; and it holds
+  nothing but the words, because a window that displays only what it is told cannot be talked into
+  doing anything else.
+
+  It ships as a static file beside the app's own, so it needs no build step and no bundler entry.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Subtitles</title>
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: transparent; overflow: hidden; }
+  body {
+    font-family: "Rajdhani", "Segoe UI", Roboto, Arial, sans-serif;
+    display: flex; align-items: flex-end; justify-content: center;
+    -webkit-user-select: none; user-select: none; cursor: default;
+  }
+  .bar {
+    width: 780px; max-width: 100%; box-sizing: border-box;
+    min-height: 58px; margin-bottom: 14px;
+    display: none; align-items: center; gap: 12px;
+    padding: 9px 16px; border-radius: 14px;
+    background: rgba(5, 9, 16, .84);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border: 1px solid hsl(187 100% 52% / .34);
+    box-shadow: 0 0 26px hsl(187 100% 52% / .13);
+  }
+  .bar.show { display: flex; }
+  .chip {
+    flex: none; font-family: "Orbitron", "Segoe UI", monospace;
+    font-size: 9.5px; font-weight: 700; letter-spacing: .08em;
+    padding: 4px 9px; border-radius: 999px;
+    color: hsl(187 100% 52%); background: hsl(187 100% 52% / .12);
+    border: 1px solid hsl(187 100% 52% / .32);
+    max-width: 210px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .said { flex: 1; min-width: 0; }
+  .text {
+    font-size: 19.5px; font-weight: 600; color: #fff; line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .raw {
+    font-size: 12px; font-style: italic; color: hsl(222 25% 62%); line-height: 1.3; margin-top: 2px;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .raw.hide { display: none; }
+</style>
+</head>
+<body>
+  <div class="bar" id="bar">
+    <span class="chip" id="chip"></span>
+    <div class="said">
+      <div class="text" id="text"></div>
+      <div class="raw hide" id="raw"></div>
+    </div>
+  </div>
+<script>
+  var bar = document.getElementById("bar"), chip = document.getElementById("chip");
+  var text = document.getElementById("text"), raw = document.getElementById("raw");
+  var api = window.slBar;
+  if (api && typeof api.onLine === "function") {
+    api.onLine(function (line) {
+      var l = line || {};
+      if (!l.text) { bar.classList.remove("show"); return; }
+      chip.textContent = l.chip || "";
+      chip.style.display = l.chip ? "" : "none";
+      text.textContent = l.text;
+      if (l.asSaid) { raw.textContent = l.asSaid; raw.classList.remove("hide"); }
+      else raw.classList.add("hide");
+      bar.classList.add("show");
+    });
+  }
+</script>
+</body>
+</html>

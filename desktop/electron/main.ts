@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, session, ipcMain, dialog } from "electron";
+import { app, BrowserWindow, desktopCapturer, shell, session, ipcMain, dialog } from "electron";
 import https from "https";
 import http from "http";
 import fs from "fs";
@@ -7,6 +7,7 @@ import path from "path";
 import crypto from "crypto";
 import { initVirtualCameraIpc, shutdownVirtualCamera } from "./virtual-camera";
 import { initCheckoutWindow, openCheckoutWindow } from "./checkout-window";
+import { closeSubtitleBar, initSubtitleBar, openSubtitleBar, sendSubtitleLine } from "./subtitle-bar";
 import { isAppDocumentUrl } from "./checkout-guard";
 
 const isDev = process.env.NODE_ENV === "development" || !app.isPackaged;
@@ -621,6 +622,43 @@ ipcMain.on("open-checkout", (event, page: unknown) => {
   if (!result.ok) logAccount(`payment window refused: ${result.reason}`);
 });
 
+// ─── IPC: the floating subtitle line ──────────────────────────────────────────
+// A man on a call watches his calling app, not this window, so the caller's words have to be
+// drawn over the calling app. The line is a window of the app's own: no frame, nothing in the
+// taskbar, never focused, and it refuses the mouse so a click lands on the call behind it.
+// Only this app's own screen may put it on the air or feed it words, and it carries nothing but
+// text - no address, no account, no control over a call.
+ipcMain.on("subtitle-bar", (event, on: unknown) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  if (on === true) {
+    const result = openSubtitleBar();
+    if (!result.ok) logAccount("the subtitle line could not be opened");
+  } else {
+    closeSubtitleBar();
+  }
+});
+
+ipcMain.on("subtitle-line", (event, line: unknown) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return;
+  if (!line || typeof line !== "object") return;
+  const l = line as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v.slice(0, 400) : "");
+  sendSubtitleLine({ chip: str(l.chip), text: str(l.text), asSaid: str(l.asSaid) });
+});
+
+// The screen the sound of the call is on. The renderer cannot ask this itself - the source list
+// belongs to the main process - and it is given one id for one whole screen, which is only ever
+// used to take a passive copy of audio that is already playing out loud.
+ipcMain.handle("speaker-source-id", async (event) => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return "";
+  try {
+    const sources = await desktopCapturer.getSources({ types: ["screen"] });
+    return sources[0]?.id ?? "";
+  } catch {
+    return "";
+  }
+});
+
 // ─── Virtual camera frame feeder (UnityCapture shared-memory protocol) ────────
 // Registers vcam-start / vcam-stop / vcam-status / vcam-frame IPC. Fully guarded:
 // if the native layer is unavailable the handlers report unsupported and the app
@@ -631,6 +669,7 @@ initVirtualCameraIpc(ipcMain);
 initCheckoutWindow(logAccount, () => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("checkout-receipt");
 });
+initSubtitleBar(logAccount);
 
 // ─── Window ───────────────────────────────────────────────────────────────────
 function createWindow() {
@@ -722,6 +761,12 @@ function createWindow() {
     if (!isDev && mainWindow) {
       mainWindow.loadFile(path.join(__dirname, "../dist/index.html"));
     }
+  });
+
+  // The bar is not a window anyone chose to open: left standing after the app window goes, it
+  // would keep the whole app alive with nothing visible to close.
+  mainWindow.on("closed", () => {
+    closeSubtitleBar();
   });
 
   // Update checks: at launch, then on a schedule and on every window focus.

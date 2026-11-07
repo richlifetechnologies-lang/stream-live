@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, type CSSProperties, type ReactNode, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { useLocation } from "wouter";
 import { AppLayout, RAIL_W } from "../components/layout";
 import { WatermarkOffer } from "../components/watermark-offer";
@@ -23,6 +24,7 @@ import { drawOutputFrame } from "../lib/vcam-frame";
 import { VoiceGate, voiceBandLevel, gateState, type GateState } from "../lib/voicegate";
 import { pieceHasSignal, piecePeak, pieceTrim, speechOnset } from "../lib/voice-piece";
 import { speakableWords } from "../lib/transcript";
+import { CallerReader, speakerCopy, type SubtitleView } from "../lib/subtitles";
 import { autoDelivery, SpeechTrack, VOICE_STABILITY_DEFAULT, VOICE_SIMILARITY_DEFAULT, type Delivery } from "../lib/voice-tune";
 import { FALLBACK_HOLD, LipSyncEstimator, MAX_HOLD, type SyncReason } from "../lib/lipsync";
 import { FRAME_W, FRAME_H, AVATAR_BAND, bandMotion } from "../lib/face-motion";
@@ -33,7 +35,7 @@ import {
 } from "lucide-react";
 import { GuidedTour, onTourRequested, tourSeen, tourStops } from "../components/guided-tour";
 import { encode, decode } from "@msgpack/msgpack";
-import { t } from "../lib/i18n";
+import { t, getLang } from "../lib/i18n";
 
 // ─── Branding ─────────────────────────────────────────────────────────────────
 const APP = "Stream Live";
@@ -368,6 +370,112 @@ const ANSWER_LANGS = (() => {
     .filter(([name]) => VOICE_ACCENTS.includes(name))
     .map(([name, code]) => ({ name, code }));
 })();
+
+// The languages the CALLER's words may be read on the screen in. This list is not the one above and
+// must not be: nothing here is spoken, so no voice has to be able to say it. A language stands on this
+// row exactly while the line that changes words can change them into it, and the two tables are
+// checked against each other before a build goes out.
+//
+// The order is the order the list is drawn in - two columns, read across - so the names he is most
+// likely to want are the first ones his eye lands on.
+const TEXT_LANGS: Array<{ name: string; code: string }> = [
+  { name: "Spanish", code: "es" }, { name: "Polish", code: "pl" },
+  { name: "French", code: "fr" }, { name: "Swedish", code: "sv" },
+  { name: "Portuguese", code: "pt" }, { name: "Turkish", code: "tr" },
+  { name: "German", code: "de" }, { name: "Japanese", code: "ja" },
+  { name: "Italian", code: "it" }, { name: "Arabic", code: "ar" },
+  { name: "Dutch", code: "nl" },
+];
+// The chip on a subtitle line names the language it is IN, in the caller's own hearing when nothing
+// was changed and in the one he asked for when it was.
+const LANG_NAME: Record<string, string> = Object.fromEntries(
+  [...TEXT_LANGS, ...ANSWER_LANGS].map(l => [l.code, l.name]));
+
+/**
+ * A list of choices that floats OVER the page instead of pushing it down.
+ *
+ * Both language boxes on the voice card used to open inside the page, so every card underneath them
+ * moved down for as long as they were open. This one is drawn on the body at a measured position, so
+ * the row that opens it stays exactly as tall as it was shut and nothing below it moves at all. It is
+ * put on the body rather than beside the row because the column it lives in scrolls inside itself,
+ * and a list drawn inside a scrolling column is cut off by it.
+ *
+ * It closes on a press anywhere else and on Escape, and it turns itself over above the row when there
+ * is no room below - so the last entries are never off the bottom of the screen.
+ */
+function FloatingPick({ open, anchor, width, onClose, children }: {
+  open: boolean;
+  anchor: RefObject<HTMLDivElement | null>;
+  width: number;
+  onClose: () => void;
+  children: ReactNode;
+}) {
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [at, setAt] = useState<{ left: number; top: number; width: number } | null>(null);
+
+  useLayoutEffect(() => {
+    if (!open) { setAt(null); return; }
+    const place = () => {
+      const a = anchor.current?.getBoundingClientRect();
+      if (!a) return;
+      const w = Math.min(width, window.innerWidth - 24);
+      const left = Math.max(12, Math.min(a.left, window.innerWidth - w - 12));
+      const h = listRef.current?.offsetHeight ?? 0;
+      const below = a.bottom + 6;
+      const top = h > 0 && below + h > window.innerHeight - 12
+        ? Math.max(12, a.top - h - 6)
+        : Math.min(below, window.innerHeight - 40);
+      setAt({ left, top, width: w });
+    };
+    place();
+    // The list has to be on screen before it can be measured, so it is placed once more on the next
+    // frame with its real height in hand.
+    const raf = requestAnimationFrame(place);
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", place);
+      window.removeEventListener("scroll", place, true);
+    };
+  }, [open, anchor, width]);
+
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: MouseEvent) => {
+      const hit = e.target as Node | null;
+      if (hit && (listRef.current?.contains(hit) || anchor.current?.contains(hit))) return;
+      onClose();
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("mousedown", away);
+    window.addEventListener("keydown", esc);
+    return () => { window.removeEventListener("mousedown", away); window.removeEventListener("keydown", esc); };
+  }, [open, onClose, anchor]);
+
+  if (!open || !at) return null;
+  return createPortal(
+    <div ref={listRef} role="dialog"
+      style={{ position: "fixed", left: at.left, top: at.top, width: at.width, boxSizing: "border-box", maxHeight: "calc(100vh - 24px)", overflowY: "auto", zIndex: 8000, padding: 6, borderRadius: 10, background: "hsl(222 46% 7%)", border: "1px solid hsl(265 90% 65% / 0.42)", boxShadow: "0 20px 48px rgba(0,0,0,0.7)" }}>
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+/** One line in a floating list: the choice, and the small words that say what picking it does. */
+function PickLine({ label, note, on, onClick }: { label: string; note?: string; on: boolean; onClick: () => void }) {
+  return (
+    <button onClick={onClick} aria-pressed={on}
+      style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "5px 9px", borderRadius: 7, border: "none", cursor: "pointer", textAlign: "left", background: on ? "hsl(187 100% 52% / 0.15)" : "transparent", color: on ? C : "hsl(190 80% 92%)", fontSize: 11.5, fontWeight: on ? 700 : 600, fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.25 }}>
+      <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      {note && <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 9.5, fontWeight: 600, color: "hsl(222 25% 48%)", textAlign: "right" }}>{note}</span>}
+    </button>
+  );
+}
+
+const PICK_SEP = <div style={{ height: 1, background: "hsl(222 40% 14%)", margin: "5px 3px" }} />;
+const PICK_HELP: CSSProperties = { padding: "3px 9px 4px", margin: 0, fontSize: 10.5, color: "hsl(222 25% 52%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.5 };
 
 // Why the list may be swapped out at all: the chosen voice is held for the session and never written
 // to disk, so a build that changes it simply asks the customer to pick again. There is no old choice
@@ -1146,6 +1254,11 @@ class VoiceCloningEngine {
   onTune?:   (d: Delivery) => void;
   onVu?:     (level: number) => void;
   onError?:  (msg: string) => void;
+  // The words this call has just put on air, handed over as they are settled rather than as they
+  // arrive: a sentence still being spoken is not yet a sentence anyone has heard. The reader of the
+  // caller's words keeps these so his own answer coming back out of his speakers is never shown to
+  // him as if the caller had said it.
+  onAnswer?: (text: string) => void;
   // Reports whether the player that carries the cloned voice is actually running. The
   // meter below the panel reads through this, so silence can never look like sound.
   playerLive?: () => boolean;
@@ -1676,6 +1789,7 @@ class VoiceCloningEngine {
       const at = this.seqText;
       this.seqText += 1;
       if (!w.text) continue;
+      this.onAnswer?.(w.text);
       this.segments.push({ seq: at, text: w.text, bytes: new Uint8Array(0), aired: 0, onset: null,
         asked: false, done: false, reached: false, sttMs: w.sttMs, ttsMs: 0, sentAt: w.sentAt });
     }
@@ -1981,6 +2095,11 @@ interface ElectronAPI {
   vcamStop?: () => Promise<VcamResult>;
   vcamStatus?: () => Promise<VcamResult & { cameraName: string }>;
   vcamFrame?: (buf: ArrayBuffer, w: number, h: number) => void;
+  // The caller's words as text: put the floating line up or take it away, hand it one sentence, and
+  // ask this machine for the id of its own speaker output so a passive copy of it can be opened.
+  subtitleBar?: (on: boolean) => void;
+  subtitleLine?: (line: { chip: string; text: string; asSaid: string }) => void;
+  getSpeakerSourceId?: () => Promise<string>;
 }
 function getElectronAPI(): ElectronAPI | undefined {
   return (window as unknown as { electronAPI?: ElectronAPI }).electronAPI;
@@ -2407,6 +2526,7 @@ export default function StreamPage() {
   // still names the language in use, so nothing is hidden by the fold - and it is a different name
   // from the two boxes beside it on purpose: open means the choices are showing.
   const [answerOpen, setAnswerOpen] = useState(false);
+  const answerRowRef = useRef<HTMLDivElement | null>(null);
   // The chosen code, said as the name the shelf uses. Every language on this row already appears on
   // the screen as a voice label, so this is the one word for it and it needs no second translation.
   const answerLangName = ANSWER_LANGS.find(l => l.code === answerLang)?.name ?? "";
@@ -2603,6 +2723,116 @@ export default function StreamPage() {
   // before it asks for a lease: his microphone reaching the app, and the voice service
   // answering at all. The Video Call tab needs neither, because it sends his own voice.
   const needsVoice = cloneTab;
+
+  // ── Their words as text ─────────────────────────────────────────────────────
+  // ONE switch for the whole of it. Shut, nothing reads the sound of the call and no text appears
+  // anywhere - not in this window, not over the calling app - and the app is exactly what it was.
+  // Open, the caller's words arrive as a line here and a line floating over whatever calling program
+  // he is really in, in the language this card names. That language belongs to the text alone: it
+  // never touches his voice, his answers, or what a call costs.
+  //
+  // Kept per tab the way his voice and his delivery figures are, and shut on every new account. The
+  // reading rides the call that is already metered, so it opens no lease of its own and draws no
+  // minute - and it is only offered where a voice call exists to ride, which is the two cloning tabs.
+  const [subOn, setSubOn] = usePerTabSetting<boolean>(activeTab, "ss_subtitles_on",
+    raw => raw === "1", v => (v ? "1" : "0"));
+  // "" is the language his own screens speak, "*" is the caller's words exactly as they were said.
+  const [subLang, setSubLang] = usePerTabSetting<string>(activeTab, "ss_sub_lang", raw => {
+    const v = raw ?? "";
+    return v === "*" || TEXT_LANGS.some(l => l.code === v) ? v : "";
+  }, v => v);
+  const [subOpen, setSubOpen] = useState(false);
+  const [subLine, setSubLine] = useState<SubtitleView | null>(null);
+  const [subFault, setSubFault] = useState("");
+  const subRowRef = useRef<HTMLDivElement | null>(null);
+  // The name the closed row carries, so the language in use is readable without opening anything.
+  const subLangName = subLang === "*" ? t("Their words, as they said them")
+    : subLang === "" ? t("The language I speak")
+      : t(TEXT_LANGS.find(l => l.code === subLang)?.name ?? "");
+  const readerRef       = useRef<CallerReader | null>(null);
+  const readerStreamRef = useRef<MediaStream | null>(null);
+  // Bumped on every stop, so a copy still being opened when he presses the switch off is thrown away
+  // rather than handed to a reader nobody asked for.
+  const readerGenRef    = useRef(0);
+  // The call this tab has already tried to open a reading for. A machine that refused the copy is not
+  // asked again every time the page re-renders: he reads the reason once, and his next press - or his
+  // next call - is the next ask.
+  const readerTriedRef  = useRef("");
+
+  const stopReader = useCallback(() => {
+    readerGenRef.current += 1;
+    readerTriedRef.current = "";
+    readerRef.current?.stop(); readerRef.current = null;
+    readerStreamRef.current?.getTracks().forEach(tr => tr.stop());
+    readerStreamRef.current = null;
+    getElectronAPI()?.subtitleBar?.(false);
+    setSubLine(null); setSubFault("");
+  }, []);
+
+  // The chip names the language the line is IN: the one he asked for when the words were changed, and
+  // the one the caller spoke when they were not. A language this screen has no name for is shown as
+  // the code the reader heard, which is still a true answer rather than a guess.
+  const subChip = useCallback((v: SubtitleView): string => {
+    const code = v.to || v.heard;
+    const name = LANG_NAME[code];
+    return (name ? t(name) : code.toUpperCase()).toUpperCase();
+  }, []);
+
+  const startReader = useCallback(async (sessionId: string) => {
+    if (readerRef.current) return;
+    const gen = ++readerGenRef.current;
+    const api = getElectronAPI();
+    let sourceId = "";
+    try { sourceId = (await api?.getSpeakerSourceId?.()) ?? ""; } catch { sourceId = ""; }
+    if (gen !== readerGenRef.current) return;
+    const copy = await speakerCopy(sourceId);
+    if (gen !== readerGenRef.current) { copy?.getTracks().forEach(tr => tr.stop()); return; }
+    if (!copy) {
+      // Said plainly on the card, and the call carries on exactly as it did. A machine that will not
+      // hand over a copy of its own speakers is not a fault this app can fix from here.
+      setSubFault(t("This machine will not hand over a copy of its own speakers, so their words cannot be read here."));
+      return;
+    }
+    const reader = new CallerReader();
+    reader.ask    = (path, body) => gateway.voice(path, body, { sessionId });
+    reader.change = (words, from, to) => gateway.translateWords({ text: words, to, from });
+    reader.myLang = getLang();
+    reader.target = subLang;
+    reader.onFault = why => setSubFault(why);
+    reader.onTurn = v => {
+      setSubLine(v); setSubFault("");
+      api?.subtitleLine?.({ chip: subChip(v), text: v.text, asSaid: v.asSaid });
+    };
+    readerStreamRef.current = copy;
+    readerRef.current = reader;
+    const ok = await reader.start(copy);
+    if (gen !== readerGenRef.current) { reader.stop(); copy.getTracks().forEach(tr => tr.stop()); return; }
+    if (!ok) { stopReader(); setSubFault(t("The sound of this call could not be opened for reading.")); return; }
+    api?.subtitleBar?.(true);
+  }, [subLang, subChip, stopReader]);
+
+  // The one gate, read on every press and on every call: open it mid-call and the reading starts
+  // then, shut it mid-call and the line, the floating bar and the reading all go at once.
+  useEffect(() => {
+    if (!subOn) { if (readerRef.current || readerTriedRef.current) stopReader(); return; }
+    if (!isStreaming || !cloneTab || cloneOwnerRef.current !== activeTab) return;
+    const sid = sessionIdRef.current;
+    if (!sid || readerRef.current || readerTriedRef.current === sid) return;
+    readerTriedRef.current = sid;
+    void startReader(sid);
+  }, [subOn, isStreaming, cloneTab, activeTab, startReader, stopReader]);
+
+  // His language press reaches the call this tab dialled, and no other - the same rule the two dials
+  // and the answer language already keep.
+  useEffect(() => {
+    if (cloneOwnerRef.current !== activeTab) return;
+    const r = readerRef.current;
+    if (!r) return;
+    r.target = subLang; r.myLang = getLang();
+  }, [subLang, activeTab]);
+
+  // Leaving the page takes the reading and the floating line with it.
+  useEffect(() => () => { stopReader(); }, [stopReader]);
 
   // ─── What stands between this tab and a call ────────────────────────────────
   // One press per tab, so one short list of reasons — and the first thing on it is the voice
@@ -3371,6 +3601,9 @@ export default function StreamPage() {
       firstFrameRef.current = null;
       videoSessionRef.current?.close(); videoSessionRef.current = null;
       clonerRef.current?.stop(); clonerRef.current = null;
+      // Their words stop being read the moment the call stops: the copy of the speakers is closed
+      // and the line over his calling app comes down with it.
+      stopReader();
       if (cloneAudioRef.current) { try { cloneAudioRef.current.pause(); } catch { /**/ } cloneAudioRef.current.srcObject = null; }
       // The cable loses the microphone the moment the call is over, so a second call
       // never starts with two voices on it.
@@ -3405,7 +3638,7 @@ export default function StreamPage() {
       closingRef.current = false; setIsClosing(false);
       void refreshBalances();
     }
-  }, [releaseAirHold]);
+  }, [releaseAirHold, stopReader]);
 
   // Route changes (e.g. opening Settings mid-stream) unmount this page. Without
   // this the fal WebSocket would stay open and keep billing in the background.
@@ -3815,6 +4048,9 @@ export default function StreamPage() {
         // again at every sentence, so a press here changes the NEXT answer and not the one playing.
         cloner.answerLang = answerLang;
         cloner.change = (words, heard, to) => gateway.translateWords({ text: words, to, from: heard });
+        // What this call has just put on air, so the reader of their words can tell his own voice
+        // coming back through the speakers from the caller it is there to read.
+        cloner.onAnswer = text => readerRef.current?.noteAnswer(text);
         // Why the sentence went out untranslated, written where it can be read the next time rather
         // than only on his screen for the second it is there. This is the whole gap he reported: a
         // German call whose first answers came back in English, and nothing afterwards said which of
@@ -4923,36 +5159,32 @@ export default function StreamPage() {
           to the words rather than to the voice: nothing here picks a different voice, changes how one
           is delivered, or moves what the call costs. Only the names on the shelf's own labels appear,
           so a language is offered exactly while a voice of it is on the screen - and closed, this box
-          still says which language is in use. */}
-      <div style={{ marginTop: 10, border: "1px solid hsl(265 90% 65% / 0.28)", borderRadius: 10, background: "hsl(222 40% 8%)", overflow: "hidden", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
-        <div onClick={() => setAnswerOpen(v => !v)} role="button" tabIndex={0} aria-expanded={answerOpen}
+          still says which language is in use. Open, the list floats over the cards below instead of
+          pushing them down, so this row is the same height either way. */}
+      <div style={{ marginTop: 10, border: "1px solid hsl(265 90% 65% / 0.28)", borderRadius: 10, background: "hsl(222 40% 8%)", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
+        <div ref={answerRowRef} onClick={() => setAnswerOpen(v => !v)} role="button" tabIndex={0} aria-expanded={answerOpen}
           onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setAnswerOpen(v => !v); } }}
           style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 11px", cursor: "pointer", userSelect: "none" }}>
           <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6, border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 13, fontWeight: 700, fontFamily: "'Orbitron',monospace", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>{answerOpen ? "−" : "+"}</span>
           <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.04em", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{t("Answer in")}</p>
           <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: answerLang ? VC : "hsl(222 25% 52%)", fontFamily: "'Rajdhani',sans-serif" }}>
             {answerLang ? t(answerLangName) : t("The language I speak")}
+            <span style={{ marginLeft: 6, fontSize: 9, color: VC }}>▾</span>
           </span>
         </div>
-        {answerOpen && (
-          <div style={{ padding: "0 11px 11px", borderTop: "1px solid hsl(222 40% 12%)" }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "9px 0 8px", alignItems: "center" }}>
-              {[["", t("The language I speak")] as [string, string], ...ANSWER_LANGS.map(l => [l.code, t(l.name)] as [string, string])].map(([key, label]) => (
-                <button key={key} onClick={() => applyAnswerLang(key)} aria-pressed={answerLang === key}
-                  style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${answerLang === key ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 14%)"}`, background: answerLang === key ? "hsl(265 90% 65% / 0.16)" : "hsl(222 40% 6%)", color: answerLang === key ? VC : "hsl(222 25% 60%)" }}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>
-              {t("The voice you picked says what you said in the language you choose here.")}{" "}
-              {t("Leave it on the language you speak and nothing about your call changes.")}
-            </p>
-            <p style={{ marginTop: 6, fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
-              {t("A chosen language adds a moment to each answer and costs no extra minutes.")}
-            </p>
+        <FloatingPick open={answerOpen && !cloneDead} anchor={answerRowRef} width={430} onClose={() => setAnswerOpen(false)}>
+          <PickLine label={t("The language I speak")} note={t("nothing changes")} on={answerLang === ""}
+            onClick={() => { applyAnswerLang(""); setAnswerOpen(false); }} />
+          {PICK_SEP}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1px 6px" }}>
+            {ANSWER_LANGS.map(l => (
+              <PickLine key={l.code} label={t(l.name)} on={answerLang === l.code}
+                onClick={() => { applyAnswerLang(l.code); setAnswerOpen(false); }} />
+            ))}
           </div>
-        )}
+          {PICK_SEP}
+          <p style={PICK_HELP}>{t("Your voice model says your words in the language you pick here. Costs no extra minutes.")}</p>
+        </FloatingPick>
       </div>
 
       {/* What he already saved and the way to add to it, side by side under the list. */}
@@ -5071,6 +5303,83 @@ export default function StreamPage() {
           <span style={{ position: "absolute", top: 3, left: voiceMonitor ? 25 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
         </button>
       </div>
+  );
+
+  // ─── Their words as text — the one switch the whole of it hangs on ────────────
+  // Shut, nothing here runs: no copy of the speakers is opened, no words are read, and no line is put
+  // over his calling app. Open, their words arrive as text in this card and on a line floating over
+  // whatever he is calling from, in the language he picks on the row below. The row opens a list that
+  // floats over the page, so the card is the same height with the list open as with it shut.
+  const SubtitleCard = () => (
+    <div style={{ background: "hsl(228 62% 4% / 0.9)", backdropFilter: "blur(16px)", border: `1px solid ${subOn ? "hsl(265 90% 65% / 0.35)" : "hsl(187 100% 52% / 0.24)"}`, borderRadius: 14, padding: 16, opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
+      <p style={{ fontSize: 10, fontWeight: 700, color: VC, textTransform: "uppercase", letterSpacing: "0.12em", fontFamily: "'Orbitron',monospace", margin: "0 0 10px" }}>{t("Their words as text")}</p>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: "hsl(190 80% 92%)", fontFamily: "'Rajdhani',sans-serif", minWidth: 0 }}>{t("Show what they said as text")}</span>
+        <button onClick={() => setSubOn(v => !v)} aria-pressed={subOn} title={t("Show what they said as text")}
+          style={{ flexShrink: 0, width: 46, height: 24, borderRadius: 14, border: "none", cursor: "pointer", background: subOn ? VC : "hsl(222 30% 20%)", position: "relative", transition: "background 0.15s" }}>
+          <span style={{ position: "absolute", top: 3, left: subOn ? 25 : 3, width: 18, height: 18, borderRadius: "50%", background: "#fff", transition: "left 0.15s" }} />
+        </button>
+      </div>
+
+      {!subOn ? (
+        <p style={{ margin: "10px 0 0", fontSize: 11, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.55 }}>
+          {t("Shut, the app reads nothing from your speakers and no text appears anywhere — not in this window, not over your call. Turn it back on whenever you like, even mid-call.")}
+        </p>
+      ) : (
+        <>
+          <div ref={subRowRef} onClick={() => setSubOpen(v => !v)} role="button" tabIndex={0} aria-expanded={subOpen}
+            onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSubOpen(v => !v); } }}
+            style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, padding: "9px 11px", borderRadius: 10, cursor: "pointer", userSelect: "none", background: "hsl(222 40% 8%)", border: "1px solid hsl(265 90% 65% / 0.28)" }}>
+            <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6, border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 13, fontWeight: 700, fontFamily: "'Orbitron',monospace", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>{subOpen ? "−" : "+"}</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.04em", whiteSpace: "nowrap" }}>{t("Text in")}</span>
+            <span style={{ marginLeft: "auto", minWidth: 0, fontSize: 10.5, fontWeight: 700, color: VC, fontFamily: "'Rajdhani',sans-serif", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {subLangName}<span style={{ marginLeft: 6, fontSize: 9 }}>▾</span>
+            </span>
+          </div>
+          <FloatingPick open={subOpen} anchor={subRowRef} width={430} onClose={() => setSubOpen(false)}>
+            <PickLine label={t("The language I speak")} note={t("in your language")} on={subLang === ""}
+              onClick={() => { setSubLang(""); setSubOpen(false); }} />
+            <PickLine label={t("Their words, as they said them")} note={t("no translating")} on={subLang === "*"}
+              onClick={() => { setSubLang("*"); setSubOpen(false); }} />
+            {PICK_SEP}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1px 6px" }}>
+              {TEXT_LANGS.map(l => (
+                <PickLine key={l.code} label={t(l.name)} on={subLang === l.code}
+                  onClick={() => { setSubLang(l.code); setSubOpen(false); }} />
+              ))}
+            </div>
+            {PICK_SEP}
+            <p style={PICK_HELP}>{t("The line over your call shows their words in the language you pick here. Costs no extra minutes.")}</p>
+          </FloatingPick>
+
+          {/* The same words the floating line carries, here where he can read them without looking
+              away from the app. The box is a fixed height so a long sentence never moves the cards
+              under it, and it says what it is waiting for rather than standing empty. */}
+          <div style={{ marginTop: 10, minHeight: 62, padding: "9px 11px", borderRadius: 10, background: "hsl(222 40% 6%)", border: `1px solid ${subFault ? "hsl(38 95% 55% / 0.4)" : "hsl(187 100% 52% / 0.22)"}`, display: "flex", flexDirection: "column", justifyContent: "center", gap: 4 }}>
+            {subFault ? (
+              <p style={{ margin: 0, fontSize: 11, color: "hsl(38 95% 66%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>{subFault}</p>
+            ) : subLine ? (
+              <>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", fontFamily: "'Orbitron',monospace", padding: "3px 8px", borderRadius: 999, color: C, background: "hsl(187 100% 52% / 0.12)", border: "1px solid hsl(187 100% 52% / 0.32)" }}>{subChip(subLine)}</span>
+                  <span style={{ minWidth: 0, fontSize: 13.5, fontWeight: 600, color: "#fff", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{subLine.text}</span>
+                </div>
+                {subLine.asSaid && subLine.asSaid !== subLine.text && (
+                  <p style={{ margin: 0, fontSize: 10.5, fontStyle: "italic", color: "hsl(222 25% 52%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.35, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{subLine.asSaid}</p>
+                )}
+              </>
+            ) : (
+              <p style={{ margin: 0, fontSize: 11, color: "hsl(222 25% 48%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+                {isStreaming ? t("Waiting for their first words.") : t("Their words appear here once your call is running.")}
+              </p>
+            )}
+          </div>
+          <p style={{ margin: "8px 0 0", fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+            {t("The same line floats over your calling app, and stays shut when this is shut. Each tab keeps its own choice.")}
+          </p>
+        </>
+      )}
+    </div>
   );
 
   // ─── Voice service check — the one card on this tab that proves the clone is working ──
@@ -5581,6 +5890,7 @@ export default function StreamPage() {
                   Lip-sync has no place here — there is no picture to line anything up with. */}
               <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
                 {VoiceServiceCheck()}
+                {SubtitleCard()}
                 {VoiceMonitorCard(false)}
                 {VoiceOnlyNote()}
               </div>
@@ -5610,6 +5920,7 @@ export default function StreamPage() {
             <div style={{ width: 336, flexShrink: 0, alignSelf: "flex-start", position: "sticky", top: 16, maxHeight: "calc(100vh - 40px)", overflowY: "auto", display: "flex", flexDirection: "column", gap: 14 }}>
               {comboTab && VoicePanel()}
               {comboTab && TuneCard()}
+              {comboTab && SubtitleCard()}
               {AudioSyncPanel()}
               {PromptCard()}
               {!comboTab && renderVirtualDevices(true)}
