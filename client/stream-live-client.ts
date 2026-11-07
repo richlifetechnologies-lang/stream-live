@@ -888,6 +888,39 @@ export class StreamLiveClient {
     };
   }
 
+  /**
+   * Ask for the words a cloned voice is about to speak, in the language the voice card chose.
+   *
+   * This is the one step on the cloning path that changes WHAT is said rather than how it is said, and
+   * it is deliberately a separate route from the voice line: the voice service is handed the new words
+   * exactly as it is handed the old ones, on the same voice with the same delivery figures.
+   *
+   * Nothing here may cost a customer his answer. Every failure — no translator linked, the allowance
+   * spent, a language the translator will not serve, or a reply that came too late to be worth
+   * waiting for — comes back as `null` text with the reason attached, and the caller speaks the words
+   * it already holds. A voice that answers in the language it was spoken to is a working call; a blank
+   * one is not, and it is never the price of a translation.
+   */
+  async translateWords(input: {
+    text: string;
+    to: string;
+    from?: string | null;
+  }): Promise<{ text: string | null; reason: string | null }> {
+    try {
+      const res = await this.invoke("translate-words", {
+        text: input.text,
+        to: input.to,
+        from: input.from ?? null,
+        sessionId: this.sessionId ?? undefined,
+      }) as unknown as { text?: unknown };
+      const said = typeof res.text === "string" ? res.text.trim() : "";
+      return said ? { text: said, reason: null } : { text: null, reason: "translator_empty" };
+    } catch (err) {
+      const reason = err instanceof GatewayError ? err.reason : "line";
+      return { text: null, reason };
+    }
+  }
+
   // ── Internals ──────────────────────────────────────────────────────────────
   private async invoke(fn: string, body: Record<string, unknown>): Promise<Record<string, never>> {
     const token = await this.token();

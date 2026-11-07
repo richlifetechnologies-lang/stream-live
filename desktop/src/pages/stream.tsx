@@ -298,6 +298,38 @@ const VOICE_ACCENTS = (() => {
 // the ones holding a single voice each. The sign opens the rest in place.
 const ACCENT_CHIPS_SHOWN = 8;
 
+// The languages the cloned voice can be asked to ANSWER in, beside the one its caller used.
+//
+// A name gets onto this list by four tests, and it is the second and third that hold it to the list
+// the customer already knows. First, the words he said have to be changeable into it - that is the one
+// thing the reading and the voice cannot do between them, since a voice reads whatever it is handed.
+// Second, it has to be a name that stands in the voice list above as one of his own voices' labels:
+// the screen offers a language exactly while a voice of that language is on the shelf, and a choice
+// that leads to no voice, or a voice that leads to no choice, reads as broken. Third, it has to be a
+// language rather than a place: American, British, Australian, Canadian, Indian and Eastern European
+// are accents the same English words come back wearing, so asking for a sentence to be changed into
+// one of them is asking for nothing. Fourth, and this is the one his customers would hear before any
+// of it, the voice on the line has to still be able to say it - the low-latency voice he is heard
+// through is not a 90-language model, and Gujarati and Catalan are not in the thirty-odd it carries.
+//
+// The short code beside each name is what the words are changed into on the far side, and the two
+// tables - this one and the one on the line that does it - are checked against each other before a
+// build goes out, because a choice the far side cannot honour is the only way this feature could
+// quietly stop working and go on looking switched on.
+//
+// One thing this list is not: it is nothing to do with the language the app's own screens speak, and
+// it never changes which voice is used, which figures it is delivered with, or what the call costs.
+const ANSWER_LANGS = (() => {
+  const names: Array<[string, string]> = [
+    ["Spanish", "es"], ["French", "fr"], ["German", "de"], ["Chinese", "zh"],
+    ["Italian", "it"], ["Portuguese", "pt"], ["Korean", "ko"], ["Turkish", "tr"],
+    ["Norwegian", "no"], ["Hungarian", "hu"], ["Indonesian", "id"],
+  ];
+  return names
+    .filter(([name]) => VOICE_ACCENTS.includes(name))
+    .map(([name, code]) => ({ name, code }));
+})();
+
 // Why the list may be swapped out at all: the chosen voice is held for the session and never written
 // to disk, so a build that changes it simply asks the customer to pick again. There is no old choice
 // on his machine to translate, and no silent swap onto a voice nobody offered him. What goes up for
@@ -677,6 +709,13 @@ const CLONE_SEND_MS       = 9000;
 // stopped mid-sentence buys nothing, and this raise was never about that. It is the gap every build
 // since the split has aired an arriving answer against.
 const CLONE_ANSWER_GAP_MS = 6000;
+// How long the words are allowed to take on their way through the language the card chose. It sits
+// INSIDE the wait his caller hears, so it is deliberately shorter than the voice line's own deadline
+// and it ends in the words being spoken as they were heard rather than in a refused turn: a sentence
+// in the language it arrived in is a sentence the caller hears, and no translation is worth a blank.
+// The line that changes the words gives up before this does, so a wait past this point means that
+// line never answered at all.
+const CHANGE_WORDS_MS     = 2500;
 // Names the deadline above, so a turn abandoned because nothing replied can be told apart from
 // one the voice line actively refused. Only the second of the two ends a call.
 const VOICE_TIMEOUT       = "voice_timeout";
@@ -1008,7 +1047,23 @@ class VoiceCloningEngine {
   // cloned voice back as it is made. A call books both, and a call that loses either says so.
   ask?:   (path: string, body: FormData) => Promise<Response>;
   speak?: (path: string, body: Record<string, unknown>) => Promise<Response>;
+  // A third way out, and the only one of the three that changes WHAT is said rather than how it is
+  // said: it asks for these words in another language, and answers with either the new words or the
+  // reason there are none. It never throws - a turn is not refused over a translation.
+  change?: (words: string, heard: string | null, to: string) =>
+    Promise<{ text: string | null; reason: string | null }>;
   voiceId    = BUILTIN_VOICES[0].id;
+  // The language the card asked the answer to be spoken in, or "" for the one the caller used - which
+  // is what every call ever made has run on, and what this costs nothing extra to keep running on.
+  // Read once per sentence, at the moment the words are handed on, so the next sentence after a press
+  // carries his choice and a sentence already being spoken is left alone.
+  answerLang = "";
+  // The two counts the card shows while a call is on air: how many sentences went out in the language
+  // he asked for, and how many stayed in the caller's because the change could not be had. A choice
+  // that is set, shown on screen and silently ignored is the fault he has reported about this app
+  // before, so the second of those two numbers is the reason this one is on the card at all.
+  sentencesChanged  = 0;
+  sentencesUnchanged = 0;
   // The two delivery figures. They change how the voice he picked is DELIVERED - how level its
   // keeping, and how close it holds to the recording it was made from - not which voice it is, and
   // not what the call costs. Two ways of getting them, and only one is ever in force on a sentence:
@@ -1182,6 +1237,7 @@ class VoiceCloningEngine {
     // The four counters that report how this call was handled start empty, as does the round trip the
     // picture hold is measured against - a hold learned on his last call is not a reading of this one.
     this.piecesNotHim = 0; this.notHimOff = false;
+    this.sentencesChanged = 0; this.sentencesUnchanged = 0;
     this.pieceLevelSum = 0; this.pieceLevelN = 0; this.pieceLevel = 0; this.pieceFrames = 0;
     this.roundTripS = 0;
     this.audioCtx = new AudioContext();
@@ -1352,6 +1408,36 @@ class VoiceCloningEngine {
     } finally { if (timer !== null) clearTimeout(timer); }
   }
 
+  /**
+   * These words, in the language the card asked for - or these words as they were heard, which is
+   * what every answer has always been.
+   *
+   * It answers null for its own failure and for a deadline it missed, and it is never allowed to
+   * throw, because the turn it sits in would treat a throw as the voice line refusing and would end
+   * the call over a translation. That is the whole design of this step: the choice adds a language, it
+   * does not add a way to lose the answer. Both of its counts land on the card, so a customer who
+   * picked Spanish and is hearing English can see that it happened and how often.
+   */
+  private async _changeWords(words: string, heard: string): Promise<string | null> {
+    if (!this.change || !this.answerLang) return null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    try {
+      const got = await Promise.race([
+        // Caught here rather than left to the turn: a rejected ask would read to the code above it as
+        // the voice line refusing, and that code ends calls. A translation is not allowed that much
+        // power over somebody's minute, so its worst answer is the same as its failure answer.
+        this.change(words, heard || null, this.answerLang).catch(() => ({ text: null, reason: "the language line did not answer" })),
+        new Promise<{ text: null; reason: string }>(r => {
+          timer = setTimeout(() => r({ text: null, reason: "took too long to be worth the wait" }), CHANGE_WORDS_MS);
+        }),
+      ]);
+      if (got.text) { this.sentencesChanged += 1; return got.text; }
+      this.sentencesUnchanged += 1;
+      console.warn(`[voice] sentence #${this.sentencesUnchanged} was not answered in ${this.answerLang} (${got.reason}); spoken as heard`);
+      return null;
+    } finally { if (timer !== null) clearTimeout(timer); }
+  }
+
   // How far the cloned voice sits behind his microphone, in seconds. Everything this engine does
   // to keep the line honest is measured against this one number.
   private _behind(): number {
@@ -1474,7 +1560,7 @@ class VoiceCloningEngine {
         this._refuse(`the transcriber returned HTTP ${res.status}`);
         return;
       }
-      const j = await res.json().catch(() => null) as { text?: unknown } | null;
+      const j = await res.json().catch(() => null) as { text?: unknown; language_code?: unknown } | null;
       // What came back is read for HIS words, and only his words. An engine that found no speech
       // often says so in prose - "[background noise]" is a note about the room, not a sentence - and
       // that prose used to be handed to the cloned voice and spoken down the line as if he had said
@@ -1484,6 +1570,15 @@ class VoiceCloningEngine {
       if (!text && said.trim())
         console.warn(`[voice] the transcriber described the audio, not his words ("${said.trim().slice(0, 60)}"), nothing spoken`);
       else if (!text) console.warn("[voice] this piece came back with no words in it");
+      // The card's language choice, carried: the transcriber names the language it heard, so a
+      // customer who picked Spanish while speaking English has every sentence changed, and one who
+      // picked Spanish and speaks Spanish has none of them changed. Without this stamp the app
+      // would pay a translation hop on words that are already in the language he asked for.
+      const heardLang = typeof j?.language_code === "string" ? j.language_code.trim().toLowerCase() : "";
+      if (text && this.answerLang && this.answerLang !== heardLang) {
+        const changed = await this._changeWords(text, heardLang);
+        if (changed) text = changed;
+      }
     } catch (e) {
       if (!this.running) return;
       // A turn whose request had already left this app failed on the voice line; anything earlier
@@ -2212,6 +2307,34 @@ export default function StreamPage() {
     setTuneHeldCall(false);
     clonerRef.current?.releaseTune();
   }, [applyTune]);
+
+  // ── Which language the cloned voice answers in ────────────────────────────
+  // Empty means today: the answer comes back in the language he spoke. Anything else is the one
+  // name he picked, and it is a setting of this machine like the two dials are - it follows the
+  // look he chose for the call, not his account, so a second computer is not quietly told to
+  // translate. A call already on air picks it up at his next sentence: the words of a sentence
+  // already playing are not swapped underneath it.
+  const [answerLang, setAnswerLang] = useState<string>(() => {
+    try {
+      const stored = localStorage.getItem("ss_answer_lang") ?? "";
+      // A name this build does not offer is not a name to carry forward: the list is derived from
+      // the voices on the shelf, so an older machine can hold a language the shelf no longer has.
+      return ANSWER_LANGS.some(l => l.code === stored) ? stored : "";
+    } catch { return ""; }
+  });
+  const applyAnswerLang = useCallback((code: string) => {
+    try { localStorage.setItem("ss_answer_lang", code); } catch { /* remembering is a convenience */ }
+    setAnswerLang(code);
+    const c = clonerRef.current;
+    if (c) c.answerLang = code;
+  }, []);
+  // Closed until he opens it, because this is a setting he picks once and leaves. Closed, the row
+  // still names the language in use, so nothing is hidden by the fold - and it is a different name
+  // from the two boxes beside it on purpose: open means the choices are showing.
+  const [answerOpen, setAnswerOpen] = useState(false);
+  // The chosen code, said as the name the shelf uses. Every language on this row already appears on
+  // the screen as a voice label, so this is the one word for it and it needs no second translation.
+  const answerLangName = ANSWER_LANGS.find(l => l.code === answerLang)?.name ?? "";
 
   // ── Local monitor: hear your own cloned voice ─────────────────────────────
   // Off until he asks for it, and his own switch setting is kept either way. The cloned voice is
@@ -2947,9 +3070,9 @@ export default function StreamPage() {
   // once a second beside the liveness check. The meters on that card come from the audio
   // graph; these come from the counting, so a bar that moved on a piece which never left
   // this app can never be read as an answer.
-  const [voiceRead, setVoiceRead] = useState({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0, svcMs: 0, late: 0, notHim: 0 });
+  const [voiceRead, setVoiceRead] = useState({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0, svcMs: 0, late: 0, notHim: 0, changed: 0, same: 0 });
   useEffect(() => {
-    if (!vcActive) { setCloneAlive(false); setMicGone(false); setVoiceRead({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0, svcMs: 0, late: 0, notHim: 0 }); return; }
+    if (!vcActive) { setCloneAlive(false); setMicGone(false); setVoiceRead({ sent: 0, back: 0, inS: 0, outS: 0, lastMs: 0, svcMs: 0, late: 0, notHim: 0, changed: 0, same: 0 }); return; }
     const read = () => {
       const c = clonerRef.current;
       setCloneAlive(!!c && c.alive(CLONE_ALIVE_SECONDS));
@@ -2957,9 +3080,13 @@ export default function StreamPage() {
       // `late` and `notHim` are the two ways this call can hand the line less than everything he said.
       // They are read off the same engine counts as the four figures beside them, so the card can never
       // show a tidy call that the engine knows was dropping sentences.
+      // `changed` and `same` are the two ways the language choice can fail to reach the line, and they
+      // are counted by the engine for the same reason: a customer who picked Spanish and is hearing
+      // English needs the card to say so in a number rather than leave him wondering which is broken.
       setVoiceRead({ sent: c?.piecesSent ?? 0, back: c?.piecesBack ?? 0,
         inS: c?.secondsIn ?? 0, outS: c?.secondsOut ?? 0, lastMs: c?.lastAnswerMs ?? 0, svcMs: c?.serviceMs ?? 0,
-        late: c?.givenUp ?? 0, notHim: c?.piecesNotHim ?? 0 });
+        late: c?.givenUp ?? 0, notHim: c?.piecesNotHim ?? 0,
+        changed: c?.sentencesChanged ?? 0, same: c?.sentencesUnchanged ?? 0 });
     };
     read();
     const watch = setInterval(read, 1000);
@@ -3597,6 +3724,10 @@ export default function StreamPage() {
         // shows are then the figures the line is carrying, never the ones the app intended.
         cloner.stability = voiceStability; cloner.similarity = voiceSimilarity;
         cloner.tuneAuto  = voiceTuneAuto;
+        // The language choice rides with the call the same way the two dials do, and it is read
+        // again at every sentence, so a press here changes the NEXT answer and not the one playing.
+        cloner.answerLang = answerLang;
+        cloner.change = (words, heard, to) => gateway.translateWords({ text: words, to, from: heard });
         cloner.onTune    = d => { setVoiceStability(d.stability); setVoiceSimilarity(d.similarity); setTuneSaid(d); };
         // A new call has been told nothing yet, so the card is not allowed to keep explaining the last
         // one's room as if it were this one's - and the same goes for his own hand on the dials: the
@@ -4407,6 +4538,11 @@ export default function StreamPage() {
   // card rather than something he has to go and ask for. Both fold away at zero, because a warning that
   // shows on every clean call is a warning he stops reading - and both are counted by the engine
   // itself, so a card that looks healthy can never be hiding a call that dropped his sentences.
+  //
+  // The language pair is the same idea one step on: a customer who picks Spanish and is hearing English
+  // back has nothing on this screen to tell him whether the choice landed, whether it landed and then
+  // stopped, or whether it is working and his ear is being unfair. So the choice reports both halves -
+  // how many answers it changed, and how many it had to give up on and speak as heard.
   const VoiceHeldLines = () => (
     <>
       {voiceRead.late > 0 && (
@@ -4418,6 +4554,16 @@ export default function StreamPage() {
         <p style={{ marginTop: 6, fontSize: 10, color: "hsl(40 90% 62%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
           {t("Sounds too loud to be your voice, so not read out: {n}", { n: String(voiceRead.notHim) })}{" "}
           {t("Something else is playing near your microphone.")}
+        </p>
+      )}
+      {answerLang && voiceRead.changed > 0 && (
+        <p style={{ marginTop: 6, fontSize: 10, color: "hsl(265 60% 76%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+          {t("Sentences answered in {lang}: {n}", { lang: t(answerLangName), n: String(voiceRead.changed) })}
+        </p>
+      )}
+      {answerLang && voiceRead.same > 0 && (
+        <p style={{ marginTop: 6, fontSize: 10, color: "hsl(40 90% 62%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+          {t("Sentences not answered in {lang}, so spoken as you said them: {n}", { lang: t(answerLangName), n: String(voiceRead.same) })}
         </p>
       )}
     </>
@@ -4663,6 +4809,42 @@ export default function StreamPage() {
                 );
               })}
             </div>
+          </div>
+        )}
+      </div>
+
+      {/* The language the cloned voice answers in. It stands under the voice list because it belongs
+          to the words rather than to the voice: nothing here picks a different voice, changes how one
+          is delivered, or moves what the call costs. Only the names on the shelf's own labels appear,
+          so a language is offered exactly while a voice of it is on the screen - and closed, this box
+          still says which language is in use. */}
+      <div style={{ marginTop: 10, border: "1px solid hsl(265 90% 65% / 0.28)", borderRadius: 10, background: "hsl(222 40% 8%)", overflow: "hidden", opacity: cloneDead ? 0.42 : 1, pointerEvents: cloneDead ? "none" : undefined, filter: cloneDead ? "grayscale(0.9)" : undefined }}>
+        <div onClick={() => setAnswerOpen(v => !v)} role="button" tabIndex={0} aria-expanded={answerOpen}
+          onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setAnswerOpen(v => !v); } }}
+          style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 11px", cursor: "pointer", userSelect: "none" }}>
+          <span style={{ width: 20, height: 20, flexShrink: 0, borderRadius: 6, border: "1px solid hsl(265 90% 65% / 0.35)", color: VC, fontSize: 13, fontWeight: 700, fontFamily: "'Orbitron',monospace", display: "flex", alignItems: "center", justifyContent: "center", lineHeight: 1 }}>{answerOpen ? "−" : "+"}</span>
+          <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(190 80% 96%)", fontFamily: "'Rajdhani',sans-serif", letterSpacing: "0.04em", margin: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{t("Answer in")}</p>
+          <span style={{ marginLeft: "auto", flexShrink: 0, fontSize: 10.5, fontWeight: 700, color: answerLang ? VC : "hsl(222 25% 52%)", fontFamily: "'Rajdhani',sans-serif" }}>
+            {answerLang ? t(answerLangName) : t("The language I speak")}
+          </span>
+        </div>
+        {answerOpen && (
+          <div style={{ padding: "0 11px 11px", borderTop: "1px solid hsl(222 40% 12%)" }}>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "9px 0 8px", alignItems: "center" }}>
+              {[["", t("The language I speak")] as [string, string], ...ANSWER_LANGS.map(l => [l.code, t(l.name)] as [string, string])].map(([key, label]) => (
+                <button key={key} onClick={() => applyAnswerLang(key)} aria-pressed={answerLang === key}
+                  style={{ padding: "4px 9px", borderRadius: 999, cursor: "pointer", fontSize: 10, fontWeight: 700, fontFamily: "'Rajdhani',sans-serif", border: `1px solid ${answerLang === key ? "hsl(265 90% 65% / 0.45)" : "hsl(222 40% 14%)"}`, background: answerLang === key ? "hsl(265 90% 65% / 0.16)" : "hsl(222 40% 6%)", color: answerLang === key ? VC : "hsl(222 25% 60%)" }}>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <p style={{ fontSize: 10.5, color: "hsl(222 25% 50%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45, margin: 0 }}>
+              {t("The voice you picked says what you said in the language you choose here.")}{" "}
+              {t("Leave it on the language you speak and nothing about your call changes.")}
+            </p>
+            <p style={{ marginTop: 6, fontSize: 10.5, color: "hsl(222 25% 45%)", fontFamily: "'Rajdhani',sans-serif", lineHeight: 1.45 }}>
+              {t("A chosen language adds a moment to each answer and costs no extra minutes.")}
+            </p>
           </div>
         )}
       </div>

@@ -59,3 +59,10 @@ verify_jwt = false
 # is no signed-in account - so the desktop app can tell a refusal from a transport failure.
 [functions.account-language]
 verify_jwt = false
+
+# "Change these words into the language he chose, before his cloned voice speaks them."
+# Like every route here it checks the caller's own session and answers 401 in its own words,
+# and the desktop app has to hear that wording: a refusal from this function means the sentence
+# is spoken as it arrived, while a platform refusal would mean the hop is unreachable at all.
+[functions.translate-words]
+verify_jwt = false
