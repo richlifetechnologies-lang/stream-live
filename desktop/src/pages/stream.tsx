@@ -755,6 +755,12 @@ const CLONE_ANSWER_GAP_MS = 6000;
 // The line that changes the words gives up before this does, so a wait past this point means that
 // line never answered at all.
 const CHANGE_WORDS_MS     = 2500;
+// A call's FIRST translated sentence gets longer patience than every one after it, for one reason: it
+// is the sentence that has to open the line to the translator, and a first trip that is slow is the
+// fault he reported - a German call whose opening answers went out in English. It is spent once per
+// call, on the one answer his caller is already waiting through, and it is a bound on the wait, not a
+// promise of it: a translator that answers in a fifth of a second still answers in a fifth of a second.
+const CHANGE_WORDS_FIRST_MS = 3500;
 // Names the deadline above, so a turn abandoned because nothing replied can be told apart from
 // one the voice line actively refused. Only the second of the two ends a call.
 const VOICE_TIMEOUT       = "voice_timeout";
@@ -1091,6 +1097,13 @@ class VoiceCloningEngine {
   // reason there are none. It never throws - a turn is not refused over a translation.
   change?: (words: string, heard: string | null, to: string) =>
     Promise<{ text: string | null; reason: string | null }>;
+  // The card counts a sentence it had to speak as heard, but the count says only THAT it happened.
+  // This says why, once per call, so the reason outlives the screen: he reported a German call whose
+  // opening answers came back in English, and nothing on disk or in the app could tell us which of
+  // the translator's refusals it was. Only the very first give-up of a call is reported - a line that
+  // is failing every sentence has already said everything it has to say in the first note.
+  onLanguageGaveUp?: (why: string, lang: string) => void;
+  private languageNoted = false;
   voiceId    = BUILTIN_VOICES[0].id;
   // The language the card asked the answer to be spoken in, or "" for the one the caller used - which
   // is what every call ever made has run on, and what this costs nothing extra to keep running on.
@@ -1459,22 +1472,43 @@ class VoiceCloningEngine {
    */
   private async _changeWords(words: string, heard: string): Promise<string | null> {
     if (!this.change || !this.answerLang) return null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    try {
-      const got = await Promise.race([
-        // Caught here rather than left to the turn: a rejected ask would read to the code above it as
-        // the voice line refusing, and that code ends calls. A translation is not allowed that much
-        // power over somebody's minute, so its worst answer is the same as its failure answer.
-        this.change(words, heard || null, this.answerLang).catch(() => ({ text: null, reason: "the language line did not answer" })),
-        new Promise<{ text: null; reason: string }>(r => {
-          timer = setTimeout(() => r({ text: null, reason: "took too long to be worth the wait" }), CHANGE_WORDS_MS);
-        }),
-      ]);
-      if (got.text) { this.sentencesChanged += 1; return got.text; }
-      this.sentencesUnchanged += 1;
-      console.warn(`[voice] sentence #${this.sentencesUnchanged} was not answered in ${this.answerLang} (${got.reason}); spoken as heard`);
-      return null;
-    } finally { if (timer !== null) clearTimeout(timer); }
+    // ONE bound for the whole step, and a second try inside it rather than a second wait after it.
+    // A translator that answers quickly with "no" - a cold first trip, a refused pair, a hiccup - used
+    // to cost the customer his language for that sentence, and asking once more is what clears nearly
+    // every one of those. A translator that never answers still cannot make him wait past the bound:
+    // the retry gets only whatever time the first try left, never a fresh slice of his answer.
+    const stopAt = performance.now() + (this.sentencesChanged + this.sentencesUnchanged === 0
+      ? CHANGE_WORDS_FIRST_MS : CHANGE_WORDS_MS);
+    let reason = "";
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const left = Math.round(stopAt - performance.now());
+      if (left <= 0) break;
+      let timer: ReturnType<typeof setTimeout> | null = null;
+      try {
+        const got = await Promise.race([
+          // Caught here rather than left to the turn: a rejected ask would read to the code above it as
+          // the voice line refusing, and that code ends calls. A translation is not allowed that much
+          // power over somebody's minute, so its worst answer is the same as its failure answer.
+          this.change(words, heard || null, this.answerLang).catch(() => ({ text: null, reason: "the language line did not answer" })),
+          new Promise<{ text: null; reason: string }>(r => {
+            timer = setTimeout(() => r({ text: null, reason: "took too long to be worth the wait" }), left);
+          }),
+        ]);
+        if (got.text) { this.sentencesChanged += 1; return got.text; }
+        // A step that answers "no" always says why, and a why this step cannot name is written down as
+        // nothing, so the note the seller reads never carries a blank in place of a reason.
+        reason = got.reason || "answered with no words";
+      } catch {
+        // Nothing this step does may reach the turn as a throw, and that rule now has to hold twice
+        // over: a first try that failed in a way we did not expect must not become a second one's
+        // exception on its way out either.
+        reason = "the language line did not answer";
+      } finally { if (timer !== null) clearTimeout(timer); }
+    }
+    this.sentencesUnchanged += 1;
+    console.warn(`[voice] sentence #${this.sentencesUnchanged} was not answered in ${this.answerLang} (${reason}); spoken as heard`);
+    if (!this.languageNoted) { this.languageNoted = true; this.onLanguageGaveUp?.(reason, this.answerLang); }
+    return null;
   }
 
   // How far the cloned voice sits behind his microphone, in seconds. Everything this engine does
@@ -3781,6 +3815,17 @@ export default function StreamPage() {
         // again at every sentence, so a press here changes the NEXT answer and not the one playing.
         cloner.answerLang = answerLang;
         cloner.change = (words, heard, to) => gateway.translateWords({ text: words, to, from: heard });
+        // Why the sentence went out untranslated, written where it can be read the next time rather
+        // than only on his screen for the second it is there. This is the whole gap he reported: a
+        // German call whose first answers came back in English, and nothing afterwards said which of
+        // the translator's answers it was. It never fires twice on one call, and it is filed against
+        // the call that is already on air - the words still reached his caller either way.
+        cloner.onLanguageGaveUp = (why, lang) => {
+          const sid = sessionIdRef.current;
+          if (!sid) return;
+          reportCallFailure(sid, "voice_language",
+            `the cloned voice spoke his words in the language he said them, not in ${lang} - ${why}`);
+        };
         cloner.onTune    = d => { setVoiceStability(d.stability); setVoiceSimilarity(d.similarity); setTuneSaid(d); };
         // A new call has been told nothing yet, so the card is not allowed to keep explaining the last
         // one's room as if it were this one's - and the same goes for his own hand on the dials: the
