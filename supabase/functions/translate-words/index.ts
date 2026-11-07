@@ -184,7 +184,7 @@ Deno.serve(async (req: Request) => {
         { reason: res.status === 403 ? "translator_quota" : "translator_refused" });
     }
 
-    const j = await upstream.json().catch(() => null) as
+    const j = await res.json().catch(() => null) as
       { translations?: Array<{ text?: unknown }> } | null;
     const said = typeof j?.translations?.[0]?.text === "string" ? j.translations[0].text.trim() : "";
     if (!said) return fail("the translator gave back nothing", 502, { reason: "translator_empty" });
