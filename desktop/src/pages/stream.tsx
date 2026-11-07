@@ -113,6 +113,45 @@ function usePerTabState<T>(activeTab: TabId, initial: T): [T, (v: T | ((prev: T)
   return [store[activeTab], setValue];
 }
 
+// The same isolation again, but remembered on this machine, because these five are settings he keeps
+// rather than inputs he types per call. ONE box under the old name meant the two cloning tabs shared
+// every figure on the delivery card: a language or a dial chosen for Voice Clone Only was silently
+// chosen for Video + Audio too, which is the leak he reported on 7 November. Each tab now has a box of
+// its own, named after the old one.
+//
+// A tab with no box of its own yet is read out of the OLD box, so a machine that was already tuned
+// comes up on both tabs with the figures he set - never back at the app's defaults the day they split.
+// The first press on a tab writes that tab's own box, so from then on the two are independent.
+//
+// The setter a call was started with belongs to the tab that started it - the same way the chosen voice
+// already does - so what the app decides in the middle of a call is written to that tab's box and never
+// to whichever tab he happens to have clicked over to.
+function usePerTabSetting<T>(
+  activeTab: TabId, base: string,
+  read: (raw: string | null) => T, said: (v: T) => string,
+): [T, (v: T | ((prev: T) => T)) => void] {
+  const [store, setStore] = useState<Record<TabId, T>>(() => {
+    const all = {} as Record<TabId, T>;
+    for (const id of TAB_IDS) {
+      let raw: string | null = null;
+      try {
+        raw = localStorage.getItem(base + ":" + id);
+        if (raw === null) raw = localStorage.getItem(base);
+      } catch { raw = null; }
+      all[id] = read(raw);
+    }
+    return all;
+  });
+  const setValue = useCallback((v: T | ((prev: T) => T)) => {
+    setStore(prev => {
+      const next = typeof v === "function" ? (v as (p: T) => T)(prev[activeTab]) : v;
+      try { localStorage.setItem(base + ":" + activeTab, said(next)); } catch { /* remembering is a convenience */ }
+      return { ...prev, [activeTab]: next };
+    });
+  }, [activeTab, base]);
+  return [store[activeTab], setValue];
+}
+
 // ─── Style presets ────────────────────────────────────────────────────────────
 const STYLES = [
   { id: "hyper-real",  label: "HYPER-REAL",  color: "#00d2d3", prompt: "photorealistic human, ultra-high-definition, natural skin texture, cinematic lighting, professional photography" },
@@ -761,22 +800,22 @@ const TTS_MODEL_ID = "eleven_flash_v2_5";
 // because a voice hurried past 1.15 stops sounding like anybody.
 
 /**
- * One dial as this machine left it, or the figure every call ran on before dials existed.
+ * One dial as this tab left it, or the figure every call ran on before dials existed.
  *
  * A stored value that is not a number between 0 and 1 is a damaged box rather than a setting, and
  * the default is the sound he has already agreed to by using the app - so it is always a safe
  * place to land, and a bad read can never put a voice on his line that no screen is showing.
+ *
+ * The bytes come in already read, because the box they came out of is now named per cloning tab.
  */
-function storedTune(key: string, fallback: number): number {
-  try {
-    const raw = localStorage.getItem(key);
-    // An empty box reads as 0 to a computer, and 0 is a dial figure - so the blank has to be named
-    // before the number is, or a damaged setting opens the voice at the flattest sound there is.
-    if (raw === null || raw.trim() === "") return fallback;
-    const n = Number(raw);
-    return Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
-  } catch { return fallback; }
+function tuneFromRaw(raw: string | null, fallback: number): number {
+  // An empty box reads as 0 to a computer, and 0 is a dial figure - so the blank has to be named
+  // before the number is, or a damaged setting opens the voice at the flattest sound there is.
+  if (raw === null || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : fallback;
 }
+
 // The cloned voice comes back as raw samples, not as a compressed file: the player is built
 // straight out of the bytes on the line, so nothing waits for a decoder and nothing waits for a
 // frame boundary. 24 kHz is the highest rate the fast model is offered at.
@@ -2242,11 +2281,16 @@ export default function StreamPage() {
   const [uploadVoiceName, setUploadVoiceName] = useState("");
   const [vcAnalyser, setVcAnalyser]       = useState<AnalyserNode | null>(null);
 
-  // The two delivery dials, kept on this machine. They are on the order of the look he picked for
-  // the call rather than of his account: a setting that followed him onto a second computer would
-  // be one he never agreed to there, and what sounds right in one room can sound loose in another.
-  const [voiceStability, setVoiceStability]   = useState<number>(() => storedTune("ss_voice_stability", VOICE_STABILITY_DEFAULT));
-  const [voiceSimilarity, setVoiceSimilarity] = useState<number>(() => storedTune("ss_voice_similarity", VOICE_SIMILARITY_DEFAULT));
+  // The two delivery dials, kept on this machine AND on this tab. They are on the order of the look he
+  // picked for the call rather than of his account: a setting that followed him onto a second computer
+  // would be one he never agreed to there, and what sounds right in one room can sound loose in
+  // another. They are also on the order of the CALL he is making - a picture-and-voice call and a
+  // voice-alone call are two different sounds to tune, and a figure shared between them meant a change
+  // made for one was a change made for the other without saying so.
+  const [voiceStability, setVoiceStability]   = usePerTabSetting<number>(activeTab, "ss_voice_stability",
+    raw => tuneFromRaw(raw, VOICE_STABILITY_DEFAULT), v => String(v));
+  const [voiceSimilarity, setVoiceSimilarity] = usePerTabSetting<number>(activeTab, "ss_voice_similarity",
+    raw => tuneFromRaw(raw, VOICE_SIMILARITY_DEFAULT), v => String(v));
   // Folded until he opens it. This card is a refinement, and a refinement that spends the room the
   // readings, the voice list and Start stand in has stopped being a refinement.
   const [tuneFold, setTuneFold]               = useState(true);
@@ -2255,15 +2299,13 @@ export default function StreamPage() {
   // day one touch of a slider switched the listener off for good on that machine without ever telling
   // him it had. It is off only while he says so on this row, and his hand on a dial is the override it
   // was always meant to be: that call, not every call after it.
-  const [voiceTuneAuto, setVoiceTuneAuto]     = useState<boolean>(() => {
-    try {
-      // "off", and only this word, means he turned the listener off on this row. The build before this
-      // one wrote its own off-mark there every time a slider was moved, so a machine carrying that
-      // older mark comes back up listening - which is the state he asked for on 6 November, and one
-      // press here returns it to whatever he actually wants.
-      return localStorage.getItem("ss_voice_tune_auto") !== "off";
-    } catch { return true; }
-  });
+  const [voiceTuneAuto, setVoiceTuneAuto]     = usePerTabSetting<boolean>(activeTab, "ss_voice_tune_auto",
+    // "off", and only this word, means he turned the listener off on this row. The build before this
+    // one wrote its own off-mark there every time a slider was moved, so a machine carrying that
+    // older mark comes back up listening - which is the state he asked for on 6 November, and one
+    // press here returns it to whatever he actually wants. An absent box means he has never said so
+    // on this tab, and the row opens listening.
+    raw => raw !== "off", v => (v ? "on" : "off"));
   // What the app decided, and which of his own sounds it decided from. Held so the card can say the
   // reason in the same words it uses under the dials, instead of showing two numbers it cannot explain.
   const [tuneSaid, setTuneSaid]               = useState<Delivery | null>(null);
@@ -2272,62 +2314,61 @@ export default function StreamPage() {
   // it says so on the card, and it is gone by the next one.
   const [tuneHeldCall, setTuneHeldCall]       = useState(false);
   const toggleTuneAuto = useCallback(() => {
-    setVoiceTuneAuto(v => {
-      const next = !v;
-      try { localStorage.setItem("ss_voice_tune_auto", next ? "on" : "off"); } catch { /* remembering is a convenience */ }
-      // Asking the app to listen is the louder instruction: it takes the running call back off the
-      // sliders it is holding, and it decides again at his next sentence.
-      if (next) { setTuneHeldCall(false); clonerRef.current?.releaseTune(); }
-      return next;
-    });
-  }, []);
+    const next = !voiceTuneAuto;
+    // The remembering is the tab's own hook's job now: this press writes Voice Clone Only's box, or
+    // Video + Audio's, and never the other tab's.
+    setVoiceTuneAuto(next);
+    // Asking the app to listen is the louder instruction: it takes the running call back off the
+    // sliders it is holding, and it decides again at his next sentence. Only a press on the tab that
+    // dialled can do that - the other tab's call keeps what its own card set.
+    if (next) { setTuneHeldCall(false); if (cloneOwnerRef.current === activeTab) clonerRef.current?.releaseTune(); }
+  }, [voiceTuneAuto, setVoiceTuneAuto, setTuneHeldCall, activeTab]);
 
-  // One move on either dial reaches three places: this screen, this machine, and - if a call is on
-  // air - the engine, which reads both figures at the moment it opens its next speaking request. A
-  // sentence already playing is deliberately left alone: changing a voice mid-word is the one thing
-  // here that would sound broken rather than tuned.
+  // One move on either dial reaches three places: this screen, THIS TAB's own box on this machine, and
+  // - if a call is on air - the engine, which reads both figures at the moment it opens its next
+  // speaking request. A sentence already playing is deliberately left alone: changing a voice mid-word
+  // is the one thing here that would sound broken rather than tuned.
   //
   // It does one more thing, and this is the whole of what he asked for on 6 November. His hand on a
   // dial is the last word FOR THIS CALL, and for no other call: it no longer writes the listener off.
   // A rule that stopped running for good because somebody once moved a slider is the fault, not the
   // override - and the card now says, in words, which of the two it is showing him.
   const applyTune = useCallback((which: "stability" | "similarity", v: number) => {
-    const key = which === "stability" ? "ss_voice_stability" : "ss_voice_similarity";
-    try { localStorage.setItem(key, String(v)); } catch { /* remembering is a convenience */ }
     (which === "stability" ? setVoiceStability : setVoiceSimilarity)(v);
     setTuneSaid(null); setTuneHeldCall(true);
+    // The call on air takes the move only when this is the tab that dialled it. His press is a press
+    // on the card in front of him, and the other tab's call is not in front of him.
+    if (cloneOwnerRef.current !== activeTab) return;
     const c = clonerRef.current;
     if (c) { if (which === "stability") c.stability = v; else c.similarity = v; c.tuneHeld = true; }
-  }, []);
+  }, [setVoiceStability, setVoiceSimilarity, setTuneSaid, setTuneHeldCall, activeTab]);
   const resetTune = useCallback(() => {
     applyTune("stability", VOICE_STABILITY_DEFAULT);
     applyTune("similarity", VOICE_SIMILARITY_DEFAULT);
     // Clearing both sliders is him stepping off them, so the call goes back to the listener instead of
     // staying held by a move he has just undone.
     setTuneHeldCall(false);
-    clonerRef.current?.releaseTune();
-  }, [applyTune]);
+    if (cloneOwnerRef.current === activeTab) clonerRef.current?.releaseTune();
+  }, [applyTune, setTuneHeldCall, activeTab]);
 
   // ── Which language the cloned voice answers in ────────────────────────────
   // Empty means today: the answer comes back in the language he spoke. Anything else is the one
-  // name he picked, and it is a setting of this machine like the two dials are - it follows the
-  // look he chose for the call, not his account, so a second computer is not quietly told to
-  // translate. A call already on air picks it up at his next sentence: the words of a sentence
-  // already playing are not swapped underneath it.
-  const [answerLang, setAnswerLang] = useState<string>(() => {
-    try {
-      const stored = localStorage.getItem("ss_answer_lang") ?? "";
-      // A name this build does not offer is not a name to carry forward: the list is derived from
-      // the voices on the shelf, so an older machine can hold a language the shelf no longer has.
-      return ANSWER_LANGS.some(l => l.code === stored) ? stored : "";
-    } catch { return ""; }
-  });
+  // name he picked, and it is a setting of this machine and of this tab, like the two dials are - it
+  // follows the call he is making, not his account, so a second computer is not quietly told to
+  // translate and a voice-alone call is not told to translate because a picture call was. A call
+  // already on air picks it up at his next sentence: the words of a sentence already playing are not
+  // swapped underneath it.
+  const [answerLang, setAnswerLang] = usePerTabSetting<string>(activeTab, "ss_answer_lang",
+    // A name this build does not offer is not a name to carry forward: the list is derived from
+    // the voices on the shelf, so an older machine can hold a language the shelf no longer has.
+    raw => (raw && ANSWER_LANGS.some(l => l.code === raw)) ? raw : "",
+    v => v);
   const applyAnswerLang = useCallback((code: string) => {
-    try { localStorage.setItem("ss_answer_lang", code); } catch { /* remembering is a convenience */ }
     setAnswerLang(code);
+    if (cloneOwnerRef.current !== activeTab) return;
     const c = clonerRef.current;
     if (c) c.answerLang = code;
-  }, []);
+  }, [setAnswerLang, activeTab]);
   // Closed until he opens it, because this is a setting he picks once and leaves. Closed, the row
   // still names the language in use, so nothing is hidden by the fold - and it is a different name
   // from the two boxes beside it on purpose: open means the choices are showing.
@@ -2337,15 +2378,14 @@ export default function StreamPage() {
   const answerLangName = ANSWER_LANGS.find(l => l.code === answerLang)?.name ?? "";
 
   // ── Local monitor: hear your own cloned voice ─────────────────────────────
-  // Off until he asks for it, and his own switch setting is kept either way. The cloned voice is
-  // now made out of WORDS, so anything that reaches the microphone twice is said twice: out of a
-  // loudspeaker and straight back into the line, this app's own answer becomes his next sentence.
-  const [voiceMonitor, setVoiceMonitor] = useState<boolean>(() => {
-    try { return localStorage.getItem("ss_voice_monitor") === "1"; } catch { return false; }
-  });
-  const toggleVoiceMonitor = useCallback(() => {
-    setVoiceMonitor(v => { const next = !v; try { localStorage.setItem("ss_voice_monitor", next ? "1" : "0"); } catch { /**/ } return next; });
-  }, []);
+  // Off until he asks for it, and his own switch setting is kept either way - on the tab he asked for
+  // it on. A picture-and-voice call and a voice-alone call are wired differently enough that he may
+  // want to hear one and not the other. The cloned voice is now made out of WORDS, so anything that
+  // reaches the microphone twice is said twice: out of a loudspeaker and straight back into the line,
+  // this app's own answer becomes his next sentence.
+  const [voiceMonitor, setVoiceMonitor] = usePerTabSetting<boolean>(activeTab, "ss_voice_monitor",
+    raw => raw === "1", v => (v ? "1" : "0"));
+  const toggleVoiceMonitor = useCallback(() => setVoiceMonitor(v => !v), [setVoiceMonitor]);
 
   // ── UI ────────────────────────────────────────────────────────────────────
   const [isFullscreen, setIsFullscreen]       = useState(false);
@@ -2370,6 +2410,11 @@ export default function StreamPage() {
   // The tab whose call is holding the two devices right now. The dial writes it, and the call ending
   // clears that tab alone - whichever tab he happens to be looking at by then.
   const broadcastOwnerRef = useRef<TabId>(activeTab);
+  // The same idea for the cloned voice: the tab whose call the engine on air belongs to. Both cloning
+  // tabs now keep their own delivery figures and their own answer language, so what a call reads must
+  // be named by its tab - otherwise clicking over to the other tab, which is not a press at all, would
+  // move the figures of the call that is on air.
+  const cloneOwnerRef = useRef<TabId>(activeTab);
   // Both writers name the tab they mean and close over nothing, so their identity never changes. A
   // tab change must not rebuild the functions that hold a running call.
   const setCamFor = useCallback((tab: TabId, on: boolean) => setCamOnTab(p => ({ ...p, [tab]: on })), []);
@@ -3107,19 +3152,27 @@ export default function StreamPage() {
 
   // With routing OFF the clone already reaches your speakers through the audio
   // element; monitor mode only adds local playback when the clone is on the cable.
+  //
+  // Only the tab that dialled may move it: each cloning tab keeps its own switch now, and a bare click
+  // across to the other tab is not him asking for anything.
   useEffect(() => {
+    if (cloneOwnerRef.current !== activeTab) return;
     clonerRef.current?.setMonitor(voiceMonitor && audioRouteOn);
     // Either of those puts the cloned voice where his microphone can hear it: the monitor on
     // purpose, and no routing at all by accident, since then the playback element simply uses his
     // speakers. The engine closes its own ears on this, so a call can no longer answer itself.
     clonerRef.current?.setSelfAudible(voiceMonitor || !audioRouteOn);
-  }, [voiceMonitor, audioRouteOn, vcActive]);
+  }, [voiceMonitor, audioRouteOn, vcActive, activeTab]);
 
   // WHO sets the delivery figures, pushed to a call already on air. A switch that only took hold after
   // a restart would break the one promise this card has always made - that his next sentence uses what
   // he just set - and the engine treats the turn as the single decision point, so switching here costs
-  // at most one more settled pair and never a delivery that drifts answer by answer.
-  useEffect(() => { clonerRef.current?.setTuneAuto(voiceTuneAuto); }, [voiceTuneAuto, vcActive]);
+  // at most one more settled pair and never a delivery that drifts answer by answer. Same rule as the
+  // monitor above: the call on air answers to the tab that opened it.
+  useEffect(() => {
+    if (cloneOwnerRef.current !== activeTab) return;
+    clonerRef.current?.setTuneAuto(voiceTuneAuto);
+  }, [voiceTuneAuto, vcActive, activeTab]);
 
   // ─── Microphone check: proof that costs no minutes ─────────────────────────
   // Opens the selected microphone for a few seconds, runs the same learning the app runs inside
@@ -3735,6 +3788,10 @@ export default function StreamPage() {
         // back in charge of this one.
         setTuneSaid(null); setTuneHeldCall(false);
         await cloner.start(micStreamForCloner);
+        // From this line the call on air is THIS tab's, until the next one opens. Every push below that
+        // reaches a live engine asks this first, so a press or a click on the other tab cannot move the
+        // sentence being spoken now.
+        cloneOwnerRef.current = activeTab;
         clonerRef.current = cloner;
         setVcAnalyser(cloner.getAnalyser());
         setVcActive(true);
@@ -3839,7 +3896,11 @@ export default function StreamPage() {
       if (!micHandedOff && mic) mic.getTracks().forEach(t => t.stop());
     }
   }, [selectedStyle, customPrompt, refImageB64, selectedMicId, vcVoiceId, teardownStream, toast, setLocation, releaseAirHold, armHold, blindReadout, voiceReadout,
-      activeTab, camOnTab, micOnTab, runVCam, applyAudioRoute, setMicFor]);
+      activeTab, camOnTab, micOnTab, runVCam, applyAudioRoute, setMicFor,
+      // The four figures the block above copies onto a fresh engine. Left out, the callback kept the
+      // values from the render it was built in, so a press between two calls moved the card and not
+      // the next call - which is how a customer chosen as French kept being answered in Spanish.
+      answerLang, voiceStability, voiceSimilarity, voiceTuneAuto]);
 
   /**
    * Sleep, counting the seconds on screen. A wait the server announced for this exact
