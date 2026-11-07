@@ -20,8 +20,17 @@
 //
 //   Stability  - "sounds more like a person", which that line says is the LOW end. So the rule works
 //                down from a held figure and goes further down the more his own voice moves.
-//   Similarity - "sounds cleaner", which that line says is the LOW end too. So the rule sits well
-//                under the app's own figure and goes further down the louder his room is.
+//   Similarity - "sounds cleaner", which that line says is the LOW end too. So the rule never rises
+//                above the app's own figure and goes further down the louder his room is.
+//
+// The LOW END OF THESE TWO DIALS MOVED ON 6 NOVEMBER, and the reason is his own listening. The old
+// Stability band ran down to 0.25, and 0.25 is a long way into the region the voice service itself
+// describes as randomness between generations: a voice delivered at 0.25 comes back at a slightly
+// different tone every sentence, which is exactly the fault he wrote in as "spikes of high and low
+// pitch". The help line under the dial is still honoured - the livelier end of the band is still the
+// lower number - but the band now sits around the service's own published middle, where a voice keeps
+// ONE tone across a call and still rises and falls inside a sentence. Nothing here goes to the top of
+// the dial either, because the vendor's own reading of a high Stability is a flat, machine-like voice.
 //
 // Neither goes to the bottom of its dial, because the bottom is where his own test call ran: at 0 the
 // voice stopped sounding like him and came back a different person every sentence. What his
@@ -35,25 +44,38 @@
 // Where the card starts, and the figures every call ran on before anyone could move them. They live
 // here rather than on the page, so that the automatic choice and the manual dials cannot disagree
 // about what "the app's own numbers" means.
-export const VOICE_STABILITY_DEFAULT  = 0.4;
-export const VOICE_SIMILARITY_DEFAULT = 0.8;
+//
+// Both defaults now sit INSIDE the bands below, and that is deliberate. Until 1.8.48 the manual
+// Similarity started at 0.80 while the automatic choice could never go above 0.55, so a customer who
+// turned Choose for me off landed on a figure the app itself had rejected as too close a copy - and
+// the vendor's own words are that a high similarity on a poor sample copies the noise with it. A dial
+// that starts outside the range the app believes in is a setting nobody explained.
+export const VOICE_STABILITY_DEFAULT  = 0.5;
+export const VOICE_SIMILARITY_DEFAULT = 0.55;
 
 // Similarity, and the standing ask is the low end of its own explanation too: "Lower sounds cleaner".
 // A quiet room lets the copy sit a little closer to his voice without bringing anything else with it;
 // a room that is loud against his voice is held further back, because copying a noisy sample copies
-// the noise onto the line as well. Both ends sit BELOW the app's own figure, which is the point of the
-// ask. Neither end is 0: that is the figure his own last test call ran on, and the call he reported
-// back as several different voices in one.
+// the noise onto the line as well. The top of the band is the app's own starting figure, so the
+// automatic choice can agree with the dial or undercut it, never overshoot it. Neither end is 0:
+// that is the figure his own last test call ran on, and the call he reported back as several
+// different voices in one.
 const SIMILARITY_QUIET = 0.55;
 const SIMILARITY_LOUD  = 0.35;
 
-// Stability, and the standing ask is the low end of its own explanation: "Lower sounds more like a
-// person". So the rule sits at or below the app's own figure and only climbs toward the held end when
-// his own speech says he does not move much as he talks. The top of the dial is never reached, because
-// a voice held at the top stops moving at all - which is his other complaint, the one about the pitch
-// going high and low, arriving in the opposite direction.
-const STABILITY_HELD   = 0.45;
-const STABILITY_PERSON = 0.25;
+// Stability - the dial the card describes as "How much the voice moves while it talks. Higher is even
+// and careful. Lower sounds more like a person". The band is 0.50 to 0.60.
+//
+// It used to be 0.25 to 0.45, and that is the root of the tone spikes he reported on 6 November. The
+// service's own published meaning of this figure is how much RANDOMNESS is allowed between
+// generations: at 0.25 every sentence is a fresh reading of the voice, so one comes back a shade high
+// and the next a shade low, which is heard as the same person changing register mid-call. The middle
+// of the dial is where the voice keeps one register across a call and still rises and falls INSIDE a
+// sentence, which is the standing ask in his own words: a steady tone that does not sound flat.
+// 0.60 is the ceiling rather than higher, because the vendor's own reading of a high Stability is a
+// monotonous voice with limited emotion - the other complaint on this card.
+const STABILITY_HELD   = 0.60;
+const STABILITY_PERSON = 0.50;
 
 // The dials move in these jumps, so a figure the app chooses is always one he could land on himself.
 const STEP = 0.05;
@@ -99,6 +121,18 @@ export class SpeechTrack {
   reset(): void { this.n = 0; this.sum = 0; this.sq = 0; }
 
   get frames(): number { return this.n; }
+
+  /**
+   * The level of HIM at his own microphone: the average of exactly the frames the gate called his
+   * voice. Zero until enough of him has been heard. The engine compares one piece's own average
+   * against this figure to decide whether a piece can be him at all, so it has to be the same
+   * measurement taken two ways - the same analyser, the same band, the same gate verdict - and never
+   * a peak, because a peak is what a door slam produces.
+   */
+  get mean(): number {
+    if (this.n < MIN_TRACK_FRAMES) return 0;
+    return this.sum / this.n;
+  }
 
   /**
    * How much his voice moves while it talks, as the spread of his own levels divided by their
@@ -165,10 +199,12 @@ export function autoDelivery(floor: number, voice: number, listened: number, wan
     ? onDial(SIMILARITY_QUIET - (SIMILARITY_QUIET - SIMILARITY_LOUD) * crowd, SIMILARITY_LOUD, SIMILARITY_QUIET)
     : VOICE_SIMILARITY_DEFAULT;
 
-  // His voice rose and fell as he talked: the line is asked to do the same, which is the low, human
-  // end the explanation names. His voice held one level: nothing on his side asks for movement, so it
-  // may be held even with him - and "held", not "highest", is as far as this rule is allowed to go.
-  // Nothing of his speech heard yet: the app's own figure, unchanged and admitted.
+  // His voice rose and fell as he talked: the line is asked to do the same, which is the livelier end
+  // of this dial's own explanation - the lower figure, inside a band that no longer reaches the
+  // randomness that changes a voice's register between sentences. His voice held one level: nothing on
+  // his side asks for movement, so it may be held even with him - and "held", not "highest", is as far
+  // as this rule is allowed to go. Nothing of his speech heard yet: the app's own figure, unchanged and
+  // admitted.
   const canReadVoice = sane && w > 0;
   const share = canReadVoice
     ? Math.min(1, Math.max(0, (w - WANDER_STEADY) / (WANDER_MOVING - WANDER_STEADY)))
